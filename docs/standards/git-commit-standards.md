@@ -44,6 +44,25 @@ Just as in the **subject**, use the imperative, present tense: "change" not "cha
 ### Footer
 The footer should contain any information about **Breaking Changes** and is also the place to reference GitHub issues that this commit **Closes**.
 
+## Pre-Commit Checklist
+
+Before finalizing a commit, verify the following:
+
+1.  **Review Staged Files**:
+    - Run `git status` to ensure only intended files are staged.
+    - Run `git diff --staged` to review the exact changes being committed.
+
+2.  **Clean Up Debug Code**:
+    - Remove temporary `console.log`, `debugger` statements, or commented-out code blocks used for testing.
+    - Ensure no hardcoded secrets or sensitive data are included.
+
+3.  **Exclude Unwanted Files**:
+    - Ensure build artifacts (e.g., `dist/`, `release/`), dependency folders (`node_modules/`), and system files (`.DS_Store`) are excluded.
+    - Use `.gitignore` to prevent accidental tracking of these files. Do not use `git add .` blindly if untracked files exist.
+
+4.  **Verify Tests**:
+    - Ensure all relevant tests pass locally before committing.
+
 ## Example
 
 ```
