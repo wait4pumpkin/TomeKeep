@@ -18,7 +18,14 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
     const [channel, ...omit] = args
     return ipcRenderer.invoke(channel, ...omit)
   },
+})
 
-  // You can expose other APTs you need here.
-  // ...
+contextBridge.exposeInMainWorld('db', {
+  getBooks: () => ipcRenderer.invoke('db:get-books'),
+  addBook: (book: any) => ipcRenderer.invoke('db:add-book', book),
+  updateBook: (book: any) => ipcRenderer.invoke('db:update-book', book),
+  deleteBook: (id: string) => ipcRenderer.invoke('db:delete-book', id),
+  getWishlist: () => ipcRenderer.invoke('db:get-wishlist'),
+  addWishlistItem: (item: any) => ipcRenderer.invoke('db:add-wishlist-item', item),
+  deleteWishlistItem: (id: string) => ipcRenderer.invoke('db:delete-wishlist-item', id),
 })

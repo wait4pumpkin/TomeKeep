@@ -1,11 +1,11 @@
 # AGENTS.md
 
 ## Project Purpose
-This project provides: [一句话说明项目的目标和核心价值]
+This project provides: A desktop application for managing personal book inventory, wishlists, and automated price comparisons across multiple retailers.
 
 ## Current Stage
-- Stage: discovery / MVP / growth / scale / maintenance
-- Primary focus this quarter: [当前最重要目标]
+- Stage: MVP
+- Primary focus this quarter: Implement core inventory and wishlist features with local storage.
 
 ## Start Here
 Before making any non-trivial change, read:

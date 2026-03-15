@@ -1,73 +1,67 @@
-# React + TypeScript + Vite
+# TomeKeep
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+TomeKeep is a desktop application designed to help book lovers manage their personal library, track wishlists, and automatically compare prices across various online retailers.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Inventory Management**: Catalog your physical book collection with details like ISBN, author, and reading status.
+- **Wishlist Tracking**: Maintain a list of books you want to buy.
+- **Price Comparison**: Automatically check prices from multiple online stores to find the best deals.
+- **Local Storage**: All data is stored locally for privacy and offline access.
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Framework**: Electron
+- **UI Library**: React (with Vite)
+- **Language**: TypeScript
+- **State Management**: React Context / Hooks
+- **Database**: Lowdb (Local JSON storage)
+- **Package Manager**: pnpm
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Prerequisites
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Node.js (v18 or higher recommended)
+- pnpm (v8 or higher)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Installation
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd TomeKeep
+   ```
+
+2. Install dependencies:
+   ```bash
+   pnpm install
+   ```
+
+### Development
+
+To start the development server (concurrently running React and Electron):
+
+```bash
+pnpm dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Build
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+To build the application for macOS:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm electron:build
 ```
+
+The output will be in the `release` directory.
+
+## Documentation
+
+- [Project Standards](docs/standards/)
+- [Product Specs](docs/product-specs/)
+- [Architecture](ARCHITECTURE.md)
+
+## License
+
+[MIT](LICENSE)
