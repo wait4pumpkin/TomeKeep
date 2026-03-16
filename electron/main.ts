@@ -2,6 +2,8 @@ import { app, BrowserWindow } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setupDatabase } from './db'
+import { setupMetadata } from './metadata'
+import { resolvePreloadPath } from './preloadPath'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -28,7 +30,7 @@ function createWindow() {
     height: 800,
     icon: path.join(process.env.VITE_PUBLIC as string, 'electron-vite.svg'),
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: resolvePreloadPath(__dirname),
     },
   })
 
@@ -65,5 +67,6 @@ app.on('activate', () => {
 
 app.whenReady().then(() => {
   setupDatabase()
+  setupMetadata()
   createWindow()
 })

@@ -1,6 +1,5 @@
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
-import fs from 'node:fs'
 import { JSONFilePreset } from 'lowdb/node'
 
 export interface Book {

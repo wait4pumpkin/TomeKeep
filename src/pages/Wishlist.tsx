@@ -7,14 +7,20 @@ export function Wishlist() {
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({ priority: 'medium' })
   const [prices, setPrices] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    loadWishlist()
-  }, [])
-
   async function loadWishlist() {
     const data = await window.db.getWishlist()
     setItems(data)
   }
+
+  useEffect(() => {
+    let cancelled = false
+    window.db.getWishlist().then(data => {
+      if (!cancelled) setItems(data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -102,7 +108,7 @@ export function Wishlist() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
                 <select
                   value={newItem.priority}
-                  onChange={e => setNewItem({ ...newItem, priority: e.target.value as any })}
+                  onChange={e => setNewItem({ ...newItem, priority: e.target.value as WishlistItem['priority'] })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="high">High</option>

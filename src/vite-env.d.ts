@@ -11,4 +11,10 @@ interface Window {
     addWishlistItem: (item: import('../electron/db').WishlistItem) => Promise<import('../electron/db').WishlistItem>
     deleteWishlistItem: (id: string) => Promise<boolean>
   }
+  meta: {
+    lookupIsbn: (isbn13: string) => Promise<
+      | { ok: true; value: import('./lib/openLibrary').BookMetadata }
+      | { ok: false; error: 'invalid_isbn' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
+    >
+  }
 }

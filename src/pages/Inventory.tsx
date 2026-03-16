@@ -1,19 +1,33 @@
 import { useEffect, useState } from 'react'
 import type { Book } from '../../electron/db'
+import { IsbnScanModal } from '../components/IsbnScanModal'
+import { normalizeIsbn, toIsbn13 } from '../lib/isbn'
+import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 
 export function Inventory() {
   const [books, setBooks] = useState<Book[]>([])
   const [isAdding, setIsAdding] = useState(false)
   const [newBook, setNewBook] = useState<Partial<Book>>({ status: 'unread' })
-
-  useEffect(() => {
-    loadBooks()
-  }, [])
+  const [isScanOpen, setIsScanOpen] = useState(false)
+  const [isbnError, setIsbnError] = useState<string | null>(null)
+  const [metaStatus, setMetaStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({
+    state: 'idle',
+  })
 
   async function loadBooks() {
     const data = await window.db.getBooks()
     setBooks(data)
   }
+
+  useEffect(() => {
+    let cancelled = false
+    window.db.getBooks().then(data => {
+      if (!cancelled) setBooks(data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleAddBook(e: React.FormEvent) {
     e.preventDefault()
@@ -27,6 +41,8 @@ export function Inventory() {
 
     await window.db.addBook(bookToAdd)
     setNewBook({ status: 'unread' })
+    setIsbnError(null)
+    setMetaStatus({ state: 'idle' })
     setIsAdding(false)
     loadBooks()
   }
@@ -36,6 +52,52 @@ export function Inventory() {
       await window.db.deleteBook(id)
       loadBooks()
     }
+  }
+
+  async function fillMetadataByIsbn(isbn13: string) {
+    setMetaStatus({ state: 'loading' })
+    const res = await window.meta.lookupIsbn(isbn13)
+    if (!res.ok) {
+      const message =
+        res.error === 'not_found' ? '未找到对应 ISBN 的元信息。' :
+        res.error === 'timeout' ? '获取元信息超时，请稍后重试。' :
+        res.error === 'invalid_isbn' ? 'ISBN 无效。' :
+        '获取元信息失败，请稍后重试。'
+      setMetaStatus({ state: 'error', message })
+      return
+    }
+
+    setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
+    setMetaStatus({ state: 'success', message: '已填充元信息。' })
+  }
+
+  function setIsbnFromRaw(raw: string): string | null {
+    const digitsCount = (raw.match(/\d/g) ?? []).length
+    const isbn10CharsCount = (raw.toUpperCase().match(/[0-9X]/g) ?? []).length
+    if (digitsCount < 13 && isbn10CharsCount < 10) {
+      setIsbnError(null)
+      return null
+    }
+
+    const result = normalizeIsbn(raw)
+    if (!result.ok) {
+      if (result.error === 'empty') {
+        setIsbnError(null)
+        return null
+      }
+      setIsbnError(result.error === 'invalid_checksum' ? 'ISBN 校验失败，请重试或手动输入。' : '未识别到有效的 ISBN。')
+      return null
+    }
+
+    const isbn13 = toIsbn13(result.value)
+    if (!isbn13) {
+      setIsbnError('未识别到有效的 ISBN。')
+      return null
+    }
+
+    setNewBook(prev => ({ ...prev, isbn: isbn13 }))
+    setIsbnError(null)
+    return isbn13
   }
 
   return (
@@ -77,18 +139,52 @@ export function Inventory() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ISBN</label>
-                <input
-                  type="text"
-                  value={newBook.isbn || ''}
-                  onChange={e => setNewBook({ ...newBook, isbn: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newBook.isbn || ''}
+                    onChange={e => {
+                      setNewBook({ ...newBook, isbn: e.target.value })
+                      setIsbnError(null)
+                      setMetaStatus({ state: 'idle' })
+                    }}
+                    onBlur={e => {
+                      if (e.target.value) setIsbnFromRaw(e.target.value)
+                    }}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const raw = newBook.isbn ?? ''
+                      const isbn13 = setIsbnFromRaw(raw)
+                      if (isbn13) void fillMetadataByIsbn(isbn13)
+                    }}
+                    className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:hover:bg-gray-100"
+                    disabled={!newBook.isbn}
+                  >
+                    Fill
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsScanOpen(true)}
+                    className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    Scan
+                  </button>
+                </div>
+                {isbnError && <p className="mt-2 text-sm text-red-600">{isbnError}</p>}
+                {metaStatus.state !== 'idle' && !isbnError && (
+                  <p className={`mt-2 text-sm ${metaStatus.state === 'error' ? 'text-red-600' : 'text-gray-600'}`}>
+                    {metaStatus.state === 'loading' ? '正在获取元信息…' : metaStatus.message}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                 <select
                   value={newBook.status}
-                  onChange={e => setNewBook({ ...newBook, status: e.target.value as any })}
+                  onChange={e => setNewBook({ ...newBook, status: e.target.value as Book['status'] })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="unread">Unread</option>
@@ -113,6 +209,15 @@ export function Inventory() {
               </button>
             </div>
           </form>
+
+          <IsbnScanModal
+            isOpen={isScanOpen}
+            onClose={() => setIsScanOpen(false)}
+            onDetected={raw => {
+              const isbn13 = setIsbnFromRaw(raw)
+              if (isbn13) void fillMetadataByIsbn(isbn13)
+            }}
+          />
         </div>
       )}
 
