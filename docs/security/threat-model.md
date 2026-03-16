@@ -26,6 +26,8 @@ review_cycle_days: 30
 - injection risks
 - replay or duplicate execution
 - insecure direct object references
+- unintended camera access or excessive camera capture
+- third-party metadata provider outage or unexpected response
 
 ## Security Controls
 - authentication
@@ -34,6 +36,14 @@ review_cycle_days: 30
 - secret management
 - audit logging
 - rate limiting
+- camera access controls:
+  - request permission only on explicit user action (Scan)
+  - stop MediaStream tracks when scan UI closes
+  - do not persist or transmit camera frames or scanned values
+- metadata lookup controls:
+  - only send ISBN to the provider after explicit user action (Scan/Fill)
+  - enforce request timeouts and handle failures without blocking core flows
+  - do not log ISBN or provider responses
 
 ## Review Triggers
 Review this document when:

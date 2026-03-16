@@ -14,7 +14,7 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 ## 2. User Scenarios
 
 ### 2.1 Inventory Management
-- **Add Book**: User manually enters ISBN or scans a barcode (future) to add a book. The system fetches metadata (title, author, cover) automatically if possible.
+- **Add Book**: User manually enters ISBN or scans a barcode to fill ISBN when adding a book. The system attempts to fetch and fill metadata (title, author, cover, publisher) after an explicit user action.
 - **Search & Filter**: User searches for a book by title or author to check if they already own it.
 - **Edit/Delete**: User updates reading status (e.g., "Unread", "Reading", "Read") or removes a book.
 
