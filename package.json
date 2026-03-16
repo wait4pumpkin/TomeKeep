@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "vitest run",
     "preview": "vite preview",
     "electron:build": "vite build && electron-builder"
   },
@@ -37,7 +38,8 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^6.4.1",
     "vite-plugin-electron": "^0.29.1",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^3.2.4"
   },
   "build": {
     "appId": "com.tomekeep.app",
