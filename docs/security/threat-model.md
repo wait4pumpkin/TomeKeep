@@ -42,6 +42,7 @@ review_cycle_days: 30
   - do not persist or transmit camera frames or scanned values
 - metadata lookup controls:
   - only send ISBN to the provider after explicit user action (Scan/Fill)
+  - for URL-based lookups, enforce strict allowlist and fetch canonical provider URLs only
   - enforce request timeouts and handle failures without blocking core flows
   - do not log ISBN or provider responses
 

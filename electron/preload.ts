@@ -33,4 +33,5 @@ contextBridge.exposeInMainWorld('db', {
 
 contextBridge.exposeInMainWorld('meta', {
   lookupIsbn: (isbn13: string) => ipcRenderer.invoke('meta:lookup-isbn', isbn13),
+  lookupDouban: (input: string) => ipcRenderer.invoke('meta:lookup-douban', input),
 })

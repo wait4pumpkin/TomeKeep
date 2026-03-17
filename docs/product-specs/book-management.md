@@ -19,7 +19,7 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 - **Edit/Delete**: User updates reading status (e.g., "Unread", "Reading", "Read") or removes a book.
 
 ### 2.2 Wishlist & Purchasing
-- **Add to Wishlist**: User adds a book to the wishlist.
+- **Add to Wishlist**: User adds a book to the wishlist. User can optionally paste an ISBN or a Douban book detail URL to fill metadata.
 - **Compare Prices**: The system queries configured online retailers (e.g., JD, DangDang, Amazon) and displays current prices.
 - **View Best Deal**: User sees the lowest price highlighted and clicks a link to purchase.
 

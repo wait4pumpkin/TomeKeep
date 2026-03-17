@@ -19,9 +19,17 @@
   - purpose: fetch book metadata by ISBN (best-effort)
   - methods:
     - lookupIsbn(isbn13) -> { ok: true, value: BookMetadata } | { ok: false, error }
+    - lookupDouban(input) -> { ok: true, value: BookMetadata } | { ok: false, error }
   - errors:
-    - invalid_isbn
-    - not_found
-    - timeout
-    - network
-    - bad_response
+    - lookupIsbn:
+      - invalid_isbn
+      - not_found
+      - timeout
+      - network
+      - bad_response
+    - lookupDouban:
+      - invalid_url
+      - not_found
+      - timeout
+      - network
+      - bad_response

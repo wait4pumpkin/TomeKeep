@@ -16,5 +16,9 @@ interface Window {
       | { ok: true; value: import('./lib/openLibrary').BookMetadata }
       | { ok: false; error: 'invalid_isbn' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
     >
+    lookupDouban: (input: string) => Promise<
+      | { ok: true; value: import('./lib/openLibrary').BookMetadata }
+      | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
+    >
   }
 }

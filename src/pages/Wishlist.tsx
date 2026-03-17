@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { WishlistItem } from '../../electron/db'
+import { AddFormCard } from '../components/AddFormCard'
+import { DoubanFillField } from '../components/DoubanFillField'
 
 export function Wishlist() {
   const [items, setItems] = useState<WishlistItem[]>([])
@@ -71,69 +73,65 @@ export function Wishlist() {
       </div>
 
       {isAdding && (
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold mb-4">Add to Wishlist</h3>
-          <form onSubmit={handleAdd} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                <input
-                  type="text"
-                  required
-                  value={newItem.title || ''}
-                  onChange={e => setNewItem({ ...newItem, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Author</label>
-                <input
-                  type="text"
-                  required
-                  value={newItem.author || ''}
-                  onChange={e => setNewItem({ ...newItem, author: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ISBN</label>
-                <input
-                  type="text"
-                  value={newItem.isbn || ''}
-                  onChange={e => setNewItem({ ...newItem, isbn: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                <select
-                  value={newItem.priority}
-                  onChange={e => setNewItem({ ...newItem, priority: e.target.value as WishlistItem['priority'] })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                type="button"
-                onClick={() => setIsAdding(false)}
-                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Save
-              </button>
-            </div>
-          </form>
-        </div>
+        <AddFormCard
+          title="Add to Wishlist"
+          onSubmit={handleAdd}
+          onCancel={() => setIsAdding(false)}
+          submitLabel="Save"
+          cancelLabel="Cancel"
+        >
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <input
+              type="text"
+              required
+              value={newItem.title || ''}
+              onChange={e => setNewItem({ ...newItem, title: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Author</label>
+            <input
+              type="text"
+              required
+              value={newItem.author || ''}
+              onChange={e => setNewItem({ ...newItem, author: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ISBN</label>
+            <input
+              type="text"
+              value={newItem.isbn || ''}
+              onChange={e => setNewItem({ ...newItem, isbn: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+            <select
+              value={newItem.priority}
+              onChange={e => setNewItem({ ...newItem, priority: e.target.value as WishlistItem['priority'] })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <DoubanFillField
+            onApply={meta => {
+              setNewItem(prev => ({
+                ...prev,
+                isbn: prev.isbn?.trim() ? prev.isbn : meta.isbn13,
+                title: prev.title?.trim() ? prev.title : meta.title ?? prev.title,
+                author: prev.author?.trim() ? prev.author : meta.author ?? prev.author,
+              }))
+            }}
+          />
+        </AddFormCard>
       )}
 
       <div className="space-y-4">
