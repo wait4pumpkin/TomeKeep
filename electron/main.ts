@@ -3,7 +3,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setupDatabase } from './db'
 import { setupMetadata } from './metadata'
+import { setupPricing } from './pricing'
 import { resolvePreloadPath } from './preloadPath'
+import { setupStores } from './stores'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -65,8 +67,10 @@ app.on('activate', () => {
   }
 })
 
-app.whenReady().then(() => {
-  setupDatabase()
+app.whenReady().then(async () => {
+  await setupDatabase()
   setupMetadata()
+  setupStores()
+  setupPricing()
   createWindow()
 })

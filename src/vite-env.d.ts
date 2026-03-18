@@ -21,4 +21,20 @@ interface Window {
       | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
     >
   }
+  pricing: {
+    get: (keys: string[]) => Promise<Record<string, import('../electron/db').PriceCacheEntry>>
+    refresh: (
+      inputs: import('../electron/pricing').PricingInput[],
+      opts?: { force?: boolean },
+    ) => Promise<{ ok: true; entries: Record<string, import('../electron/db').PriceCacheEntry> } | { ok: false; error: 'bad_request' }>
+  }
+  stores: {
+    openLogin: (channel: import('../electron/stores').StoreChannel) => Promise<boolean>
+    openPage: (url: string) => Promise<{ ok: true } | { ok: false; error: 'invalid_url' | 'not_allowed' }>
+    getStatus: (channel: import('../electron/stores').StoreChannel) => Promise<{ ok: true; loggedIn: boolean }>
+    clearCookies: (channel: import('../electron/stores').StoreChannel) => Promise<{ ok: true }>
+  }
+  app: {
+    openExternal: (url: string) => Promise<{ ok: true } | { ok: false; error: 'invalid_url' }>
+  }
 }

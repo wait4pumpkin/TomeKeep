@@ -1,5 +1,6 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import type { Book, WishlistItem } from './db'
+import type { StoreChannel } from './stores'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -34,4 +35,21 @@ contextBridge.exposeInMainWorld('db', {
 contextBridge.exposeInMainWorld('meta', {
   lookupIsbn: (isbn13: string) => ipcRenderer.invoke('meta:lookup-isbn', isbn13),
   lookupDouban: (input: string) => ipcRenderer.invoke('meta:lookup-douban', input),
+})
+
+contextBridge.exposeInMainWorld('pricing', {
+  get: (keys: string[]) => ipcRenderer.invoke('pricing:get', keys),
+  refresh: (inputs: import('./pricing').PricingInput[], opts?: { force?: boolean }) =>
+    ipcRenderer.invoke('pricing:refresh', inputs, opts),
+})
+
+contextBridge.exposeInMainWorld('stores', {
+  openLogin: (channel: StoreChannel) => ipcRenderer.invoke('stores:open-login', channel),
+  openPage: (url: string) => ipcRenderer.invoke('stores:open-page', url),
+  getStatus: (channel: StoreChannel) => ipcRenderer.invoke('stores:get-status', channel),
+  clearCookies: (channel: StoreChannel) => ipcRenderer.invoke('stores:clear-cookies', channel),
+})
+
+contextBridge.exposeInMainWorld('app', {
+  openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
 })

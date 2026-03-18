@@ -23,12 +23,48 @@ export interface WishlistItem {
   addedAt: string
 }
 
+export type PriceChannel = 'jd' | 'bookschina' | 'dangdang'
+
+export type PriceQuoteStatus = 'ok' | 'needs_login' | 'blocked' | 'not_found' | 'error'
+
+export interface PriceQuote {
+  channel: PriceChannel
+  currency: 'CNY'
+  url: string
+  fetchedAt: string
+  status: PriceQuoteStatus
+  priceCny?: number
+  message?: string
+}
+
+export interface PriceQuery {
+  title: string
+  author?: string
+  isbn?: string
+}
+
+export interface PriceCacheEntry {
+  key: string
+  query: PriceQuery
+  quotes: PriceQuote[]
+  updatedAt: string
+  expiresAt: string
+}
+
 export interface DatabaseSchema {
   books: Book[]
   wishlist: WishlistItem[]
+  priceCache: Record<string, PriceCacheEntry>
 }
 
-const defaultData: DatabaseSchema = { books: [], wishlist: [] }
+const defaultData: DatabaseSchema = { books: [], wishlist: [], priceCache: {} }
+
+let dbInstance: Awaited<ReturnType<typeof JSONFilePreset<DatabaseSchema>>> | null = null
+
+export function getDb() {
+  if (!dbInstance) throw new Error('Database not initialized')
+  return dbInstance
+}
 
 export async function setupDatabase() {
   const userDataPath = app.getPath('userData')
@@ -37,6 +73,10 @@ export async function setupDatabase() {
   console.log('Database path:', dbPath)
 
   const db = await JSONFilePreset<DatabaseSchema>(dbPath, defaultData)
+  db.data.books ??= []
+  db.data.wishlist ??= []
+  db.data.priceCache ??= {}
+  dbInstance = db
 
   // Register IPC handlers
   ipcMain.handle('db:get-books', () => db.data.books)
