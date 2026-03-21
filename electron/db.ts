@@ -34,6 +34,7 @@ export interface PriceQuote {
   fetchedAt: string
   status: PriceQuoteStatus
   priceCny?: number
+  source?: 'manual'
   message?: string
 }
 

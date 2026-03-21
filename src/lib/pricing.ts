@@ -5,65 +5,9 @@ export interface PriceOffer {
   priceCny: number
 }
 
-export function parseJdSkuFromSearchHtml(html: string): ParseResult<string, 'not_found'> {
-  const m =
-    html.match(/href="\/\/item\.jd\.com\/(\d+)\.html"/) ??
-    html.match(/href="https?:\/\/item\.jd\.com\/(\d+)\.html"/) ??
-    html.match(/data-sku="(\d+)"/) ??
-    html.match(/\bsku="?(\d+)"?/)
-  if (!m) return { ok: false, error: 'not_found' }
-  return { ok: true, value: m[1] }
-}
-
-export function parseJdSkusFromSearchHtml(html: string, limit: number): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-
-  const re = /data-sku=["'](\d+)["']/g
-  for (let m = re.exec(html); m && out.length < limit; m = re.exec(html)) {
-    const sku = m[1]
-    if (!seen.has(sku)) {
-      seen.add(sku)
-      out.push(sku)
-    }
-  }
-
-  if (out.length > 0) return out
-
-  const re2 = /href=["']\/\/item\.jd\.com\/(\d+)\.html["']/g
-  for (let m = re2.exec(html); m && out.length < limit; m = re2.exec(html)) {
-    const sku = m[1]
-    if (!seen.has(sku)) {
-      seen.add(sku)
-      out.push(sku)
-    }
-  }
-
-  if (out.length > 0) return out
-
-  const re3 = /"skuId"\s*:\s*"?(\d+)"?/g
-  for (let m = re3.exec(html); m && out.length < limit; m = re3.exec(html)) {
-    const sku = m[1]
-    if (!seen.has(sku)) {
-      seen.add(sku)
-      out.push(sku)
-    }
-  }
-
-  return out
-}
-
-export function parseBooksChinaProductUrlFromSearchHtml(html: string): ParseResult<string, 'not_found'> {
-  const m =
-    html.match(/href="(https?:\/\/www\.bookschina\.com\/\d+\/)"/) ??
-    html.match(/href="(https?:\/\/www\.bookschina\.com\/\d+\.htm)"/) ??
-    html.match(/href="(https?:\/\/m\.bookschina\.com\/\d+\.htm)"/) ??
-    html.match(/href="(\/\d+\/)"/) ??
-    html.match(/href="(\/\d+\.htm)"/)
-  if (!m) return { ok: false, error: 'not_found' }
-  const url = m[1].startsWith('http') ? m[1] : `https://m.bookschina.com${m[1]}`
-  return { ok: true, value: url }
-}
+// ---------------------------------------------------------------------------
+// BooksChina
+// ---------------------------------------------------------------------------
 
 export function parseBooksChinaOffersFromSearchHtml(html: string, limit: number): PriceOffer[] {
   const offers: PriceOffer[] = []
@@ -72,7 +16,7 @@ export function parseBooksChinaOffersFromSearchHtml(html: string, limit: number)
     const raw = m[1]
     const url = raw.startsWith('http') ? raw : `https://www.bookschina.com${raw}`
     const windowText = html.slice(m.index, Math.min(html.length, m.index + 800))
-    const p = windowText.match(/¥\s*([0-9]+(?:\.[0-9]{1,2})?)/)
+    const p = windowText.match(/(?:¥|&yen;)\s*([0-9]+(?:\.[0-9]{1,2})?)/)
     if (!p) continue
     const price = Number(p[1])
     if (!Number.isFinite(price) || price <= 0) continue
@@ -110,49 +54,23 @@ export function parseBooksChinaPriceFromProductHtml(html: string): ParseResult<n
   return { ok: true, value: n }
 }
 
-export function parseJdPriceApiJson(
-  json: unknown,
-): ParseResult<number, 'not_found' | 'bad_number' | 'bad_response'> {
-  if (!Array.isArray(json) || json.length === 0) return { ok: false, error: 'bad_response' }
-  const first = json[0]
-  if (typeof first !== 'object' || first === null) return { ok: false, error: 'bad_response' }
-
-  const p = (first as { p?: unknown; op?: unknown }).p ?? (first as { op?: unknown }).op
-  if (typeof p !== 'string' && typeof p !== 'number') return { ok: false, error: 'not_found' }
-
-  const n = typeof p === 'number' ? p : Number(p)
-  if (!Number.isFinite(n) || n <= 0) return { ok: false, error: 'bad_number' }
-  return { ok: true, value: n }
+export function normalizeBooksChinaProductUrl(url: string): string {
+  return url.replace(/^https?:\/\/m\.bookschina\.com\//, 'https://www.bookschina.com/')
 }
 
-export function parseJdPricesApiJson(
-  json: unknown,
-): ParseResult<Record<string, number>, 'bad_response'> {
-  if (!Array.isArray(json)) return { ok: false, error: 'bad_response' }
-  const out: Record<string, number> = {}
-  for (const row of json) {
-    if (typeof row !== 'object' || row === null) continue
-    const id = (row as { id?: unknown }).id
-    const p = (row as { p?: unknown; op?: unknown }).p ?? (row as { op?: unknown }).op
-    if (typeof id !== 'string') continue
-    if (typeof p !== 'string' && typeof p !== 'number') continue
-    const n = typeof p === 'number' ? p : Number(p)
-    if (!Number.isFinite(n) || n <= 0) continue
-    out[id] = n
+export function encodeBookschinaStp(input: string): string {
+  let out = ''
+  for (const ch of input) {
+    const code = ch.charCodeAt(0)
+    if (code <= 0x7f) out += ch
+    else out += `%u${code.toString(16).toUpperCase().padStart(4, '0')}`
   }
-  return { ok: true, value: out }
+  return out
 }
 
-export function parseDangdangProductUrlFromSearchHtml(html: string): ParseResult<string, 'not_found'> {
-  const m =
-    html.match(/href="(https?:\/\/product\.dangdang\.com\/\d+\.html)"/) ??
-    html.match(/href="(\/\/product\.dangdang\.com\/\d+\.html)"/) ??
-    html.match(/href="(\/product\.dangdang\.com\/\d+\.html)"/)
-  if (!m) return { ok: false, error: 'not_found' }
-  const raw = m[1]
-  const url = raw.startsWith('http') ? raw : raw.startsWith('//') ? `https:${raw}` : `https://${raw.replace(/^\//, '')}`
-  return { ok: true, value: url }
-}
+// ---------------------------------------------------------------------------
+// Dangdang
+// ---------------------------------------------------------------------------
 
 export function parseDangdangOffersFromSearchHtml(html: string, limit: number): PriceOffer[] {
   const offers: PriceOffer[] = []
@@ -160,7 +78,7 @@ export function parseDangdangOffersFromSearchHtml(html: string, limit: number): 
   for (let m = re.exec(html); m && offers.length < limit; m = re.exec(html)) {
     const url = m[1].startsWith('http') ? m[1] : `https:${m[1]}`
     const windowText = html.slice(m.index, Math.min(html.length, m.index + 900))
-    const p = windowText.match(/¥\s*([0-9]+(?:\.[0-9]{1,2})?)/)
+    const p = windowText.match(/(?:¥|&yen;)\s*([0-9]+(?:\.[0-9]{1,2})?)/)
     if (!p) continue
     const price = Number(p[1])
     if (!Number.isFinite(price) || price <= 0) continue
@@ -190,6 +108,10 @@ export function parseDangdangPriceFromHtml(html: string): ParseResult<number, 'n
   return { ok: true, value: n }
 }
 
+// ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
+
 export function pickLowestOffer(offers: PriceOffer[]): ParseResult<PriceOffer, 'not_found'> {
   if (offers.length === 0) return { ok: false, error: 'not_found' }
   let best = offers[0]
@@ -197,18 +119,4 @@ export function pickLowestOffer(offers: PriceOffer[]): ParseResult<PriceOffer, '
     if (o.priceCny < best.priceCny) best = o
   }
   return { ok: true, value: best }
-}
-
-export function encodeBookschinaStp(input: string): string {
-  let out = ''
-  for (const ch of input) {
-    const code = ch.charCodeAt(0)
-    if (code <= 0x7f) out += ch
-    else out += `%u${code.toString(16).toUpperCase().padStart(4, '0')}`
-  }
-  return out
-}
-
-export function normalizeBooksChinaProductUrl(url: string): string {
-  return url.replace(/^https?:\/\/m\.bookschina\.com\//, 'https://www.bookschina.com/')
 }

@@ -39,8 +39,8 @@ contextBridge.exposeInMainWorld('meta', {
 
 contextBridge.exposeInMainWorld('pricing', {
   get: (keys: string[]) => ipcRenderer.invoke('pricing:get', keys),
-  refresh: (inputs: import('./pricing').PricingInput[], opts?: { force?: boolean }) =>
-    ipcRenderer.invoke('pricing:refresh', inputs, opts),
+  openCapture: (input: import('./pricing').PricingInput & { channel: import('./pricing').CaptureChannel }) =>
+    ipcRenderer.invoke('pricing:open-capture', input),
 })
 
 contextBridge.exposeInMainWorld('stores', {

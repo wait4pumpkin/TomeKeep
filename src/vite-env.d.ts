@@ -23,10 +23,9 @@ interface Window {
   }
   pricing: {
     get: (keys: string[]) => Promise<Record<string, import('../electron/db').PriceCacheEntry>>
-    refresh: (
-      inputs: import('../electron/pricing').PricingInput[],
-      opts?: { force?: boolean },
-    ) => Promise<{ ok: true; entries: Record<string, import('../electron/db').PriceCacheEntry> } | { ok: false; error: 'bad_request' }>
+    openCapture: (
+      input: import('../electron/pricing').PricingInput & { channel: import('../electron/pricing').CaptureChannel },
+    ) => Promise<import('../electron/pricing').OpenCaptureResult>
   }
   stores: {
     openLogin: (channel: import('../electron/stores').StoreChannel) => Promise<boolean>

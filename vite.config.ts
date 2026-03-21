@@ -17,7 +17,24 @@ export default defineConfig({
       preload: {
         // Shortcut of `build.rollupOptions.input`.
         // Preload scripts may contain Web assets, so use the `build.rollupOptions.input` instead `build.lib.entry`.
-        input: path.join(__dirname, 'electron/preload.ts'),
+        input: {
+          preload: path.join(__dirname, 'electron/preload.ts'),
+          'capture-preload': path.join(__dirname, 'electron/capture-preload.ts'),
+        },
+        vite: {
+          build: {
+            rollupOptions: {
+              output: {
+                // Electron preload scripts must be CommonJS. Since package.json
+                // has "type": "module", .js files are treated as ESM by Node.
+                // Using .cjs forces CommonJS regardless of the type field.
+                format: 'cjs',
+                inlineDynamicImports: false,
+                entryFileNames: '[name].cjs',
+              },
+            },
+          },
+        },
       },
     }),
   ],

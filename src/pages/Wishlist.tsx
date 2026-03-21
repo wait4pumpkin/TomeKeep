@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { PriceCacheEntry, PriceChannel, PriceQuote, WishlistItem } from '../../electron/db'
-import type { PricingInput } from '../../electron/pricing'
+import type { CaptureChannel, PricingInput } from '../../electron/pricing'
 import { AddFormCard } from '../components/AddFormCard'
 import { DoubanFillField } from '../components/DoubanFillField'
 
-const channelOrder: PriceChannel[] = ['bookschina', 'jd', 'dangdang']
+const channelOrder: PriceChannel[] = ['jd', 'bookschina', 'dangdang']
 
 const channelLabel: Record<PriceChannel, string> = {
   bookschina: '中图网',
@@ -18,69 +18,40 @@ const channelBadge: Record<PriceChannel, string> = {
   dangdang: 'border-orange-200 bg-orange-50 text-orange-700',
 }
 
+// Channels that have capture support in this release
+const CAPTURE_SUPPORTED: PriceChannel[] = ['jd', 'dangdang', 'bookschina']
+
 export function Wishlist() {
   const [items, setItems] = useState<WishlistItem[]>([])
   const [isAdding, setIsAdding] = useState(false)
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({ priority: 'medium' })
   const [priceCache, setPriceCache] = useState<Record<string, PriceCacheEntry>>({})
-  const [loadingKeys, setLoadingKeys] = useState<Record<string, boolean>>({})
-  const [bookschinaLoggedIn, setBookschinaLoggedIn] = useState<boolean | null>(null)
-  const [jdLoggedIn, setJdLoggedIn] = useState<boolean | null>(null)
-  const [dangdangLoggedIn, setDangdangLoggedIn] = useState<boolean | null>(null)
-
-  async function refreshLoginStatuses() {
-    const [jdStatus, dangdangStatus, bookschinaStatus] = await Promise.all([
-      window.stores.getStatus('jd'),
-      window.stores.getStatus('dangdang'),
-      window.stores.getStatus('bookschina'),
-    ])
-    setJdLoggedIn(jdStatus.loggedIn)
-    setDangdangLoggedIn(dangdangStatus.loggedIn)
-    setBookschinaLoggedIn(bookschinaStatus.loggedIn)
-  }
-
-  async function openLoginAndPoll(channel: 'jd' | 'dangdang' | 'bookschina') {
-    await window.stores.openLogin(channel)
-    for (let i = 0; i < 30; i++) {
-      await new Promise<void>(r => setTimeout(r, 2000))
-      const status = await window.stores.getStatus(channel)
-      if (channel === 'jd') setJdLoggedIn(status.loggedIn)
-      if (channel === 'dangdang') setDangdangLoggedIn(status.loggedIn)
-      if (channel === 'bookschina') setBookschinaLoggedIn(status.loggedIn)
-      if (status.loggedIn) break
-    }
-  }
+  // key -> channel -> whether capture window is open
+  const [capturingKeys, setCapturingKeys] = useState<Record<string, Record<string, boolean>>>({})
 
   async function loadWishlist() {
     const data = await window.db.getWishlist()
     setItems(data)
+    return data
   }
 
   useEffect(() => {
     let cancelled = false
     async function init() {
-      await refreshLoginStatuses()
-      if (cancelled) return
-
       const data = await window.db.getWishlist()
       if (cancelled) return
       setItems(data)
 
+      // Load whatever is already cached — no auto-fetch
       const inputs = buildPricingInputsForItems(data)
       const keys = inputs.map(i => i.key)
       if (keys.length === 0) return
-
       const cached = await window.pricing.get(keys)
       if (cancelled) return
       setPriceCache(prev => ({ ...prev, ...cached }))
-
-      const missingInputs = inputs.filter(i => !cached[i.key])
-      if (missingInputs.length > 0) void refreshPrices(missingInputs, false)
     }
     void init()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   async function handleAdd(e: React.FormEvent) {
@@ -97,31 +68,36 @@ export function Wishlist() {
     setNewItem({ priority: 'medium' })
     setIsAdding(false)
     await loadWishlist()
-
-    void refreshPrices([buildPricingInput(itemToAdd)], true)
   }
 
   async function handleDelete(id: string) {
     if (confirm('Remove from wishlist?')) {
       await window.db.deleteWishlistItem(id)
-      loadWishlist()
+      void loadWishlist()
     }
   }
 
-  async function refreshPrices(inputs: PricingInput[], force: boolean) {
-    const uniqueInputs = uniquePricingInputs(inputs)
-    if (uniqueInputs.length === 0) return
+  async function handleCapture(item: WishlistItem, channel: CaptureChannel) {
+    const input = buildPricingInput(item)
+    const key = input.key
 
-    setLoadingKeys(prev => Object.fromEntries([...Object.entries(prev), ...uniqueInputs.map(i => [i.key, true])]))
+    setCapturingKeys(prev => ({
+      ...prev,
+      [key]: { ...(prev[key] ?? {}), [channel]: true },
+    }))
+
     try {
-      const res = await window.pricing.refresh(uniqueInputs, { force })
-      if (res.ok) setPriceCache(prev => ({ ...prev, ...res.entries }))
+      const result = await window.pricing.openCapture({ ...input, channel })
+      if (result.ok) {
+        // Re-read the updated cache entry from main process
+        const updated = await window.pricing.get([key])
+        setPriceCache(prev => ({ ...prev, ...updated }))
+      }
     } finally {
-      setLoadingKeys(prev => {
-        const next = { ...prev }
-        for (const i of uniqueInputs) next[i.key] = false
-        return next
-      })
+      setCapturingKeys(prev => ({
+        ...prev,
+        [key]: { ...(prev[key] ?? {}), [channel]: false },
+      }))
     }
   }
 
@@ -129,79 +105,12 @@ export function Wishlist() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">Wishlist</h2>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => void openLoginAndPoll('jd')}
-            className="px-4 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
-          >
-            登录京东
-          </button>
-          <button
-            onClick={() => {
-              void window.stores.clearCookies('jd').then(() => setJdLoggedIn(false))
-            }}
-            className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            清除京东登录
-          </button>
-          {jdLoggedIn !== null && (
-            <span className={`text-sm ${jdLoggedIn ? 'text-red-700' : 'text-gray-500'}`}>
-              京东：{jdLoggedIn ? '已登录' : '未登录'}
-            </span>
-          )}
-
-          <button
-            onClick={() => void openLoginAndPoll('dangdang')}
-            className="px-4 py-2 bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors"
-          >
-            登录当当
-          </button>
-          <button
-            onClick={() => {
-              void window.stores.clearCookies('dangdang').then(() => setDangdangLoggedIn(false))
-            }}
-            className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            清除当当登录
-          </button>
-          {dangdangLoggedIn !== null && (
-            <span className={`text-sm ${dangdangLoggedIn ? 'text-orange-700' : 'text-gray-500'}`}>
-              当当：{dangdangLoggedIn ? '已登录' : '未登录'}
-            </span>
-          )}
-
-          <button
-            onClick={() => void openLoginAndPoll('bookschina')}
-            className="px-4 py-2 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-colors"
-          >
-            登录中图网
-          </button>
-          <button
-            onClick={() => {
-              void window.stores.clearCookies('bookschina').then(() => setBookschinaLoggedIn(false))
-            }}
-            className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            清除中图网登录
-          </button>
-          {bookschinaLoggedIn !== null && (
-            <span className={`text-sm ${bookschinaLoggedIn ? 'text-emerald-700' : 'text-gray-500'}`}>
-              中图网：{bookschinaLoggedIn ? '已登录' : '未登录'}
-            </span>
-          )}
-          <button
-            onClick={() => void refreshPrices(buildPricingInputsForItems(items), true)}
-            className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            刷新全部
-          </button>
-          <button
-            onClick={() => setIsAdding(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Add Item
-          </button>
-        </div>
+        <button
+          onClick={() => setIsAdding(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Add Item
+        </button>
       </div>
 
       {isAdding && (
@@ -286,15 +195,13 @@ export function Wishlist() {
               <p className="text-gray-600">{item.author}</p>
               <p className="text-sm text-gray-400 font-mono mt-1">{item.isbn}</p>
             </div>
-            
+
             <div className="flex items-start gap-4">
               <PricePanel
                 item={item}
                 entry={getEntryForItem(priceCache, item)}
-                loading={isLoadingForItem(loadingKeys, item)}
-                onRefresh={() => {
-                  void refreshPrices([buildPricingInput(item)], true)
-                }}
+                capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
+                onCapture={ch => void handleCapture(item, ch)}
               />
               <button
                 onClick={() => handleDelete(item.id)}
@@ -316,160 +223,170 @@ export function Wishlist() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// PricePanel
+// ---------------------------------------------------------------------------
+
 function PricePanel(props: {
   item: WishlistItem
   entry?: PriceCacheEntry
-  loading: boolean
-  onRefresh: () => void
+  capturingChannels: Record<string, boolean>
+  onCapture: (ch: CaptureChannel) => void
 }) {
   const quotes = getQuotesForRender(props.entry)
-  const updatedAt = props.entry?.updatedAt
 
   return (
-    <div className="w-[360px] border border-gray-200 rounded-lg p-3 bg-white">
+    <div className="w-[380px] border border-gray-200 rounded-lg p-3 bg-white">
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-medium text-gray-700">比价</div>
-        <button
-          onClick={props.onRefresh}
-          className="px-2 py-1 text-xs bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100"
-        >
-          刷新
-        </button>
       </div>
 
       <div className="space-y-2">
         {channelOrder.map(ch => {
           const quote = quotes.find(q => q.channel === ch)
-          const display = getQuoteDisplay(ch, quote, props.loading, props.item)
+          const isCapturing = props.capturingChannels[ch] === true
+          const supported = CAPTURE_SUPPORTED.includes(ch)
           return (
-            <div key={ch} className="flex items-center justify-between gap-2">
-              <span className={`px-2 py-0.5 text-xs rounded border ${channelBadge[ch]}`}>{channelLabel[ch]}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => void window.app.openExternal(display.url)}
-                  className={`text-sm font-semibold ${display.valueClass} ${display.clickable ? 'hover:underline' : 'cursor-default'}`}
-                  disabled={!display.clickable}
-                >
-                  {display.valueText}
-                </button>
-
-                {display.action && (
-                  <button
-                    onClick={display.action}
-                    className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
-                  >
-                    {display.actionLabel}
-                  </button>
-                )}
-              </div>
-            </div>
+            <ChannelRow
+              key={ch}
+              channel={ch}
+              quote={quote}
+              isCapturing={isCapturing}
+              captureSupported={supported}
+              onCapture={() => props.onCapture(ch as CaptureChannel)}
+            />
           )
         })}
       </div>
-
-      {updatedAt && <div className="mt-2 text-xs text-gray-400">更新时间：{new Date(updatedAt).toLocaleString()}</div>}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// ChannelRow
+// ---------------------------------------------------------------------------
+
+function ChannelRow(props: {
+  channel: PriceChannel
+  quote?: PriceQuote
+  isCapturing: boolean
+  captureSupported: boolean
+  onCapture: () => void
+}) {
+  const { channel, quote, isCapturing, captureSupported, onCapture } = props
+
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className={`px-2 py-0.5 text-xs rounded border flex-shrink-0 ${channelBadge[channel]}`}>
+        {channelLabel[channel]}
+      </span>
+
+      <div className="flex items-center gap-2 ml-auto">
+        {isCapturing ? (
+          <span className="text-sm text-gray-400">采价中…</span>
+        ) : (
+          <div className="flex flex-col items-end">
+            <QuoteDisplay channel={channel} quote={quote} />
+            {quote?.status === 'ok' && quote.fetchedAt && (
+              <span className="text-[10px] text-gray-300 leading-tight">
+                {formatFetchedAt(quote.fetchedAt)}
+              </span>
+            )}
+          </div>
+        )}
+
+        {captureSupported && !isCapturing && (
+          <button
+            onClick={onCapture}
+            title={quote?.status === 'ok' ? '重新采价' : '去采价'}
+            className="p-1 text-gray-400 rounded hover:text-gray-600 hover:bg-gray-100 flex-shrink-0"
+          >
+            {quote?.status === 'ok' ? (
+              // Refresh icon
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                <path d="M21 3v5h-5"/>
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                <path d="M3 21v-5h5"/>
+              </svg>
+            ) : (
+              // Search icon
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="m21 21-4.35-4.35"/>
+              </svg>
+            )}
+          </button>
+        )}
+
+        {!captureSupported && (
+          <span className="text-xs text-gray-300">暂未支持</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// QuoteDisplay: shows price (linked) or error state
+// ---------------------------------------------------------------------------
+
+function QuoteDisplay(props: { channel: PriceChannel; quote?: PriceQuote }) {
+  const { quote } = props
+  if (!quote) {
+    return <span className="text-sm text-gray-400">—</span>
+  }
+
+  if (quote.status === 'ok' && typeof quote.priceCny === 'number') {
+    return (
+      <button
+        onClick={() => void window.app.openExternal(quote.url)}
+        className={`text-sm font-semibold ${channelColorText(props.channel)} hover:underline`}
+        title={quote.url}
+      >
+        ¥{quote.priceCny.toFixed(2)}
+      </button>
+    )
+  }
+
+  // Error / not-found states — show a small open link
+  return (
+    <span className="text-sm text-gray-400" title={quote.message}>
+      {quote.status === 'not_found' ? '未找到' : (quote.message ?? '失败')}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function channelColorText(ch: PriceChannel): string {
+  switch (ch) {
+    case 'bookschina': return 'text-emerald-700'
+    case 'jd':         return 'text-red-700'
+    case 'dangdang':   return 'text-orange-700'
+  }
+}
+
+/** Format an ISO timestamp as a compact local date+time, e.g. "3/21 19:30" */
+function formatFetchedAt(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const sameYear = d.getFullYear() === now.getFullYear()
+  if (sameYear) {
+    return d.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+  return d.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function getEntryForItem(cache: Record<string, PriceCacheEntry>, item: WishlistItem): PriceCacheEntry | undefined {
   return cache[buildPricingKey(item)]
 }
 
-function isLoadingForItem(loading: Record<string, boolean>, item: WishlistItem): boolean {
-  return loading[buildPricingKey(item)] === true
-}
-
 function getQuotesForRender(entry?: PriceCacheEntry): PriceQuote[] {
   if (!entry?.quotes) return []
   return entry.quotes.filter(q => channelOrder.includes(q.channel))
-}
-
-function getQuoteDisplay(
-  ch: PriceChannel,
-  quote: PriceQuote | undefined,
-  loading: boolean,
-  item: WishlistItem,
-): {
-  url: string
-  valueText: string
-  valueClass: string
-  clickable: boolean
-  action?: () => void
-  actionLabel?: string
-} {
-  const url = quote?.url ?? buildSearchUrl(ch, item.title)
-  if (loading) return { url, valueText: '查询中…', valueClass: 'text-gray-400', clickable: false }
-  if (!quote) {
-    return {
-      url,
-      valueText: '—',
-      valueClass: 'text-gray-400',
-      clickable: false,
-      action: () => void window.app.openExternal(url),
-      actionLabel: '搜索',
-    }
-  }
-
-  if (quote.status === 'ok' && typeof quote.priceCny === 'number') {
-    return { url, valueText: `¥${quote.priceCny.toFixed(2)}`, valueClass: channelColorText(ch), clickable: true }
-  }
-
-  if (quote.status === 'needs_login') {
-    return {
-      url,
-      valueText: '需要登录',
-      valueClass: 'text-amber-700',
-      clickable: true,
-      action: () => void window.stores.openLogin(ch),
-      actionLabel: '登录',
-    }
-  }
-
-  if (quote.status === 'blocked') {
-    if (ch === 'bookschina' || ch === 'jd') {
-      return {
-        url,
-        valueText: quote.message ?? '受限',
-        valueClass: 'text-amber-700',
-        clickable: true,
-        action: () => void window.stores.openPage(url),
-        actionLabel: '去验证',
-      }
-    }
-    return {
-      url,
-      valueText: quote.message ?? '受限',
-      valueClass: 'text-amber-700',
-      clickable: true,
-      action: () => void window.app.openExternal(url),
-      actionLabel: '打开',
-    }
-  }
-
-  if (quote.status === 'not_found') {
-    return { url, valueText: '未找到', valueClass: 'text-gray-500', clickable: true, action: () => void window.app.openExternal(url), actionLabel: '搜索' }
-  }
-
-  return {
-    url,
-    valueText: quote.message ?? '失败',
-    valueClass: 'text-gray-500',
-    clickable: true,
-    action: () => void window.app.openExternal(url),
-    actionLabel: '打开',
-  }
-}
-
-function channelColorText(ch: PriceChannel): string {
-  switch (ch) {
-    case 'bookschina':
-      return 'text-emerald-700'
-    case 'jd':
-      return 'text-red-700'
-    case 'dangdang':
-      return 'text-orange-700'
-  }
 }
 
 function normalizeIsbn(value: unknown): string {
@@ -487,43 +404,23 @@ function buildPricingKey(item: WishlistItem): string {
 }
 
 function buildPricingInput(item: WishlistItem): PricingInput {
-  return { key: buildPricingKey(item), title: item.title, author: item.author, isbn: normalizeIsbn(item.isbn) || undefined }
+  return {
+    key: buildPricingKey(item),
+    title: item.title,
+    author: item.author,
+    isbn: normalizeIsbn(item.isbn) || undefined,
+  }
 }
 
 function buildPricingInputsForItems(items: WishlistItem[]): PricingInput[] {
-  return uniquePricingInputs(items.map(buildPricingInput))
-}
-
-function uniquePricingInputs(inputs: PricingInput[]): PricingInput[] {
   const out: PricingInput[] = []
   const seen = new Set<string>()
-  for (const input of inputs) {
+  for (const item of items) {
+    const input = buildPricingInput(item)
     if (!input.key || !input.title) continue
     if (seen.has(input.key)) continue
     seen.add(input.key)
     out.push(input)
   }
   return out
-}
-
-function encodeBookschinaStp(input: string): string {
-  let out = ''
-  for (const ch of input) {
-    const code = ch.charCodeAt(0)
-    if (code <= 0x7f) out += ch
-    else out += `%u${code.toString(16).toUpperCase().padStart(4, '0')}`
-  }
-  return out
-}
-
-function buildSearchUrl(channel: PriceChannel, title: string): string {
-  const q = encodeURIComponent(title)
-  switch (channel) {
-    case 'bookschina':
-      return `https://www.bookschina.com/book_find2/?stp=${encodeBookschinaStp(title)}&sCate=0`
-    case 'jd':
-      return `https://search.jd.com/Search?keyword=${encodeURIComponent(title.trim().startsWith('书') ? title.trim() : `书 ${title.trim()}`)}&wtype=1&enc=utf-8`
-    case 'dangdang':
-      return `https://search.dangdang.com/?key=${q}&act=input`
-  }
 }
