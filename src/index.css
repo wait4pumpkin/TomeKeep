@@ -1,1 +1,4 @@
 @import "tailwindcss";
+
+/* Tailwind v4: activate dark: utilities when .dark is on <html> */
+@custom-variant dark (&:where(.dark, .dark *));

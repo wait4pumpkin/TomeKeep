@@ -27,10 +27,16 @@ let win: BrowserWindow | null
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 
 function createWindow() {
+  // Resolve app icon: use build/icon.png relative to project root (works in both
+  // dev and packaged builds because electron-builder copies it in)
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'build', 'icon.png')
+    : path.join(__dirname, '../build/icon.png')
+
   win = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path.join(process.env.VITE_PUBLIC as string, 'electron-vite.svg'),
+    icon: iconPath,
     webPreferences: {
       preload: resolvePreloadPath(__dirname),
     },
