@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Book } from '../../electron/db'
-import { AddFormCard } from '../components/AddFormCard'
-import { DoubanFillField } from '../components/DoubanFillField'
+import type { DoubanSearchHit } from '../../electron/metadata'
 import { IsbnScanModal } from '../components/IsbnScanModal'
 import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from '../lib/isbn'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
@@ -17,10 +16,12 @@ export function Inventory() {
   const menuRef = useRef<HTMLDivElement>(null)
 
   const [newBook, setNewBook] = useState<Partial<Book>>({ status: 'unread' })
-  const [isbnError, setIsbnError] = useState<string | null>(null)
-  const [metaStatus, setMetaStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({
-    state: 'idle',
-  })
+
+  // Douban search-as-you-type state (manual form)
+  const [searchHits, setSearchHits] = useState<DoubanSearchHit[]>([])
+  const [searchState, setSearchState] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [fillState, setFillState] = useState<'idle' | 'loading'>('idle')
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Clipboard import status
   const [clipStatus, setClipStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ state: 'idle' })
@@ -123,6 +124,15 @@ export function Inventory() {
     return () => { cancelled = true }
   }, [])
 
+  function resetManualForm() {
+    setNewBook({ status: 'unread' })
+    setSearchHits([])
+    setSearchState('idle')
+    setFillState('idle')
+    setClipStatus({ state: 'idle' })
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+  }
+
   async function handleAddBook(e: React.FormEvent) {
     e.preventDefault()
     if (!newBook.title || !newBook.author) return
@@ -142,9 +152,7 @@ export function Inventory() {
     } as Book
 
     await window.db.addBook(bookToAdd)
-    setNewBook({ status: 'unread' })
-    setIsbnError(null)
-    setMetaStatus({ state: 'idle' })
+    resetManualForm()
     setAddMode(null)
     loadBooks()
   }
@@ -165,45 +173,47 @@ export function Inventory() {
     await window.db.updateBook(updated)
   }
 
-  async function fillMetadataByIsbn(isbn13: string) {
-    setMetaStatus({ state: 'loading' })
-    const res = await window.meta.lookupIsbn(isbn13)
-    if (!res.ok) {
-      const message =
-        res.error === 'not_found' ? '未找到对应 ISBN 的元信息。' :
-        res.error === 'timeout' ? '获取元信息超时，请稍后重试。' :
-        res.error === 'invalid_isbn' ? 'ISBN 无效。' :
-        '获取元信息失败，请稍后重试。'
-      setMetaStatus({ state: 'error', message })
+  /** Trigger debounced Douban search based on current title + author fields. */
+  function triggerSearch(title: string, author: string) {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    const query = [title, author].filter(Boolean).join(' ').trim()
+    if (query.length < 2) {
+      setSearchHits([])
+      setSearchState('idle')
       return
     }
-    setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
-    setMetaStatus({ state: 'success', message: '已填充元信息。' })
+    setSearchState('loading')
+    searchDebounceRef.current = setTimeout(async () => {
+      const res = await window.meta.searchDouban(query)
+      if (!res.ok) {
+        setSearchState('error')
+        return
+      }
+      setSearchHits(res.value)
+      setSearchState('idle')
+    }, 600)
   }
 
-  function setIsbnFromRaw(raw: string): string | null {
-    const digitsCount = (raw.match(/\d/g) ?? []).length
-    const isbn10CharsCount = (raw.toUpperCase().match(/[0-9X]/g) ?? []).length
-    if (digitsCount < 13 && isbn10CharsCount < 10) {
-      setIsbnError(null)
-      return null
+  /** Select a search hit: fetch full metadata then fill form. */
+  async function handleSelectHit(hit: DoubanSearchHit) {
+    setSearchHits([])
+    setFillState('loading')
+    const res = await window.meta.lookupDouban(`https://book.douban.com/subject/${hit.subjectId}/`)
+    if (res.ok) {
+      setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
+    } else {
+      // Fallback: at least fill title/author from the search hit
+      setNewBook(prev => ({
+        ...prev,
+        title: prev.title || hit.title,
+        author: prev.author || hit.author,
+      }))
     }
-    const result = normalizeIsbn(raw)
-    if (!result.ok) {
-      if (result.error === 'empty') { setIsbnError(null); return null }
-      setIsbnError(result.error === 'invalid_checksum' ? 'ISBN 校验失败，请重试或手动输入。' : '未识别到有效的 ISBN。')
-      return null
-    }
-    const isbn13 = toIsbn13(result.value)
-    if (!isbn13) { setIsbnError('未识别到有效的 ISBN。'); return null }
-    setNewBook(prev => ({ ...prev, isbn: isbn13 }))
-    setIsbnError(null)
-    return isbn13
+    setFillState('idle')
   }
 
   // Derived booleans — hoisted out to avoid TypeScript narrowing issues in JSX
   const showManualForm = addMode === 'manual'
-  const scanSingleOpen = addMode === 'scan-single'
   const scanBatchOpen = addMode === 'scan-batch'
 
   return (
@@ -365,109 +375,21 @@ export function Inventory() {
       </div>
 
       {showManualForm && (
-        <>
-          {clipStatus.state !== 'idle' && (
-            <p className={`text-sm px-1 ${clipStatus.state === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
-              {clipStatus.state === 'loading' ? '正在从剪贴板导入…' : clipStatus.message}
-            </p>
-          )}
-          <AddFormCard
-            title="Add New Book"
-            onSubmit={handleAddBook}
-            onCancel={() => { setAddMode(null); setNewBook({ status: 'unread' }); setClipStatus({ state: 'idle' }) }}
-            submitLabel="Save Book"
-            cancelLabel="Cancel"
-          >
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
-              <input
-                type="text"
-                required
-                value={newBook.title || ''}
-                onChange={e => setNewBook({ ...newBook, title: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Author</label>
-              <input
-                type="text"
-                required
-                value={newBook.author || ''}
-                onChange={e => setNewBook({ ...newBook, author: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ISBN</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newBook.isbn || ''}
-                  onChange={e => {
-                    setNewBook({ ...newBook, isbn: e.target.value })
-                    setIsbnError(null)
-                    setMetaStatus({ state: 'idle' })
-                  }}
-                  onBlur={e => { if (e.target.value) setIsbnFromRaw(e.target.value) }}
-                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const raw = newBook.isbn ?? ''
-                    const isbn13 = setIsbnFromRaw(raw)
-                    if (isbn13) void fillMetadataByIsbn(isbn13)
-                  }}
-                  className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:hover:bg-gray-100 dark:disabled:hover:bg-gray-700"
-                  disabled={!newBook.isbn}
-                >
-                  Fill
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAddMode('scan-single')}
-                  className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                >
-                  Scan
-                </button>
-              </div>
-              {isbnError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{isbnError}</p>}
-              {metaStatus.state !== 'idle' && !isbnError && (
-                <p className={`mt-2 text-sm ${metaStatus.state === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
-                  {metaStatus.state === 'loading' ? '正在获取元信息…' : metaStatus.message}
-                </p>
-              )}
-            </div>
-            <DoubanFillField
-              onApply={meta => {
-                setNewBook(prev => mergeBookDraftWithMetadata(prev, meta) as Partial<Book>)
-                setIsbnError(null)
-                setMetaStatus({ state: 'idle' })
-              }}
-            />
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
-              <select
-                value={newBook.status}
-                onChange={e => setNewBook({ ...newBook, status: e.target.value as Book['status'] })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-              >
-                <option value="unread">Unread</option>
-                <option value="reading">Reading</option>
-                <option value="read">Read</option>
-              </select>
-            </div>
-          </AddFormCard>
-          <IsbnScanModal
-            isOpen={scanSingleOpen}
-            onClose={() => setAddMode(null)}
-            onDetected={raw => {
-              const isbn13 = setIsbnFromRaw(raw)
-              if (isbn13) void fillMetadataByIsbn(isbn13)
-            }}
-          />
-        </>
+        <ManualAddForm
+          book={newBook}
+          searchHits={searchHits}
+          searchState={searchState}
+          fillState={fillState}
+          clipStatus={clipStatus}
+          onBookChange={(patch) => {
+            const next = { ...newBook, ...patch }
+            setNewBook(next)
+            triggerSearch(next.title ?? '', next.author ?? '')
+          }}
+          onSelectHit={handleSelectHit}
+          onSubmit={handleAddBook}
+          onCancel={() => { setAddMode(null); resetManualForm() }}
+        />
       )}
 
       {/* Batch scan modal — adds books directly without opening the form */}
@@ -614,6 +536,178 @@ export function Inventory() {
             : '没有符合条件的书籍。'}
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ManualAddForm — compact inline form for manually adding a book.
+// Debounces title+author input → searches Douban → select to auto-fill.
+// ---------------------------------------------------------------------------
+
+type ManualAddFormProps = {
+  book: Partial<Book>
+  searchHits: DoubanSearchHit[]
+  searchState: 'idle' | 'loading' | 'error'
+  fillState: 'idle' | 'loading'
+  clipStatus: { state: 'idle' | 'loading' | 'success' | 'error'; message?: string }
+  onBookChange: (patch: Partial<Book>) => void
+  onSelectHit: (hit: DoubanSearchHit) => void
+  onSubmit: (e: React.FormEvent) => void
+  onCancel: () => void
+}
+
+function ManualAddForm({ book, searchHits, searchState, fillState, clipStatus, onBookChange, onSelectHit, onSubmit, onCancel }: ManualAddFormProps) {
+  const inputCls = 'w-full px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+  const statusOptions: { value: Book['status']; label: string }[] = [
+    { value: 'unread', label: '未读' },
+    { value: 'reading', label: '在读' },
+    { value: 'read', label: '已读' },
+  ]
+
+  const metaFilled = !!(book.coverUrl || book.isbn || book.publisher)
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-3">
+      {/* Clipboard status banner */}
+      {clipStatus.state !== 'idle' && (
+        <p className={`text-xs mb-2 px-0.5 ${clipStatus.state === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
+          {clipStatus.state === 'loading' ? '正在从剪贴板导入…' : clipStatus.message}
+        </p>
+      )}
+
+      <form onSubmit={onSubmit}>
+        {/* Row 1: cover preview + fields */}
+        <div className="flex gap-3">
+          {/* Cover thumbnail */}
+          <div className="flex-shrink-0 w-12 h-16 rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+            {book.coverUrl ? (
+              <img src={book.coverUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+              </svg>
+            )}
+          </div>
+
+          {/* Input fields */}
+          <div className="flex-1 min-w-0 space-y-1.5">
+            {/* Title */}
+            <div className="relative">
+              <input
+                type="text"
+                required
+                placeholder="书名 *"
+                value={book.title ?? ''}
+                onChange={e => onBookChange({ title: e.target.value })}
+                className={inputCls}
+                autoFocus
+              />
+              {/* Search indicator */}
+              {searchState === 'loading' && (
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                </span>
+              )}
+
+              {/* Search results dropdown */}
+              {searchHits.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-0.5 z-40 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden">
+                  {searchHits.map(hit => (
+                    <button
+                      key={hit.subjectId}
+                      type="button"
+                      onClick={() => onSelectHit(hit)}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0"
+                    >
+                      {hit.coverUrl ? (
+                        <img src={hit.coverUrl} alt="" className="w-7 h-9 object-cover rounded flex-shrink-0" />
+                      ) : (
+                        <div className="w-7 h-9 rounded bg-gray-100 dark:bg-gray-700 flex-shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm text-gray-900 dark:text-gray-100 truncate leading-snug">{hit.title}</p>
+                        {hit.author && <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{hit.author}</p>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Author */}
+            <input
+              type="text"
+              required
+              placeholder="作者 *"
+              value={book.author ?? ''}
+              onChange={e => onBookChange({ author: e.target.value })}
+              className={inputCls}
+            />
+          </div>
+        </div>
+
+        {/* Fill loading indicator */}
+        {fillState === 'loading' && (
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 flex items-center gap-1.5">
+            <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+            正在从豆瓣获取详情…
+          </p>
+        )}
+
+        {/* Metadata filled confirmation */}
+        {metaFilled && fillState === 'idle' && (
+          <p className="text-xs text-green-600 dark:text-green-400 mt-2">已从豆瓣填充元信息</p>
+        )}
+
+        {/* Row 2: status + actions */}
+        <div className="flex items-center gap-2 mt-3">
+          {/* Status segmented control */}
+          <div className="flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden shrink-0">
+            {statusOptions.map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => onBookChange({ status: opt.value })}
+                className={`px-2.5 py-1 text-xs transition-colors ${
+                  book.status === opt.value
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1" />
+
+          {/* Cancel */}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            取消
+          </button>
+
+          {/* Save */}
+          <button
+            type="submit"
+            disabled={!book.title || !book.author}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            添加
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

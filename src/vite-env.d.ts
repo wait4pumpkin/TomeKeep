@@ -20,6 +20,10 @@ interface Window {
       | { ok: true; value: import('./lib/openLibrary').BookMetadata }
       | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
     >
+    searchDouban: (query: string) => Promise<
+      | { ok: true; value: import('../electron/metadata').DoubanSearchHit[] }
+      | { ok: false; error: 'timeout' | 'network' | 'bad_response' }
+    >
   }
   pricing: {
     get: (keys: string[]) => Promise<Record<string, import('../electron/db').PriceCacheEntry>>

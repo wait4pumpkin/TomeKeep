@@ -10,7 +10,40 @@ type LookupDoubanResult =
   | { ok: true; value: BookMetadata }
   | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
 
+export type DoubanSearchHit = {
+  subjectId: string
+  title: string
+  author?: string
+  coverUrl?: string
+}
+
+type SearchDoubanResult =
+  | { ok: true; value: DoubanSearchHit[] }
+  | { ok: false; error: 'timeout' | 'network' | 'bad_response' }
+
 export function setupMetadata() {
+  ipcMain.handle('meta:search-douban', async (_event, query: string): Promise<SearchDoubanResult> => {
+    if (!query || typeof query !== 'string') return { ok: true, value: [] }
+    const url = `https://www.douban.com/search?cat=1001&q=${encodeURIComponent(query.trim())}`
+    try {
+      const res = await fetchWithTimeout(url, 8000, {
+        headers: {
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+      })
+      if (!res.ok) return { ok: false, error: 'network' }
+      const html = await res.text()
+      const hits = parseDoubanSearchHtml(html)
+      return { ok: true, value: hits }
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : ''
+      if (name === 'AbortError') return { ok: false, error: 'timeout' }
+      return { ok: false, error: 'network' }
+    }
+  })
   ipcMain.handle('meta:lookup-isbn', async (_event, isbn13: string): Promise<LookupIsbnResult> => {
     if (!isValidIsbn13(isbn13)) return { ok: false, error: 'invalid_isbn' }
 
@@ -82,4 +115,57 @@ async function fetchWithTimeout(url: string, timeoutMs: number, init?: RequestIn
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Parse Douban search results page for book hits.
+ * Extracts subject ID, title, author, and cover thumbnail from each result item.
+ */
+function parseDoubanSearchHtml(html: string): DoubanSearchHit[] {
+  const hits: DoubanSearchHit[] = []
+
+  // Each result is in a <div class="result"> block
+  const resultRe = /<div[^>]+class=["'][^"']*\bresult\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi
+  let block: RegExpExecArray | null
+
+  // eslint-disable-next-line no-cond-assign
+  while ((block = resultRe.exec(html)) !== null && hits.length < 8) {
+    const chunk = block[1]
+
+    // Subject link: href="/subject/1234567/"
+    const linkM = chunk.match(/href=["']https?:\/\/book\.douban\.com\/subject\/(\d+)\/?["']/)
+    if (!linkM) continue
+    const subjectId = linkM[1]
+
+    // Title: inside <div class="title"> ... <a ...>TITLE</a>
+    const titleM = chunk.match(/<div[^>]+class=["'][^"']*\btitle\b[^"']*["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/)
+    const title = titleM ? titleM[1].trim() : null
+    if (!title) continue
+
+    // Author: first <span class="subject-cast"> — "作者 / ..."
+    const castM = chunk.match(/<span[^>]+class=["']subject-cast["'][^>]*>([^<]+)<\/span>/)
+    const cast = castM ? castM[1].trim() : undefined
+    // cast format: "作者 / 出版社 / 年份" — take the first segment before " / "
+    const author = cast ? cast.split('/')[0].trim() || undefined : undefined
+
+    // Cover thumbnail
+    const imgM = chunk.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/)
+    const coverUrl = imgM ? imgM[1].trim() : undefined
+
+    hits.push({ subjectId, title: decodeHtmlEntitiesSimple(title), author: author ? decodeHtmlEntitiesSimple(author) : undefined, coverUrl })
+  }
+
+  return hits
+}
+
+function decodeHtmlEntitiesSimple(input: string): string {
+  return input
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
