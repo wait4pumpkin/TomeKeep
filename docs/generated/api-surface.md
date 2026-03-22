@@ -14,8 +14,26 @@ interface Book {
   isbn?: string
   publisher?: string   // from metadata fill (OpenLibrary / Douban); not inferred from ISBN
   coverUrl?: string    // app:// local path (new records) or remote URL (legacy records)
-  status: 'unread' | 'reading' | 'read'
+  status?: 'unread' | 'reading' | 'read'  // legacy field; per-user status now stored in ReadingState
+  tags?: string[]      // free-form labels, e.g. ["科幻", "经典"]; undefined = no tags
   addedAt: string      // ISO 8601
+}
+```
+
+#### UserProfile
+```ts
+interface UserProfile {
+  id: string    // UUID
+  name: string
+}
+```
+
+#### ReadingState
+```ts
+interface ReadingState {
+  userId: string   // UserProfile.id
+  bookId: string   // Book.id
+  status: 'unread' | 'reading' | 'read'
 }
 ```
 
@@ -28,6 +46,7 @@ interface WishlistItem {
   isbn?: string
   publisher?: string   // from metadata fill (Douban); not inferred from ISBN
   coverUrl?: string    // app:// local path (new records) or remote URL (legacy records)
+  tags?: string[]      // free-form labels; undefined = no tags
   priority: 'high' | 'medium' | 'low'
   addedAt: string      // ISO 8601
 }
@@ -35,7 +54,7 @@ interface WishlistItem {
 
 ### Renderer Global APIs (preload)
 - window.db
-  - purpose: local persistence for inventory and wishlist
+  - purpose: local persistence for inventory, wishlist, users, and per-user reading state
   - methods:
     - getBooks() -> Book[]
     - addBook(book) -> Book
@@ -43,7 +62,16 @@ interface WishlistItem {
     - deleteBook(id) -> boolean
     - getWishlist() -> WishlistItem[]
     - addWishlistItem(item) -> WishlistItem
+    - updateWishlistItem(item) -> WishlistItem | null
     - deleteWishlistItem(id) -> boolean
+    - getAllTags() -> string[]  (returns all distinct tags across books + wishlist, sorted)
+    - getUsers() -> UserProfile[]
+    - addUser(name: string) -> UserProfile
+    - deleteUser(id: string) -> boolean  (also deletes all ReadingState rows for this user)
+    - getActiveUser() -> UserProfile | null
+    - setActiveUser(id: string) -> UserProfile | null
+    - getReadingStates(userId: string) -> ReadingState[]
+    - setReadingState(state: ReadingState) -> ReadingState  (upsert)
 
 - window.meta
   - purpose: fetch book metadata by ISBN (best-effort)
@@ -105,6 +133,25 @@ interface WishlistItem {
       - returns original `url` unchanged if `url` is empty, already starts with `app://`, download fails, or times out (10 s)
       - never throws; always resolves
 
+- window.companion
+  - purpose: manage the LAN HTTPS companion server for mobile barcode scanning
+  - methods:
+    - start() -> Promise<{ ok: true; url: string; token: string } | { ok: false; error: string }>
+      - starts the HTTPS server (or returns existing session if already running)
+      - `url` is the full LAN URL including `?token=<token>`; render as QR code for the phone to scan
+      - `token` is a 16-byte random hex string; invalidated when stop() is called
+    - stop() -> Promise<void>
+      - stops the server, closes all SSE connections, and invalidates the token
+    - status() -> Promise<{ running: true; url: string } | { running: false }>
+      - returns current server state without side effects
+    - onIsbnReceived(cb: (isbn: string) => void) -> () => void
+      - registers a callback invoked for each ISBN the phone scanner sends
+      - returns a dispose function; call it to remove the listener
+    - sendScanAck(isbn: string, hasMetadata: boolean, title?: string) -> void
+      - notifies the phone (via SSE) whether the ISBN was saved with full metadata
+      - optional `title` is displayed on the phone scan list when metadata was resolved
+      - phone UI updates the scan list item accordingly
+
 ### Client-side ISBN library (`src/lib/isbn.ts`)
 
 Pure functions exported for renderer use. No IPC involved.
@@ -164,7 +211,16 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | db:delete-book | renderer→main | removes Book by id, returns boolean |
 | db:get-wishlist | renderer→main | returns WishlistItem[] |
 | db:add-wishlist-item | renderer→main | persists WishlistItem, returns WishlistItem |
+| db:update-wishlist-item | renderer→main | updates WishlistItem by id, returns WishlistItem\|null |
 | db:delete-wishlist-item | renderer→main | removes WishlistItem by id, returns boolean |
+| db:get-all-tags | renderer→main | returns string[] of all distinct tags across books+wishlist, sorted |
+| db:get-users | renderer→main | returns UserProfile[] |
+| db:add-user | renderer→main | creates UserProfile by name, returns UserProfile |
+| db:delete-user | renderer→main | removes UserProfile and its ReadingState rows, returns boolean |
+| db:get-active-user | renderer→main | returns active UserProfile or null |
+| db:set-active-user | renderer→main | persists activeUserId, returns UserProfile or null |
+| db:get-reading-states | renderer→main | returns ReadingState[] for a userId |
+| db:set-reading-state | renderer→main | upserts a ReadingState, returns ReadingState |
 | meta:lookup-isbn | renderer→main | fetches metadata from Open Library |
 | meta:lookup-douban | renderer→main | fetches metadata from Douban HTML |
 | pricing:get | renderer→main | reads priceCache for given keys |
@@ -177,4 +233,9 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | stores:clear-cookies | renderer→main | clears cookies for a retailer |
 | app:open-external | renderer→main | opens URL in system browser |
 | covers:save-cover | renderer→main | downloads remote cover image to userData/covers/, returns app:// URL |
+| companion:start | renderer→main | starts HTTPS companion server; returns `{ ok, url, token }` |
+| companion:stop | renderer→main | stops companion server and invalidates session token |
+| companion:status | renderer→main | returns `{ running, url? }` without side effects |
+| companion:isbn-received | main→renderer | pushed for each ISBN received from the phone scanner |
+| companion:scan-ack | renderer→main | renderer notifies main to broadcast SSE ack to phone; payload `{ isbn, hasMetadata, title? }` |
 
