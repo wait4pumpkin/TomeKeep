@@ -115,19 +115,35 @@ function drawOverlay(
 export function IsbnScanModal(props: {
   isOpen: boolean
   onClose: () => void
+  /** Called for every successfully decoded barcode. */
   onDetected: (rawValue: string) => void
+  /**
+   * 'single' (default): close modal after the first successful scan.
+   * 'batch': keep scanning; show running list; user taps "完成" to close.
+   */
+  mode?: 'single' | 'batch'
 }) {
-  const { isOpen, onClose, onDetected } = props
+  const { isOpen, onClose, onDetected, mode = 'single' } = props
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const rafRef = useRef<number | null>(null)
   const [status, setStatus] = useState<ScanStatus>({ state: 'idle' })
 
+  // Batch mode: list of scanned ISBNs this session
+  const [scanned, setScanned] = useState<string[]>([])
+  // Cooldown: after a successful scan, ignore new detections for N ms to avoid double-scanning
+  const cooldownRef = useRef(false)
+
   const BarcodeDetectorCtor = useMemo(() => {
     const maybe = (globalThis as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector
     return maybe ?? null
   }, [])
+
+  // Reset scanned list when modal opens
+  useEffect(() => {
+    if (isOpen) setScanned([])
+  }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
@@ -182,20 +198,36 @@ export function IsbnScanModal(props: {
           try {
             const barcodes = await detector.detect(v)
 
-            // Draw candidate overlays on every frame (even if no match yet)
+            // Draw candidate overlays on every frame
             if (cvs) drawOverlay(cvs, v, barcodes)
 
             const first = barcodes[0]
-            if (first?.rawValue) {
-              // Draw the final confirmed barcode, play beep, then close
+            if (first?.rawValue && !cooldownRef.current) {
+              cooldownRef.current = true
               if (cvs) drawOverlay(cvs, v, [first])
               playBeep()
-              // Small delay so the green overlay is visible before modal closes
-              setTimeout(() => {
+
+              if (mode === 'single') {
+                // Single mode: close after detection (original behaviour)
+                setTimeout(() => {
+                  onDetected(first.rawValue)
+                  onClose()
+                }, 180)
+                return
+              } else {
+                // Batch mode: fire callback, append to list, resume scanning after cooldown
                 onDetected(first.rawValue)
-                onClose()
-              }, 180)
-              return
+                setScanned(prev =>
+                  prev.includes(first.rawValue) ? prev : [...prev, first.rawValue]
+                )
+                setTimeout(() => {
+                  cooldownRef.current = false
+                  if (!cancelled) {
+                    rafRef.current = requestAnimationFrame(() => { void tick() })
+                  }
+                }, 1200)
+                return
+              }
             }
           } catch (e) {
             const message = e instanceof Error ? e.message : '未知错误'
@@ -225,6 +257,7 @@ export function IsbnScanModal(props: {
 
     return () => {
       cancelled = true
+      cooldownRef.current = false
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
@@ -235,7 +268,7 @@ export function IsbnScanModal(props: {
       }
       setStatus({ state: 'idle' })
     }
-  }, [BarcodeDetectorCtor, isOpen, onClose, onDetected])
+  }, [BarcodeDetectorCtor, isOpen, onClose, onDetected, mode])
 
   if (!isOpen) return null
 
@@ -244,13 +277,15 @@ export function IsbnScanModal(props: {
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-[min(720px,95vw)] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">扫描 ISBN</h3>
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+            {mode === 'batch' ? '连续扫描 ISBN' : '扫描 ISBN'}
+          </h3>
           <button
             type="button"
             onClick={onClose}
             className="px-3 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
           >
-            关闭
+            {mode === 'batch' ? '完成' : '关闭'}
           </button>
         </div>
 
@@ -274,7 +309,29 @@ export function IsbnScanModal(props: {
           )}
           {status.state === 'running' && (
             <div className="text-sm text-gray-400 dark:text-gray-500 text-center">
-              将条形码对准摄像头，自动识别后关闭
+              {mode === 'batch'
+                ? '将条形码对准摄像头，识别后自动继续，扫完后点击"完成"'
+                : '将条形码对准摄像头，自动识别后关闭'}
+            </div>
+          )}
+
+          {/* Batch mode: running scanned list */}
+          {mode === 'batch' && scanned.length > 0 && (
+            <div className="border border-gray-100 dark:border-gray-700 rounded-lg overflow-hidden">
+              <div className="px-3 py-1.5 bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400">
+                已扫描 {scanned.length} 本
+              </div>
+              <ul className="divide-y divide-gray-100 dark:divide-gray-700 max-h-32 overflow-y-auto">
+                {scanned.map((isbn, i) => (
+                  <li key={isbn} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300">
+                    <span className="text-gray-400 dark:text-gray-500 w-4 text-right shrink-0">{i + 1}</span>
+                    <span className="font-mono">{isbn}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-green-500 ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -284,7 +341,7 @@ export function IsbnScanModal(props: {
               onClick={onClose}
               className="px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
             >
-              取消
+              {mode === 'batch' ? '完成' : '取消'}
             </button>
           </div>
         </div>

@@ -10,13 +10,92 @@ export function Inventory() {
   const [books, setBooks] = useState<Book[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | Book['status']>('all')
-  const [isAdding, setIsAdding] = useState(false)
+
+  // add mode: null = closed, 'manual' = form, 'scan-single' | 'scan-batch' = modal
+  const [addMode, setAddMode] = useState<null | 'manual' | 'scan-single' | 'scan-batch'>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
   const [newBook, setNewBook] = useState<Partial<Book>>({ status: 'unread' })
-  const [isScanOpen, setIsScanOpen] = useState(false)
   const [isbnError, setIsbnError] = useState<string | null>(null)
   const [metaStatus, setMetaStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({
     state: 'idle',
   })
+
+  // Clipboard import status
+  const [clipStatus, setClipStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ state: 'idle' })
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!menuOpen) return
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [menuOpen])
+
+  // Clipboard import: detect Douban URL / ISBN / plain text → fill form
+  async function handleClipboardImport() {
+    setMenuOpen(false)
+    setClipStatus({ state: 'loading' })
+    let text = ''
+    try {
+      text = (await navigator.clipboard.readText()).trim()
+    } catch {
+      setClipStatus({ state: 'error', message: '无法读取剪贴板，请检查权限。' })
+      return
+    }
+    if (!text) {
+      setClipStatus({ state: 'error', message: '剪贴板为空。' })
+      return
+    }
+
+    // Try Douban URL first
+    const isDouban = /book\.douban\.com\/subject\/\d+/i.test(text)
+    if (isDouban) {
+      const res = await window.meta.lookupDouban(text)
+      if (res.ok) {
+        setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
+        setClipStatus({ state: 'success', message: '已从豆瓣填充元信息。' })
+        setAddMode('manual')
+        return
+      }
+      setClipStatus({ state: 'error', message: '解析豆瓣链接失败，已打开手动录入。' })
+      setAddMode('manual')
+      return
+    }
+
+    // Try ISBN
+    const digitsOnly = text.replace(/[^0-9X]/gi, '')
+    if (digitsOnly.length === 13 || digitsOnly.length === 10) {
+      const normalized = normalizeIsbn(text)
+      if (normalized.ok) {
+        const isbn13 = toIsbn13(normalized.value)
+        if (isbn13) {
+          const res = await window.meta.lookupIsbn(isbn13)
+          if (res.ok) {
+            setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), isbn: isbn13 } as Partial<Book>))
+            setClipStatus({ state: 'success', message: '已从 ISBN 填充元信息。' })
+            setAddMode('manual')
+            return
+          }
+          // ISBN valid but lookup failed — pre-fill ISBN and open form
+          setNewBook(prev => ({ ...prev, isbn: isbn13 }))
+          setClipStatus({ state: 'idle' })
+          setAddMode('manual')
+          return
+        }
+      }
+    }
+
+    // Fallback: treat as title
+    setNewBook(prev => ({ ...prev, title: text }))
+    setClipStatus({ state: 'idle' })
+    setAddMode('manual')
+  }
 
   const filteredBooks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -66,7 +145,7 @@ export function Inventory() {
     setNewBook({ status: 'unread' })
     setIsbnError(null)
     setMetaStatus({ state: 'idle' })
-    setIsAdding(false)
+    setAddMode(null)
     loadBooks()
   }
 
@@ -122,19 +201,71 @@ export function Inventory() {
     return isbn13
   }
 
+  // Derived booleans — hoisted out to avoid TypeScript narrowing issues in JSX
+  const showManualForm = addMode === 'manual'
+  const scanSingleOpen = addMode === 'scan-single'
+  const scanBatchOpen = addMode === 'scan-batch'
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">My Library</h2>
-        <button
-          onClick={() => setIsAdding(true)}
-          title="Add Book"
-          className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
+        <div ref={menuRef} className="relative">
+          <button
+            onClick={() => setMenuOpen(o => !o)}
+            title="Add Book"
+            className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg z-30 overflow-hidden">
+              <button
+                type="button"
+                onClick={handleClipboardImport}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" />
+                </svg>
+                剪贴板导入
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMenuOpen(false); setAddMode('scan-single') }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
+                </svg>
+                ISBN 扫描（单次）
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMenuOpen(false); setAddMode('scan-batch') }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
+                </svg>
+                ISBN 扫描（连续）
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMenuOpen(false); setAddMode('manual') }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                </svg>
+                手动输入
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Search + status filter bar */}
@@ -233,12 +364,17 @@ export function Inventory() {
         </div>
       </div>
 
-      {isAdding && (
+      {showManualForm && (
         <>
+          {clipStatus.state !== 'idle' && (
+            <p className={`text-sm px-1 ${clipStatus.state === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+              {clipStatus.state === 'loading' ? '正在从剪贴板导入…' : clipStatus.message}
+            </p>
+          )}
           <AddFormCard
             title="Add New Book"
             onSubmit={handleAddBook}
-            onCancel={() => setIsAdding(false)}
+            onCancel={() => { setAddMode(null); setNewBook({ status: 'unread' }); setClipStatus({ state: 'idle' }) }}
             submitLabel="Save Book"
             cancelLabel="Cancel"
           >
@@ -290,7 +426,7 @@ export function Inventory() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsScanOpen(true)}
+                  onClick={() => setAddMode('scan-single')}
                   className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 >
                   Scan
@@ -324,8 +460,8 @@ export function Inventory() {
             </div>
           </AddFormCard>
           <IsbnScanModal
-            isOpen={isScanOpen}
-            onClose={() => setIsScanOpen(false)}
+            isOpen={scanSingleOpen}
+            onClose={() => setAddMode(null)}
             onDetected={raw => {
               const isbn13 = setIsbnFromRaw(raw)
               if (isbn13) void fillMetadataByIsbn(isbn13)
@@ -333,6 +469,43 @@ export function Inventory() {
           />
         </>
       )}
+
+      {/* Batch scan modal — adds books directly without opening the form */}
+      <IsbnScanModal
+        isOpen={scanBatchOpen}
+        onClose={() => { setAddMode(null); loadBooks() }}
+        mode="batch"
+        onDetected={raw => {
+          void (async () => {
+            const normalized = normalizeIsbn(raw)
+            if (!normalized.ok) return
+            const isbn13 = toIsbn13(normalized.value)
+            if (!isbn13) return
+            const id = crypto.randomUUID()
+            let title = isbn13
+            let author = '—'
+            let coverUrl: string | undefined
+            const res = await window.meta.lookupIsbn(isbn13)
+            if (res.ok) {
+              title = res.value.title ?? isbn13
+              author = res.value.author ?? '—'
+              if (res.value.coverUrl) {
+                coverUrl = await window.covers.saveCover(id, res.value.coverUrl)
+              }
+            }
+            const book: Book = {
+              id,
+              title,
+              author,
+              isbn: isbn13,
+              coverUrl,
+              status: 'unread',
+              addedAt: new Date().toISOString(),
+            }
+            await window.db.addBook(book)
+          })()
+        }}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {filteredBooks.map(book => {
@@ -434,7 +607,7 @@ export function Inventory() {
         })}
       </div>
 
-      {filteredBooks.length === 0 && !isAdding && (
+      {filteredBooks.length === 0 && !addMode && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           {books.length === 0
             ? 'No books in your library yet. Click "+" to get started!'
