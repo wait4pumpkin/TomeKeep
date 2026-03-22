@@ -35,9 +35,18 @@ export function Inventory() {
     e.preventDefault()
     if (!newBook.title || !newBook.author) return
 
+    const id = crypto.randomUUID()
+
+    // Download cover to local storage before saving the record
+    let coverUrl = newBook.coverUrl
+    if (coverUrl && !coverUrl.startsWith('app://')) {
+      coverUrl = await window.covers.saveCover(id, coverUrl)
+    }
+
     const bookToAdd = {
       ...newBook,
-      id: crypto.randomUUID(),
+      coverUrl,
+      id,
       addedAt: new Date().toISOString(),
     } as Book
 
@@ -226,13 +235,13 @@ export function Inventory() {
           const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
           return (
           <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow overflow-hidden flex flex-col">
-            {/* Cover image */}
-            <div className="relative w-full bg-gray-100 dark:bg-gray-700" style={{ paddingTop: '56.25%' }}>
+            {/* Cover image — 2:3 book proportion */}
+            <div className="relative w-full bg-gray-100 dark:bg-gray-700" style={{ paddingTop: '150%' }}>
               {book.coverUrl ? (
                 <img
                   src={book.coverUrl}
                   alt={book.title}
-                  className="absolute inset-0 w-full h-full object-contain"
+                  className="absolute inset-0 w-full h-full object-cover"
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-gray-300 dark:text-gray-600">

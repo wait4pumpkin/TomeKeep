@@ -53,3 +53,8 @@ contextBridge.exposeInMainWorld('stores', {
 contextBridge.exposeInMainWorld('app', {
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
 })
+
+contextBridge.exposeInMainWorld('covers', {
+  saveCover: (id: string, url: string) =>
+    ipcRenderer.invoke('covers:save-cover', { id, url }) as Promise<string>,
+})

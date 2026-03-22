@@ -36,4 +36,11 @@ interface Window {
   app: {
     openExternal: (url: string) => Promise<{ ok: true } | { ok: false; error: 'invalid_url' }>
   }
+  covers: {
+    /**
+     * Download a remote cover image and persist it to userData/covers/<id>.jpg.
+     * Returns an app:// URL for the saved file, or the original URL on failure.
+     */
+    saveCover: (id: string, url: string) => Promise<string>
+  }
 }

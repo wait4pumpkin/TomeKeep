@@ -13,7 +13,7 @@ interface Book {
   author: string
   isbn?: string
   publisher?: string   // from metadata fill (OpenLibrary / Douban); not inferred from ISBN
-  coverUrl?: string
+  coverUrl?: string    // app:// local path (new records) or remote URL (legacy records)
   status: 'unread' | 'reading' | 'read'
   addedAt: string      // ISO 8601
 }
@@ -27,7 +27,7 @@ interface WishlistItem {
   author: string
   isbn?: string
   publisher?: string   // from metadata fill (Douban); not inferred from ISBN
-  coverUrl?: string
+  coverUrl?: string    // app:// local path (new records) or remote URL (legacy records)
   priority: 'high' | 'medium' | 'low'
   addedAt: string      // ISO 8601
 }
@@ -95,6 +95,15 @@ interface WishlistItem {
   - purpose: system-level utilities
   - methods:
     - openExternal(url) -> { ok: true } | { ok: false, error: 'invalid_url' }
+
+- window.covers
+  - purpose: download and persist cover images to local storage
+  - methods:
+    - saveCover(id, url) -> string
+      - downloads the image at `url` to `userData/covers/<id>.jpg`
+      - returns `app://covers/<id>.jpg` on success
+      - returns original `url` unchanged if `url` is empty, already starts with `app://`, download fails, or times out (10 s)
+      - never throws; always resolves
 
 ### Client-side ISBN library (`src/lib/isbn.ts`)
 
@@ -167,4 +176,5 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | stores:get-status | renderer→main | checks login cookie presence |
 | stores:clear-cookies | renderer→main | clears cookies for a retailer |
 | app:open-external | renderer→main | opens URL in system browser |
+| covers:save-cover | renderer→main | downloads remote cover image to userData/covers/, returns app:// URL |
 

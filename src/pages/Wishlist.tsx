@@ -59,9 +59,18 @@ export function Wishlist() {
     e.preventDefault()
     if (!newItem.title || !newItem.author) return
 
+    const id = crypto.randomUUID()
+
+    // Download cover to local storage before saving the record
+    let coverUrl = newItem.coverUrl
+    if (coverUrl && !coverUrl.startsWith('app://')) {
+      coverUrl = await window.covers.saveCover(id, coverUrl)
+    }
+
     const itemToAdd = {
       ...newItem,
-      id: crypto.randomUUID(),
+      coverUrl,
+      id,
       addedAt: new Date().toISOString(),
     } as WishlistItem
 
