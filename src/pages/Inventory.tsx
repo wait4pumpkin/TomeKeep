@@ -409,11 +409,20 @@ export function Inventory() {
             const isbn13 = toIsbn13(normalized.value)
             if (!isbn13) return
             resetManualForm()
-            setNewBook(prev => ({ ...prev, isbn: isbn13, status: 'unread' }))
-            const res = await window.meta.lookupIsbn(isbn13)
-            if (res.ok) {
-              setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), isbn: isbn13 } as Partial<Book>))
+            // Try Douban first (better Chinese coverage), fall back to Open Library
+            const doubanRes = await window.meta.lookupDouban(`https://book.douban.com/isbn/${isbn13}`)
+            if (doubanRes.ok) {
+              setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, doubanRes.value), isbn: isbn13 } as Partial<Book>))
+              setClipStatus({ state: 'success', message: '已从豆瓣填充元信息。' })
+              setAddMode('manual')
+              return
+            }
+            const isbnRes = await window.meta.lookupIsbn(isbn13)
+            if (isbnRes.ok) {
+              setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, isbnRes.value), isbn: isbn13 } as Partial<Book>))
               setClipStatus({ state: 'success', message: '已从 ISBN 填充元信息。' })
+            } else {
+              setNewBook({ isbn: isbn13, status: 'unread' })
             }
             setAddMode('manual')
           })()
