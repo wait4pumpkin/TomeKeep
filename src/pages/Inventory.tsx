@@ -409,14 +409,19 @@ export function Inventory() {
             const isbn13 = toIsbn13(normalized.value)
             if (!isbn13) return
             resetManualForm()
-            // Try Douban first (better Chinese coverage), fall back to Open Library
-            const doubanRes = await window.meta.lookupDouban(`https://book.douban.com/isbn/${isbn13}`)
-            if (doubanRes.ok) {
-              setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, doubanRes.value), isbn: isbn13 } as Partial<Book>))
-              setClipStatus({ state: 'success', message: '已从豆瓣填充元信息。' })
-              setAddMode('manual')
-              return
+            // Search Douban by ISBN — take first hit and fetch full metadata
+            const searchRes = await window.meta.searchDouban(isbn13)
+            if (searchRes.ok && searchRes.value.length > 0) {
+              const hit = searchRes.value[0]
+              const doubanRes = await window.meta.lookupDouban(`https://book.douban.com/subject/${hit.subjectId}/`)
+              if (doubanRes.ok) {
+                setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, doubanRes.value), isbn: isbn13 } as Partial<Book>))
+                setClipStatus({ state: 'success', message: '已从豆瓣填充元信息。' })
+                setAddMode('manual')
+                return
+              }
             }
+            // Fallback to Open Library
             const isbnRes = await window.meta.lookupIsbn(isbn13)
             if (isbnRes.ok) {
               setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, isbnRes.value), isbn: isbn13 } as Partial<Book>))
