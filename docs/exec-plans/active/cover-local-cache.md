@@ -61,14 +61,14 @@ linked_specs:
 
 ## Task Breakdown
 - [x] 创建执行计划
-- [ ] electron/main.ts: 注册 app:// 协议
-- [ ] electron/covers.ts: save-cover IPC handler
-- [ ] electron/preload.ts: 暴露 window.covers
-- [ ] src/vite-env.d.ts: 类型声明
-- [ ] Inventory.tsx: saveCover + 卡片比例
-- [ ] Wishlist.tsx: saveCover
-- [ ] docs/generated/api-surface.md: 更新
-- [ ] 构建 + 测试 + 提交
+- [x] electron/main.ts: 注册 app:// 协议
+- [x] electron/covers.ts: save-cover IPC handler
+- [x] electron/preload.ts: 暴露 window.covers
+- [x] src/vite-env.d.ts: 类型声明
+- [x] Inventory.tsx: saveCover + 卡片比例
+- [x] Wishlist.tsx: saveCover
+- [x] docs/generated/api-surface.md: 更新
+- [x] 构建 + 测试 + 提交
 
 ## Validation Plan
 - `pnpm run build` 零错误
@@ -85,6 +85,10 @@ linked_specs:
 - 2026-03-22: 使用 Node 内置模块下载图片，避免引入新运行时依赖（符合 dependency-policy）
 - 2026-03-22: 使用 app:// 自定义协议而非 file:// 直接路径，满足 Electron CSP 要求
 - 2026-03-22: 下载失败时静默回退原始远程 URL，不中断入库流程
+- 2026-03-22: protocol.registerSchemesAsPrivileged 须在 app.whenReady() 之前调用，否则渲染进程拒绝加载 app:// 图片
+- 2026-03-22: 豆瓣 CDN 防盗链要求 Referer: https://book.douban.com/，下载请求须显式携带此头
+- 2026-03-22: 扫码豆瓣匹配成功后直接入库，不再显示确认表单；仅匹配失败时退回手动表单
 
 ## Status Updates
 - 2026-03-22: created and implementation started
+- 2026-03-22: completed — all tasks done, validated manually

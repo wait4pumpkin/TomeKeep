@@ -53,6 +53,12 @@ function createWindow() {
   }
 }
 
+// Must be called before app.whenReady() — registers app:// as a secure standard
+// scheme so the renderer can load images from it without CSP violations.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { secure: true, standard: true, supportFetchAPI: true } },
+])
+
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.

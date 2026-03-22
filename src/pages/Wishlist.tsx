@@ -216,7 +216,12 @@ export function Wishlist() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Wishlist</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+          Wishlist
+          {items.length > 0 && (
+            <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{items.length}</span>
+          )}
+        </h2>
         <div ref={menuRef} className="relative">
           <button
             onClick={() => setMenuOpen(o => !o)}
@@ -262,9 +267,11 @@ export function Wishlist() {
           fillState={fillState}
           clipStatus={clipStatus}
           onItemChange={(patch: Partial<WishlistItem>) => {
-            const next = { ...newItem, ...patch }
-            setNewItem(next)
-            triggerSearch(next.title ?? '', next.author ?? '')
+            setNewItem(prev => {
+              const next = { ...prev, ...patch }
+              triggerSearch(next.title ?? '', next.author ?? '')
+              return next
+            })
           }}
           onSelectHit={handleSelectHit}
           onSubmit={handleAdd}

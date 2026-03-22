@@ -133,28 +133,30 @@ export function Inventory() {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
   }
 
-  async function handleAddBook(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newBook.title || !newBook.author) return
-
-    const id = crypto.randomUUID()
-
-    let coverUrl = newBook.coverUrl
+  /** Save a book draft to db, downloading the cover if needed. */
+  async function commitBook(draft: Partial<Book>) {
+    if (!draft.title || !draft.author) return
+    const id = draft.id ?? crypto.randomUUID()
+    let coverUrl = draft.coverUrl
     if (coverUrl && !coverUrl.startsWith('app://')) {
       coverUrl = await window.covers.saveCover(id, coverUrl)
     }
-
     const bookToAdd = {
-      ...newBook,
+      ...draft,
       coverUrl,
       id,
-      addedAt: new Date().toISOString(),
+      addedAt: draft.addedAt ?? new Date().toISOString(),
     } as Book
-
     await window.db.addBook(bookToAdd)
+    loadBooks()
+  }
+
+  async function handleAddBook(e: React.FormEvent) {
+    e.preventDefault()
+    if (!newBook.title || !newBook.author) return
+    await commitBook(newBook)
     resetManualForm()
     setAddMode(null)
-    loadBooks()
   }
 
   async function handleDelete(id: string) {
@@ -387,9 +389,11 @@ export function Inventory() {
           fillState={fillState}
           clipStatus={clipStatus}
           onBookChange={(patch) => {
-            const next = { ...newBook, ...patch }
-            setNewBook(next)
-            triggerSearch(next.title ?? '', next.author ?? '')
+            setNewBook(prev => {
+              const next = { ...prev, ...patch }
+              triggerSearch(next.title ?? '', next.author ?? '')
+              return next
+            })
           }}
           onSelectHit={handleSelectHit}
           onSubmit={handleAddBook}
@@ -397,41 +401,35 @@ export function Inventory() {
         />
       )}
 
-      {/* Single scan modal — fills the manual form on detection */}
+      {/* Single scan modal — direct save on Douban hit, form only as fallback */}
       <IsbnScanModal
         isOpen={addMode === 'scan-single'}
         onClose={() => setAddMode(null)}
         mode="single"
         onDetected={raw => {
           void (async () => {
-            console.log('[scan-single] raw=%s', raw)
             const normalized = normalizeIsbn(raw)
-            console.log('[scan-single] normalized=%o', normalized)
             if (!normalized.ok) return
             const isbn13 = toIsbn13(normalized.value)
-            console.log('[scan-single] isbn13=%s', isbn13)
             if (!isbn13) return
-            resetManualForm()
-            // Search Douban by ISBN — take first hit and fetch full metadata
+
+            // Try Douban first — on success save directly, no form needed
             const searchRes = await window.meta.searchDouban(isbn13)
-            console.log('[scan-single] searchDouban result=%o', searchRes)
             if (searchRes.ok && searchRes.value.length > 0) {
               const hit = searchRes.value[0]
               const doubanRes = await window.meta.lookupDouban(`https://book.douban.com/subject/${hit.subjectId}/`)
-              console.log('[scan-single] lookupDouban result=%o', doubanRes)
               if (doubanRes.ok) {
-                setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, doubanRes.value), isbn: isbn13 } as Partial<Book>))
-                setClipStatus({ state: 'success', message: '已从豆瓣填充元信息。' })
-                setAddMode('manual')
+                setAddMode(null)
+                await commitBook({ ...doubanRes.value, isbn: isbn13, status: 'unread' })
                 return
               }
             }
-            // Fallback to Open Library
+
+            // Fallback: open manual form pre-filled with what we have
+            resetManualForm()
             const isbnRes = await window.meta.lookupIsbn(isbn13)
-            console.log('[scan-single] lookupIsbn result=%o', isbnRes)
             if (isbnRes.ok) {
               setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, isbnRes.value), isbn: isbn13 } as Partial<Book>))
-              setClipStatus({ state: 'success', message: '已从 ISBN 填充元信息。' })
             } else {
               setNewBook({ isbn: isbn13, status: 'unread' })
             }
@@ -451,30 +449,15 @@ export function Inventory() {
             if (!normalized.ok) return
             const isbn13 = toIsbn13(normalized.value)
             if (!isbn13) return
-            // Skip if this ISBN is already in the library
             if (books.some(b => b.isbn === isbn13)) return
-            const id = crypto.randomUUID()
-            let title = isbn13
-            let author = '—'
-            let coverUrl: string | undefined
             const res = await window.meta.lookupIsbn(isbn13)
-            if (res.ok) {
-              title = res.value.title ?? isbn13
-              author = res.value.author ?? '—'
-              if (res.value.coverUrl) {
-                coverUrl = await window.covers.saveCover(id, res.value.coverUrl)
-              }
-            }
-            const book: Book = {
-              id,
-              title,
-              author,
+            await commitBook({
+              title: res.ok ? (res.value.title ?? isbn13) : isbn13,
+              author: res.ok ? (res.value.author ?? '—') : '—',
               isbn: isbn13,
-              coverUrl,
+              coverUrl: res.ok ? res.value.coverUrl : undefined,
               status: 'unread',
-              addedAt: new Date().toISOString(),
-            }
-            await window.db.addBook(book)
+            })
           })()
         }}
       />
