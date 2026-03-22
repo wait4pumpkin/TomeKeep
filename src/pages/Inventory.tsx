@@ -228,9 +228,9 @@ export function Inventory() {
           const sem = book.isbn ? parseIsbnSemantics(book.isbn) : null
           const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
           return (
-            <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow overflow-hidden flex flex-row">
+            <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-row">
               {/* Cover */}
-              <div className="flex-shrink-0 w-20 bg-gray-100 dark:bg-gray-700 self-stretch flex items-center justify-center">
+              <div className="flex-shrink-0 w-20 bg-gray-100 dark:bg-gray-700 self-stretch flex items-center justify-center rounded-l-xl overflow-hidden">
                 {book.coverUrl ? (
                   <img src={book.coverUrl} alt={book.title} className="w-full h-full object-contain" />
                 ) : (
