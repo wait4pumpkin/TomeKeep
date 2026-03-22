@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Book } from '../../electron/db'
 import { AddFormCard } from '../components/AddFormCard'
 import { DoubanFillField } from '../components/DoubanFillField'
@@ -26,9 +26,7 @@ export function Inventory() {
     window.db.getBooks().then(data => {
       if (!cancelled) setBooks(data)
     })
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   async function handleAddBook(e: React.FormEvent) {
@@ -37,7 +35,6 @@ export function Inventory() {
 
     const id = crypto.randomUUID()
 
-    // Download cover to local storage before saving the record
     let coverUrl = newBook.coverUrl
     if (coverUrl && !coverUrl.startsWith('app://')) {
       coverUrl = await window.covers.saveCover(id, coverUrl)
@@ -70,7 +67,6 @@ export function Inventory() {
       book.status === 'unread'  ? 'reading' :
       book.status === 'reading' ? 'read'    : 'unread'
     const updated = { ...book, status: next }
-    // Optimistic update
     setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
     await window.db.updateBook(updated)
   }
@@ -87,7 +83,6 @@ export function Inventory() {
       setMetaStatus({ state: 'error', message })
       return
     }
-
     setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
     setMetaStatus({ state: 'success', message: '已填充元信息。' })
   }
@@ -99,23 +94,14 @@ export function Inventory() {
       setIsbnError(null)
       return null
     }
-
     const result = normalizeIsbn(raw)
     if (!result.ok) {
-      if (result.error === 'empty') {
-        setIsbnError(null)
-        return null
-      }
+      if (result.error === 'empty') { setIsbnError(null); return null }
       setIsbnError(result.error === 'invalid_checksum' ? 'ISBN 校验失败，请重试或手动输入。' : '未识别到有效的 ISBN。')
       return null
     }
-
     const isbn13 = toIsbn13(result.value)
-    if (!isbn13) {
-      setIsbnError('未识别到有效的 ISBN。')
-      return null
-    }
-
+    if (!isbn13) { setIsbnError('未识别到有效的 ISBN。'); return null }
     setNewBook(prev => ({ ...prev, isbn: isbn13 }))
     setIsbnError(null)
     return isbn13
@@ -176,9 +162,7 @@ export function Inventory() {
                     setIsbnError(null)
                     setMetaStatus({ state: 'idle' })
                   }}
-                  onBlur={e => {
-                    if (e.target.value) setIsbnFromRaw(e.target.value)
-                  }}
+                  onBlur={e => { if (e.target.value) setIsbnFromRaw(e.target.value) }}
                   className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                 />
                 <button
@@ -244,102 +228,97 @@ export function Inventory() {
           const sem = book.isbn ? parseIsbnSemantics(book.isbn) : null
           const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
           return (
-          <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow overflow-hidden flex flex-row">
-            {/* Cover — fixed width, natural height via object-contain */}
-            <div className="relative flex-shrink-0 w-20 bg-gray-100 dark:bg-gray-700 self-stretch flex items-center justify-center">
-              {book.coverUrl ? (
-                <img
-                  src={book.coverUrl}
-                  alt={book.title}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-                  </svg>
-                </div>
-              )}
-            </div>
+            <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow overflow-hidden flex flex-row">
+              {/* Cover */}
+              <div className="flex-shrink-0 w-20 bg-gray-100 dark:bg-gray-700 self-stretch flex items-center justify-center">
+                {book.coverUrl ? (
+                  <img src={book.coverUrl} alt={book.title} className="w-full h-full object-contain" />
+                ) : (
+                  <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                    </svg>
+                  </div>
+                )}
+              </div>
 
-            {/* Card body */}
-            <div className="p-3 flex flex-col flex-1 min-w-0">
-              {/* Title + status badge */}
-              <div className="flex items-start justify-between gap-2 mb-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = book.isbn
-                      ? `https://book.douban.com/isbn/${book.isbn}`
-                      : `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(book.title)}`
-                    void window.app.openExternal(url)
-                  }}
-                  className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors cursor-pointer"
-                  title="在豆瓣查看"
-                >
-                  {book.title}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleCycleStatus(book)}
-                  title={
+              {/* Card body */}
+              <div className="p-3 flex flex-col flex-1 min-w-0">
+                {/* Title + status badge */}
+                <div className="flex items-start justify-between gap-2 mb-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = book.isbn
+                        ? `https://book.douban.com/isbn/${book.isbn}`
+                        : `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(book.title)}`
+                      void window.app.openExternal(url)
+                    }}
+                    className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
+                  >
+                    {book.title}
+                  </button>
+                  <CardTip label={
                     book.status === 'read'    ? '已读 · 点击改为未读' :
                     book.status === 'reading' ? '阅读中 · 点击改为已读' :
                                                 '未读 · 点击改为阅读中'
-                  }
-                  className={`flex-shrink-0 p-0.5 rounded-full mt-0.5 transition-opacity hover:opacity-70 cursor-pointer ${
-                    book.status === 'read'    ? 'bg-green-100 text-green-700' :
-                    book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
-                                                'bg-gray-100 text-gray-500'
-                  }`}
-                >
-                  {book.status === 'read' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-                    </svg>
-                  )}
-                  {book.status === 'reading' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-                    </svg>
-                  )}
-                  {book.status !== 'read' && book.status !== 'reading' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-                    </svg>
-                  )}
-                </button>
-              </div>
+                  }>
+                    <button
+                      type="button"
+                      onClick={() => handleCycleStatus(book)}
+                      className={`flex-shrink-0 p-0.5 rounded-full mt-0.5 hover:opacity-70 transition-opacity ${
+                        book.status === 'read'    ? 'bg-green-100 text-green-700' :
+                        book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
+                                                    'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      {book.status === 'read' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+                        </svg>
+                      )}
+                      {book.status === 'reading' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                        </svg>
+                      )}
+                      {book.status !== 'read' && book.status !== 'reading' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                        </svg>
+                      )}
+                    </button>
+                  </CardTip>
+                </div>
 
-              <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{book.author}</p>
-              {(book.publisher || inferredPublisher) && (
-                <p className="text-xs text-gray-400 dark:text-gray-500 truncate" title={book.publisher ?? inferredPublisher ?? ''}>
-                  {book.publisher ?? <span className="italic">{inferredPublisher}</span>}
-                </p>
-              )}
-
-              {/* Spacer */}
-              <div className="flex-1" />
-
-              {/* Bottom row */}
-              <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50 dark:border-gray-700">
-                {sem && book.isbn ? (
-                  <IsbnSemanticBadge isbn={book.isbn} sem={sem} />
-                ) : (
-                  <span />
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{book.author}</p>
+                {(book.publisher || inferredPublisher) && (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 truncate" title={book.publisher ?? inferredPublisher ?? ''}>
+                    {book.publisher ?? <span className="italic">{inferredPublisher}</span>}
+                  </p>
                 )}
-                <button
-                  onClick={() => handleDelete(book.id)}
-                  title="删除"
-                  className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-                  </svg>
-                </button>
+
+                <div className="flex-1" />
+
+                {/* Bottom row */}
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50 dark:border-gray-700">
+                  {sem && book.isbn ? (
+                    <IsbnSemanticBadge isbn={book.isbn} sem={sem} />
+                  ) : (
+                    <span />
+                  )}
+                  <button
+                    onClick={() => handleDelete(book.id)}
+                    title="删除"
+                    className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
           )
         })}
       </div>
@@ -369,18 +348,43 @@ function IsbnSemanticBadge(props: { isbn: string; sem: { language: string; regio
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      title={copied ? '已复制！' : `点击复制 ISBN：${isbn}`}
-      className="text-xs text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors text-left leading-snug"
-    >
-      {copied ? (
-        <span className="text-blue-500">已复制 ✓</span>
-      ) : (
-        <span>{sem.language} · {sem.region}</span>
-      )}
-    </button>
+    <CardTip label={copied ? '已复制！' : `点击复制 ISBN：${isbn}`}>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="text-xs text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors text-left leading-snug"
+      >
+        {copied ? (
+          <span className="text-blue-500">已复制 ✓</span>
+        ) : (
+          <span>{sem.language} · {sem.region}</span>
+        )}
+      </button>
+    </CardTip>
   )
 }
 
+// ---------------------------------------------------------------------------
+// CardTip — instant custom tooltip, appears immediately on mouseenter.
+// ---------------------------------------------------------------------------
+
+function CardTip({ label, children }: { label: string; children: React.ReactNode }) {
+  const [visible, setVisible] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  return (
+    <div
+      ref={ref}
+      className="relative inline-flex"
+      onMouseEnter={() => setVisible(true)}
+      onMouseLeave={() => setVisible(false)}
+    >
+      {children}
+      {visible && (
+        <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded-md text-xs whitespace-nowrap z-50 bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 shadow-sm">
+          {label}
+        </span>
+      )}
+    </div>
+  )
+}
