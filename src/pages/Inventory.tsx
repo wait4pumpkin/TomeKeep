@@ -3,7 +3,7 @@ import type { Book } from '../../electron/db'
 import { AddFormCard } from '../components/AddFormCard'
 import { DoubanFillField } from '../components/DoubanFillField'
 import { IsbnScanModal } from '../components/IsbnScanModal'
-import { normalizeIsbn, toIsbn13 } from '../lib/isbn'
+import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from '../lib/isbn'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 
 export function Inventory() {
@@ -218,34 +218,95 @@ export function Inventory() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {books.map(book => (
-          <div key={book.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="font-semibold text-lg text-gray-900 line-clamp-1" title={book.title}>
-                {book.title}
-              </h3>
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                book.status === 'read' ? 'bg-green-100 text-green-800' :
-                book.status === 'reading' ? 'bg-yellow-100 text-yellow-800' :
-                'bg-gray-100 text-gray-800'
-              }`}>
-                {book.status}
+        {books.map(book => {
+          const sem = book.isbn ? parseIsbnSemantics(book.isbn) : null
+          const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
+          return (
+          <div key={book.id} className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow overflow-hidden flex flex-col">
+            {/* Cover image */}
+            <div className="relative w-full bg-gray-100" style={{ paddingTop: '56.25%' }}>
+              {book.coverUrl ? (
+                <img
+                  src={book.coverUrl}
+                  alt={book.title}
+                  className="absolute inset-0 w-full h-full object-contain"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-gray-300">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                  </svg>
+                </div>
+              )}
+              {/* Status icon badge overlaid on cover */}
+              <span className={`absolute top-2 right-2 p-1 rounded-full ${
+                book.status === 'read'    ? 'bg-green-100 text-green-700' :
+                book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
+                                            'bg-gray-100 text-gray-500'
+              }`} title={
+                book.status === 'read' ? '已读' :
+                book.status === 'reading' ? '阅读中' : '未读'
+              }>
+                {book.status === 'read' && (
+                  /* Checkmark-book: bookmark with check */
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+                  </svg>
+                )}
+                {book.status === 'reading' && (
+                  /* Open book */
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                  </svg>
+                )}
+                {book.status !== 'read' && book.status !== 'reading' && (
+                  /* Closed book / unread */
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                  </svg>
+                )}
               </span>
             </div>
-            <p className="text-gray-600 mb-4">{book.author}</p>
-            <div className="flex justify-between items-center text-sm text-gray-500">
-              <span>{book.isbn || 'No ISBN'}</span>
-              <button
-                onClick={() => handleDelete(book.id)}
-                className="text-red-500 hover:text-red-700"
-              >
-                Delete
-              </button>
+
+            {/* Card body */}
+            <div className="p-4 flex flex-col flex-1">
+              <h3 className="font-semibold text-base text-gray-900 line-clamp-2 leading-snug mb-1" title={book.title}>
+                {book.title}
+              </h3>
+
+              <p className="text-sm text-gray-600 mb-1">{book.author}</p>
+              {(book.publisher || inferredPublisher) && (
+                <p className="text-xs text-gray-400 mb-1 line-clamp-1" title={book.publisher ?? inferredPublisher ?? ''}>
+                  {book.publisher ?? <span className="italic">{inferredPublisher}</span>}
+                </p>
+              )}
+
+              {/* Spacer to push footer to bottom */}
+              <div className="flex-1" />
+
+              {/* Bottom row: ISBN semantics (clickable to copy) + delete button */}
+              <div className="flex items-end justify-between mt-2 pt-2 border-t border-gray-50">
+                {sem && book.isbn ? (
+                  <IsbnSemanticBadge isbn={book.isbn} sem={sem} />
+                ) : (
+                  <span />
+                )}
+                <button
+                  onClick={() => handleDelete(book.id)}
+                  title="删除"
+                  className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
-      
+
       {books.length === 0 && !isAdding && (
         <div className="text-center py-12 text-gray-500">
           No books in your library yet. Click "Add Book" to get started!
@@ -254,3 +315,35 @@ export function Inventory() {
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// IsbnSemanticBadge — shows language · region, click to copy ISBN to clipboard
+// ---------------------------------------------------------------------------
+
+function IsbnSemanticBadge(props: { isbn: string; sem: { language: string; region: string } }) {
+  const { isbn, sem } = props
+  const [copied, setCopied] = useState<boolean>(false)
+
+  function handleCopy() {
+    void navigator.clipboard.writeText(isbn).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={copied ? '已复制！' : `点击复制 ISBN：${isbn}`}
+      className="text-xs text-gray-400 hover:text-blue-500 transition-colors text-left leading-snug"
+    >
+      {copied ? (
+        <span className="text-blue-500">已复制 ✓</span>
+      ) : (
+        <span>{sem.language} · {sem.region}</span>
+      )}
+    </button>
+  )
+}
+

@@ -14,21 +14,29 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 ## 2. User Scenarios
 
 ### 2.1 Inventory Management
-- **Add Book**: User manually enters ISBN or scans a barcode to fill ISBN when adding a book. The system attempts to fetch and fill metadata (title, author, cover, publisher) after an explicit user action.
+- **Add Book**: User manually enters ISBN or scans a barcode to fill ISBN when adding a book. The system attempts to fetch and fill metadata (title, author, cover, publisher) after an explicit user action (ISBN Fill or Douban Fill).
+- **ISBN Barcode Scan**: User opens the scan modal; the camera preview displays a live bounding-box overlay highlighting detected barcode candidates. On successful decode, a short audio beep plays and the modal closes automatically.
+- **ISBN Semantics**: Each book card displays the language/region derived from the ISBN registration group (e.g. "中文 · 中国大陆"). If the ISBN registrant prefix matches a known publisher, the publisher name is shown in italics as an inferred value (not persisted). Tapping the semantic label copies the raw ISBN to the clipboard.
+- **Reading Status**: Reading status is indicated by a colour-coded icon badge overlaid on the book cover (green checkmark = Read, yellow open-book = Reading, grey closed-book = Unread).
+- **Delete**: Delete button is located at the bottom-right of each card.
 - **Search & Filter**: User searches for a book by title or author to check if they already own it.
-- **Edit/Delete**: User updates reading status (e.g., "Unread", "Reading", "Read") or removes a book.
 
 ### 2.2 Wishlist & Purchasing
-- **Add to Wishlist**: User adds a book to the wishlist. User can optionally paste an ISBN or a Douban book detail URL to fill metadata.
-- **Compare Prices**: The system queries configured online retailers (e.g., JD, DangDang, Amazon) and displays current prices.
-- **View Best Deal**: User sees the lowest price highlighted and clicks a link to purchase.
+- **Add to Wishlist**: User adds a book to the wishlist. User can optionally paste an ISBN or a Douban book detail URL to fill metadata (title, author, cover, publisher).
+- **ISBN Semantics**: Same language/region label and click-to-copy behaviour as inventory cards.
+- **Compare Prices**: The system queries configured online retailers (e.g., JD, DangDang, BooksChina) and displays current prices.
+- **View Best Deal**: User sees prices per retailer and clicks a link to purchase.
+- **Delete**: Remove button is located at the bottom-right of each wishlist row.
 
 ## 3. Functional Requirements
 
 ### 3.1 Inventory Module
-- **FR-INV-01**: System SHALL store book details: Title, Author, ISBN, Publisher, Publish Date, Cover Image, Status (Unread, Reading, Read), Location (Shelf/Box ID), and Rating.
+- **FR-INV-01**: System SHALL store book details: Title, Author, ISBN, Publisher (from metadata fill only; not inferred from ISBN prefix), Cover Image, Status (Unread, Reading, Read), and addedAt timestamp.
 - **FR-INV-02**: System SHALL allow CRUD operations on book records.
 - **FR-INV-03**: System SHALL support keyword search across Title, Author, and ISBN.
+- **FR-INV-04**: System SHALL decode the ISBN registration group to display language/region semantics inline on each card, without a network request.
+- **FR-INV-05**: System SHALL play an audio beep and display a bounding-box overlay when a barcode is successfully detected during ISBN scanning.
+- **FR-INV-06**: Clicking the ISBN semantic label SHALL copy the raw ISBN-13 value to the clipboard.
 
 ### 3.2 Wishlist Module
 - **FR-WISH-01**: System SHALL maintain a list of books to purchase.

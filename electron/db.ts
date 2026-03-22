@@ -19,6 +19,8 @@ export interface WishlistItem {
   title: string
   author: string
   isbn?: string
+  publisher?: string
+  coverUrl?: string
   priority: 'high' | 'medium' | 'low'
   addedAt: string
 }

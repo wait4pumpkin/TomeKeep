@@ -3,6 +3,7 @@ import type { PriceCacheEntry, PriceChannel, PriceQuote, WishlistItem } from '..
 import type { CaptureChannel, PricingInput } from '../../electron/pricing'
 import { AddFormCard } from '../components/AddFormCard'
 import { DoubanFillField } from '../components/DoubanFillField'
+import { parseIsbnSemantics as parseIsbnSem, parseIsbnPublisher } from '../lib/isbn'
 
 const channelOrder: PriceChannel[] = ['jd', 'bookschina', 'dangdang']
 
@@ -169,6 +170,8 @@ export function Wishlist() {
                 isbn: prev.isbn?.trim() ? prev.isbn : meta.isbn13,
                 title: prev.title?.trim() ? prev.title : meta.title ?? prev.title,
                 author: prev.author?.trim() ? prev.author : meta.author ?? prev.author,
+                publisher: prev.publisher?.trim() ? prev.publisher : meta.publisher ?? prev.publisher,
+                coverUrl: prev.coverUrl?.trim() ? prev.coverUrl : meta.coverUrl ?? prev.coverUrl,
               }))
             }}
           />
@@ -176,15 +179,30 @@ export function Wishlist() {
       )}
 
       <div className="space-y-4">
-        {items.map(item => (
+        {items.map(item => {
+          const sem = item.isbn ? parseIsbnSem(item.isbn) : null
+          const inferredPublisher = item.isbn && !item.publisher ? parseIsbnPublisher(item.isbn) : null
+          return (
           <div
             key={item.id}
-            className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-start justify-between hover:shadow-md transition-shadow"
+            className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-stretch justify-between hover:shadow-md transition-shadow"
           >
-            <div className="flex-1">
+            {/* Cover thumbnail */}
+            <div className="flex-shrink-0 w-12 h-16 bg-gray-100 rounded overflow-hidden mr-3 flex items-center justify-center text-gray-300 self-start mt-0.5">
+              {item.coverUrl ? (
+                <img src={item.coverUrl} alt={item.title} className="w-full h-full object-cover" />
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+              )}
+            </div>
+
+            {/* Text info */}
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 mb-1">
-                <h3 className="font-semibold text-lg text-gray-900">{item.title}</h3>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                <h3 className="font-semibold text-lg text-gray-900 truncate" title={item.title}>{item.title}</h3>
+                <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
                   item.priority === 'high' ? 'bg-red-100 text-red-800' :
                   item.priority === 'medium' ? 'bg-blue-100 text-blue-800' :
                   'bg-gray-100 text-gray-800'
@@ -192,11 +210,19 @@ export function Wishlist() {
                   {item.priority}
                 </span>
               </div>
-              <p className="text-gray-600">{item.author}</p>
-              <p className="text-sm text-gray-400 font-mono mt-1">{item.isbn}</p>
+              <p className="text-gray-600 text-sm">{item.author}</p>
+              {(item.publisher || inferredPublisher) && (
+                <p className="text-xs text-gray-400 mt-0.5 truncate" title={item.publisher ?? inferredPublisher ?? ''}>
+                  {item.publisher ?? <span className="italic">{inferredPublisher}</span>}
+                </p>
+              )}
+              {sem && item.isbn && (
+                <WishlistIsbnBadge isbn={item.isbn} sem={sem} />
+              )}
             </div>
 
-            <div className="flex items-start gap-4">
+            {/* Right panel: price + delete at bottom-right */}
+            <div className="flex flex-col justify-between items-end gap-2 ml-4 flex-shrink-0">
               <PricePanel
                 item={item}
                 entry={getEntryForItem(priceCache, item)}
@@ -205,13 +231,17 @@ export function Wishlist() {
               />
               <button
                 onClick={() => handleDelete(item.id)}
-                className="text-red-500 hover:text-red-700"
+                title="移除"
+                className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
               >
-                Remove
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                </svg>
               </button>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {items.length === 0 && !isAdding && (
@@ -423,4 +453,35 @@ function buildPricingInputsForItems(items: WishlistItem[]): PricingInput[] {
     out.push(input)
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// WishlistIsbnBadge — shows language · region, click to copy ISBN to clipboard
+// ---------------------------------------------------------------------------
+
+function WishlistIsbnBadge(props: { isbn: string; sem: { language: string; region: string } }) {
+  const { isbn, sem } = props
+  const [copied, setCopied] = useState<boolean>(false)
+
+  function handleCopy() {
+    void navigator.clipboard.writeText(isbn).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={copied ? '已复制！' : `点击复制 ISBN：${isbn}`}
+      className="text-xs text-gray-400 hover:text-blue-500 transition-colors text-left mt-1 leading-snug"
+    >
+      {copied ? (
+        <span className="text-blue-500">已复制 ✓</span>
+      ) : (
+        <span>{sem.language} · {sem.region}</span>
+      )}
+    </button>
+  )
 }

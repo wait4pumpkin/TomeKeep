@@ -3,6 +3,36 @@
 > This file is generated or maintained from code and should reflect current public API behavior.
 
 ## Endpoints / Interfaces
+### Data Schemas
+
+#### Book
+```ts
+interface Book {
+  id: string
+  title: string
+  author: string
+  isbn?: string
+  publisher?: string   // from metadata fill (OpenLibrary / Douban); not inferred from ISBN
+  coverUrl?: string
+  status: 'unread' | 'reading' | 'read'
+  addedAt: string      // ISO 8601
+}
+```
+
+#### WishlistItem
+```ts
+interface WishlistItem {
+  id: string
+  title: string
+  author: string
+  isbn?: string
+  publisher?: string   // from metadata fill (Douban); not inferred from ISBN
+  coverUrl?: string
+  priority: 'high' | 'medium' | 'low'
+  addedAt: string      // ISO 8601
+}
+```
+
 ### Renderer Global APIs (preload)
 - window.db
   - purpose: local persistence for inventory and wishlist
@@ -65,6 +95,29 @@
   - purpose: system-level utilities
   - methods:
     - openExternal(url) -> { ok: true } | { ok: false, error: 'invalid_url' }
+
+### Client-side ISBN library (`src/lib/isbn.ts`)
+
+Pure functions exported for renderer use. No IPC involved.
+
+| Function | Signature | Description |
+|---|---|---|
+| `normalizeIsbn` | `(raw: string) -> NormalizeIsbnResult` | Parse and validate raw ISBN-10 or ISBN-13 string |
+| `toIsbn13` | `(value: NormalizedIsbn) -> string \| null` | Convert NormalizedIsbn to ISBN-13 digits |
+| `isValidIsbn13` | `(isbn13: string) -> boolean` | Validate ISBN-13 checksum |
+| `isValidIsbn10` | `(isbn10: string) -> boolean` | Validate ISBN-10 checksum |
+| `convertIsbn10ToIsbn13` | `(isbn10: string) -> string \| null` | Convert ISBN-10 to ISBN-13 |
+| `parseIsbnSemantics` | `(raw: string) -> IsbnSemantics \| null` | Resolve language/region from ISBN registration group (built-in table, ~85% coverage) |
+| `parseIsbnPublisher` | `(raw: string) -> string \| null` | Resolve publisher name from ISBN registrant prefix (built-in table, covers major CN publishers; returns null if unknown) |
+
+**`IsbnSemantics`**:
+```ts
+type IsbnSemantics = { region: string; language: string }
+```
+
+**Coverage of `parseIsbnSemantics`**: 978-0/1 (English), 978-2 (French), 978-3 (German), 978-4 (Japanese), 978-5 (Russian), 978-7 (China mainland), 978-957/986 (Taiwan), 978-988 (Hong Kong), 978-99937 (Macau), major 978 two- and three-digit groups, 979-8/10/11/12 block.
+
+**Coverage of `parseIsbnPublisher`**: ~100 well-known publishers within China mainland (978-7). Other groups always return null. Full coverage is not achievable without the ISBN Agency's non-public publisher registry.
 
 ### IPC Channels (main process)
 | Channel | Direction | Handler |
