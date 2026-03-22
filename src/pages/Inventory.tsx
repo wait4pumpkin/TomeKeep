@@ -229,75 +229,74 @@ export function Inventory() {
         </>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {books.map(book => {
           const sem = book.isbn ? parseIsbnSemantics(book.isbn) : null
           const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
           return (
-          <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow overflow-hidden flex flex-col">
-            {/* Cover image — 2:3 book proportion */}
-            <div className="relative w-full bg-gray-100 dark:bg-gray-700" style={{ paddingTop: '150%' }}>
+          <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow overflow-hidden flex flex-row">
+            {/* Cover — fixed width, natural height via object-contain */}
+            <div className="relative flex-shrink-0 w-20 bg-gray-100 dark:bg-gray-700 self-stretch flex items-center justify-center">
               {book.coverUrl ? (
                 <img
                   src={book.coverUrl}
                   alt={book.title}
-                  className="absolute inset-0 w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                 />
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-300 dark:text-gray-600">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
                   </svg>
                 </div>
               )}
-              {/* Status icon badge overlaid on cover */}
-              <span className={`absolute top-2 right-2 p-1 rounded-full ${
-                book.status === 'read'    ? 'bg-green-100 text-green-700' :
-                book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
-                                            'bg-gray-100 text-gray-500'
-              }`} title={
-                book.status === 'read' ? '已读' :
-                book.status === 'reading' ? '阅读中' : '未读'
-              }>
-                {book.status === 'read' && (
-                  /* Checkmark-book: bookmark with check */
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-                  </svg>
-                )}
-                {book.status === 'reading' && (
-                  /* Open book */
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-                  </svg>
-                )}
-                {book.status !== 'read' && book.status !== 'reading' && (
-                  /* Closed book / unread */
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-                  </svg>
-                )}
-              </span>
             </div>
 
             {/* Card body */}
-            <div className="p-4 flex flex-col flex-1">
-              <h3 className="font-semibold text-base text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug mb-1" title={book.title}>
-                {book.title}
-              </h3>
+            <div className="p-3 flex flex-col flex-1 min-w-0">
+              {/* Title + status badge */}
+              <div className="flex items-start justify-between gap-2 mb-0.5">
+                <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug" title={book.title}>
+                  {book.title}
+                </h3>
+                <span className={`flex-shrink-0 p-0.5 rounded-full mt-0.5 ${
+                  book.status === 'read'    ? 'bg-green-100 text-green-700' :
+                  book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
+                                              'bg-gray-100 text-gray-500'
+                }`} title={
+                  book.status === 'read' ? '已读' :
+                  book.status === 'reading' ? '阅读中' : '未读'
+                }>
+                  {book.status === 'read' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+                    </svg>
+                  )}
+                  {book.status === 'reading' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                    </svg>
+                  )}
+                  {book.status !== 'read' && book.status !== 'reading' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                    </svg>
+                  )}
+                </span>
+              </div>
 
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">{book.author}</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{book.author}</p>
               {(book.publisher || inferredPublisher) && (
-                <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 line-clamp-1" title={book.publisher ?? inferredPublisher ?? ''}>
+                <p className="text-xs text-gray-400 dark:text-gray-500 truncate" title={book.publisher ?? inferredPublisher ?? ''}>
                   {book.publisher ?? <span className="italic">{inferredPublisher}</span>}
                 </p>
               )}
 
-              {/* Spacer to push footer to bottom */}
+              {/* Spacer */}
               <div className="flex-1" />
 
-              {/* Bottom row: ISBN semantics (clickable to copy) + delete button */}
-              <div className="flex items-end justify-between mt-2 pt-2 border-t border-gray-50 dark:border-gray-700">
+              {/* Bottom row */}
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50 dark:border-gray-700">
                 {sem && book.isbn ? (
                   <IsbnSemanticBadge isbn={book.isbn} sem={sem} />
                 ) : (
