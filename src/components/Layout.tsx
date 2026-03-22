@@ -62,7 +62,7 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
   return (
     <div className="relative group flex items-center justify-center">
       {children}
-      <span className="pointer-events-none absolute left-full ml-2 px-2 py-1 rounded-md text-xs whitespace-nowrap z-50 bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+      <span className="pointer-events-none absolute left-full ml-2 px-2 py-1 rounded-md text-xs whitespace-nowrap z-50 bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 opacity-0 group-hover:opacity-100 transition-opacity duration-100 delay-0">
         {label}
       </span>
     </div>

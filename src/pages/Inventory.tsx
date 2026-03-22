@@ -266,9 +266,19 @@ export function Inventory() {
             <div className="p-3 flex flex-col flex-1 min-w-0">
               {/* Title + status badge */}
               <div className="flex items-start justify-between gap-2 mb-0.5">
-                <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug" title={book.title}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = book.isbn
+                      ? `https://book.douban.com/isbn/${book.isbn}`
+                      : `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(book.title)}`
+                    void window.app.openExternal(url)
+                  }}
+                  className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors cursor-pointer"
+                  title="在豆瓣查看"
+                >
                   {book.title}
-                </h3>
+                </button>
                 <button
                   type="button"
                   onClick={() => handleCycleStatus(book)}
