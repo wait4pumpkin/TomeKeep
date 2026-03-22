@@ -261,11 +261,13 @@ function WishlistCard(props: {
             <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
               {item.title}
             </span>
-            <span className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${
-              item.priority === 'high'   ? 'bg-red-400' :
-              item.priority === 'medium' ? 'bg-blue-400' :
-                                          'bg-gray-300 dark:bg-gray-500'
-            }`} title={item.priority === 'high' ? '高优先级' : item.priority === 'medium' ? '中优先级' : '低优先级'} />
+            <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium leading-none ${
+              item.priority === 'high'   ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400' :
+              item.priority === 'medium' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400' :
+                                          'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+            }`}>
+              {item.priority === 'high' ? '高' : item.priority === 'medium' ? '中' : '低'}
+            </span>
           </div>
 
           <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{item.author}</p>
