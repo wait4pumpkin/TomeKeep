@@ -219,7 +219,12 @@ export function Inventory() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">My Library</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+          My Library
+          {books.length > 0 && (
+            <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{books.length}</span>
+          )}
+        </h2>
         <div ref={menuRef} className="relative">
           <button
             onClick={() => setMenuOpen(o => !o)}
@@ -392,6 +397,29 @@ export function Inventory() {
         />
       )}
 
+      {/* Single scan modal — fills the manual form on detection */}
+      <IsbnScanModal
+        isOpen={addMode === 'scan-single'}
+        onClose={() => setAddMode(null)}
+        mode="single"
+        onDetected={raw => {
+          void (async () => {
+            const normalized = normalizeIsbn(raw)
+            if (!normalized.ok) return
+            const isbn13 = toIsbn13(normalized.value)
+            if (!isbn13) return
+            resetManualForm()
+            setNewBook(prev => ({ ...prev, isbn: isbn13, status: 'unread' }))
+            const res = await window.meta.lookupIsbn(isbn13)
+            if (res.ok) {
+              setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), isbn: isbn13 } as Partial<Book>))
+              setClipStatus({ state: 'success', message: '已从 ISBN 填充元信息。' })
+            }
+            setAddMode('manual')
+          })()
+        }}
+      />
+
       {/* Batch scan modal — adds books directly without opening the form */}
       <IsbnScanModal
         isOpen={scanBatchOpen}
@@ -403,6 +431,8 @@ export function Inventory() {
             if (!normalized.ok) return
             const isbn13 = toIsbn13(normalized.value)
             if (!isbn13) return
+            // Skip if this ISBN is already in the library
+            if (books.some(b => b.isbn === isbn13)) return
             const id = crypto.randomUUID()
             let title = isbn13
             let author = '—'
@@ -569,7 +599,7 @@ function ManualAddForm({ book, searchHits, searchState, fillState, clipStatus, o
   const metaFilled = !!(book.coverUrl || book.isbn || book.publisher)
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-3">
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-3 max-w-xs">
       {/* Clipboard status banner */}
       {clipStatus.state !== 'idle' && (
         <p className={`text-xs mb-2 px-0.5 ${clipStatus.state === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
