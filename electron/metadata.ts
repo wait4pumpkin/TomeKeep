@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { extractDoubanSubjectId, parseDoubanSubjectHtml } from '../src/lib/douban'
+import { extractDoubanSubjectId, parseDoubanSubjectHtml, parseDoubanSearchHtml, type DoubanSearchHit } from '../src/lib/douban'
 import { parseOpenLibraryBooksApiResponse, type BookMetadata } from '../src/lib/openLibrary'
 
 type LookupIsbnResult =
@@ -10,12 +10,7 @@ type LookupDoubanResult =
   | { ok: true; value: BookMetadata }
   | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
 
-export type DoubanSearchHit = {
-  subjectId: string
-  title: string
-  author?: string
-  coverUrl?: string
-}
+export type { DoubanSearchHit }
 
 type SearchDoubanResult =
   | { ok: true; value: DoubanSearchHit[] }
@@ -25,6 +20,7 @@ export function setupMetadata() {
   ipcMain.handle('meta:search-douban', async (_event, query: string): Promise<SearchDoubanResult> => {
     if (!query || typeof query !== 'string') return { ok: true, value: [] }
     const url = `https://www.douban.com/search?cat=1001&q=${encodeURIComponent(query.trim())}`
+    console.log('[meta:search-douban] query=%s url=%s', query, url)
     try {
       const res = await fetchWithTimeout(url, 8000, {
         headers: {
@@ -34,11 +30,14 @@ export function setupMetadata() {
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         },
       })
+      console.log('[meta:search-douban] http=%d', res.status)
       if (!res.ok) return { ok: false, error: 'network' }
       const html = await res.text()
       const hits = parseDoubanSearchHtml(html)
+      console.log('[meta:search-douban] hits=%d %o', hits.length, hits)
       return { ok: true, value: hits }
     } catch (e) {
+      console.error('[meta:search-douban] error', e)
       const name = e instanceof DOMException ? e.name : ''
       if (name === 'AbortError') return { ok: false, error: 'timeout' }
       return { ok: false, error: 'network' }
@@ -68,9 +67,11 @@ export function setupMetadata() {
     if (typeof input !== 'string') return { ok: false, error: 'invalid_url' }
 
     const subject = extractDoubanSubjectId(input)
+    console.log('[meta:lookup-douban] input=%s subjectId=%o', input, subject)
     if (!subject.ok) return { ok: false, error: 'invalid_url' }
 
     const url = `https://book.douban.com/subject/${subject.value}/`
+    console.log('[meta:lookup-douban] fetching %s', url)
 
     try {
       const res = await fetchWithTimeout(url, 8000, {
@@ -87,9 +88,11 @@ export function setupMetadata() {
 
       const html = await res.text()
       const parsed = parseDoubanSubjectHtml(html)
+      console.log('[meta:lookup-douban] http=%d parsed=%o', res.status, parsed)
       if (!parsed.ok) return parsed.error === 'not_found' ? { ok: false, error: 'not_found' } : { ok: false, error: 'bad_response' }
       return parsed
     } catch (e) {
+      console.error('[meta:lookup-douban] error', e)
       const name = e instanceof DOMException ? e.name : ''
       if (name === 'AbortError') return { ok: false, error: 'timeout' }
       return { ok: false, error: 'network' }
@@ -119,53 +122,5 @@ async function fetchWithTimeout(url: string, timeoutMs: number, init?: RequestIn
 
 /**
  * Parse Douban search results page for book hits.
- * Extracts subject ID, title, author, and cover thumbnail from each result item.
+ * Moved to src/lib/douban.ts for testability — imported above.
  */
-function parseDoubanSearchHtml(html: string): DoubanSearchHit[] {
-  const hits: DoubanSearchHit[] = []
-
-  // Each result is in a <div class="result"> block
-  const resultRe = /<div[^>]+class=["'][^"']*\bresult\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi
-  let block: RegExpExecArray | null
-
-  // eslint-disable-next-line no-cond-assign
-  while ((block = resultRe.exec(html)) !== null && hits.length < 8) {
-    const chunk = block[1]
-
-    // Subject link: href="/subject/1234567/"
-    const linkM = chunk.match(/href=["']https?:\/\/book\.douban\.com\/subject\/(\d+)\/?["']/)
-    if (!linkM) continue
-    const subjectId = linkM[1]
-
-    // Title: inside <div class="title"> ... <a ...>TITLE</a>
-    const titleM = chunk.match(/<div[^>]+class=["'][^"']*\btitle\b[^"']*["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/)
-    const title = titleM ? titleM[1].trim() : null
-    if (!title) continue
-
-    // Author: first <span class="subject-cast"> — "作者 / ..."
-    const castM = chunk.match(/<span[^>]+class=["']subject-cast["'][^>]*>([^<]+)<\/span>/)
-    const cast = castM ? castM[1].trim() : undefined
-    // cast format: "作者 / 出版社 / 年份" — take the first segment before " / "
-    const author = cast ? cast.split('/')[0].trim() || undefined : undefined
-
-    // Cover thumbnail
-    const imgM = chunk.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/)
-    const coverUrl = imgM ? imgM[1].trim() : undefined
-
-    hits.push({ subjectId, title: decodeHtmlEntitiesSimple(title), author: author ? decodeHtmlEntitiesSimple(author) : undefined, coverUrl })
-  }
-
-  return hits
-}
-
-function decodeHtmlEntitiesSimple(input: string): string {
-  return input
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim()
-}

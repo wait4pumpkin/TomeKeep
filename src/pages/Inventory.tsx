@@ -404,16 +404,21 @@ export function Inventory() {
         mode="single"
         onDetected={raw => {
           void (async () => {
+            console.log('[scan-single] raw=%s', raw)
             const normalized = normalizeIsbn(raw)
+            console.log('[scan-single] normalized=%o', normalized)
             if (!normalized.ok) return
             const isbn13 = toIsbn13(normalized.value)
+            console.log('[scan-single] isbn13=%s', isbn13)
             if (!isbn13) return
             resetManualForm()
             // Search Douban by ISBN — take first hit and fetch full metadata
             const searchRes = await window.meta.searchDouban(isbn13)
+            console.log('[scan-single] searchDouban result=%o', searchRes)
             if (searchRes.ok && searchRes.value.length > 0) {
               const hit = searchRes.value[0]
               const doubanRes = await window.meta.lookupDouban(`https://book.douban.com/subject/${hit.subjectId}/`)
+              console.log('[scan-single] lookupDouban result=%o', doubanRes)
               if (doubanRes.ok) {
                 setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, doubanRes.value), isbn: isbn13 } as Partial<Book>))
                 setClipStatus({ state: 'success', message: '已从豆瓣填充元信息。' })
@@ -423,6 +428,7 @@ export function Inventory() {
             }
             // Fallback to Open Library
             const isbnRes = await window.meta.lookupIsbn(isbn13)
+            console.log('[scan-single] lookupIsbn result=%o', isbnRes)
             if (isbnRes.ok) {
               setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, isbnRes.value), isbn: isbn13 } as Partial<Book>))
               setClipStatus({ state: 'success', message: '已从 ISBN 填充元信息。' })

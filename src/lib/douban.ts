@@ -9,6 +9,13 @@ export type DoubanParseResult =
   | { ok: true; value: BookMetadata }
   | { ok: false; error: 'not_found' | 'bad_response' }
 
+export type DoubanSearchHit = {
+  subjectId: string
+  title: string
+  author?: string
+  coverUrl?: string
+}
+
 export function extractDoubanSubjectId(input: string): DoubanSubjectIdResult {
   const raw = input.trim()
   if (!raw) return { ok: false, error: 'invalid_url' }
@@ -135,4 +142,46 @@ function normalizeTitle(input: string): string {
 
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Parse Douban search results page HTML into a list of book hits.
+ * Handles the redirect-URL link format and nested title/h3 structure
+ * that Douban's actual search pages use.
+ */
+export function parseDoubanSearchHtml(html: string): DoubanSearchHit[] {
+  const hits: DoubanSearchHit[] = []
+
+  // Split on <div class="result"> boundaries — each chunk is one result block
+  const parts = html.split(/<div[^>]+class=["'][^"']*\bresult\b[^"']*["'][^>]*>/)
+  // parts[0] is everything before the first result; parts[1..] are result blocks
+  for (let i = 1; i < parts.length && hits.length < 8; i++) {
+    const chunk = parts[i]
+
+    // Subject ID from onclick: sid: 26987895
+    // Also accept direct book.douban.com/subject/<id>/ links as fallback
+    const sidM = chunk.match(/\bsid[：:\s]+(\d+)/)
+    const linkM = chunk.match(/book\.douban\.com\/subject\/(\d+)/)
+    const subjectId = sidM?.[1] ?? linkM?.[1] ?? null
+    if (!subjectId) continue
+
+    // Title: inside <div class="title"> ... <a ...>TITLE</a>
+    // Actual structure: <div class="title"><h3><span>...</span><a ...>TITLE</a></h3>...
+    const titleM = chunk.match(/<div[^>]+class=["'][^"']*\btitle\b[^"']*["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/)
+    const title = titleM ? decodeHtmlEntities(titleM[1].trim()) : null
+    if (!title) continue
+
+    // Author/cast: <span class="subject-cast">作者 / 出版社 / 年份</span>
+    const castM = chunk.match(/<span[^>]+class=["']subject-cast["'][^>]*>([^<]+)<\/span>/)
+    const cast = castM ? castM[1].trim() : undefined
+    const author = cast ? decodeHtmlEntities(cast.split('/')[0].trim()) || undefined : undefined
+
+    // Cover thumbnail
+    const imgM = chunk.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/)
+    const coverUrl = imgM ? imgM[1].trim() : undefined
+
+    hits.push({ subjectId, title, author, coverUrl })
+  }
+
+  return hits
 }
