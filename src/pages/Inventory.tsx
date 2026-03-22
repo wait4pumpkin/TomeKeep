@@ -65,6 +65,16 @@ export function Inventory() {
     }
   }
 
+  async function handleCycleStatus(book: Book) {
+    const next: Book['status'] =
+      book.status === 'unread'  ? 'reading' :
+      book.status === 'reading' ? 'read'    : 'unread'
+    const updated = { ...book, status: next }
+    // Optimistic update
+    setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
+    await window.db.updateBook(updated)
+  }
+
   async function fillMetadataByIsbn(isbn13: string) {
     setMetaStatus({ state: 'loading' })
     const res = await window.meta.lookupIsbn(isbn13)
@@ -259,14 +269,20 @@ export function Inventory() {
                 <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug" title={book.title}>
                   {book.title}
                 </h3>
-                <span className={`flex-shrink-0 p-0.5 rounded-full mt-0.5 ${
-                  book.status === 'read'    ? 'bg-green-100 text-green-700' :
-                  book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
-                                              'bg-gray-100 text-gray-500'
-                }`} title={
-                  book.status === 'read' ? '已读' :
-                  book.status === 'reading' ? '阅读中' : '未读'
-                }>
+                <button
+                  type="button"
+                  onClick={() => handleCycleStatus(book)}
+                  title={
+                    book.status === 'read'    ? '已读 · 点击改为未读' :
+                    book.status === 'reading' ? '阅读中 · 点击改为已读' :
+                                                '未读 · 点击改为阅读中'
+                  }
+                  className={`flex-shrink-0 p-0.5 rounded-full mt-0.5 transition-opacity hover:opacity-70 cursor-pointer ${
+                    book.status === 'read'    ? 'bg-green-100 text-green-700' :
+                    book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
+                                                'bg-gray-100 text-gray-500'
+                  }`}
+                >
                   {book.status === 'read' && (
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
@@ -282,7 +298,7 @@ export function Inventory() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
                     </svg>
                   )}
-                </span>
+                </button>
               </div>
 
               <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{book.author}</p>
