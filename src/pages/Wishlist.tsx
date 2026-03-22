@@ -190,68 +190,21 @@ export function Wishlist() {
         </AddFormCard>
       )}
 
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {items.map(item => {
           const sem = item.isbn ? parseIsbnSem(item.isbn) : null
           const inferredPublisher = item.isbn && !item.publisher ? parseIsbnPublisher(item.isbn) : null
           return (
-          <div
-            key={item.id}
-            className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex items-stretch justify-between hover:shadow-md transition-shadow"
-          >
-            {/* Cover thumbnail */}
-            <div className="flex-shrink-0 w-12 h-16 bg-gray-100 dark:bg-gray-700 rounded overflow-hidden mr-3 flex items-center justify-center text-gray-300 dark:text-gray-600 self-start mt-0.5">
-              {item.coverUrl ? (
-                <img src={item.coverUrl} alt={item.title} className="w-full h-full object-cover" />
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-                </svg>
-              )}
-            </div>
-
-            {/* Text info */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 mb-1">
-                <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100 truncate" title={item.title}>{item.title}</h3>
-                <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
-                  item.priority === 'high' ? 'bg-red-100 text-red-800' :
-                  item.priority === 'medium' ? 'bg-blue-100 text-blue-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
-                  {item.priority}
-                </span>
-              </div>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">{item.author}</p>
-              {(item.publisher || inferredPublisher) && (
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate" title={item.publisher ?? inferredPublisher ?? ''}>
-                  {item.publisher ?? <span className="italic">{inferredPublisher}</span>}
-                </p>
-              )}
-              {sem && item.isbn && (
-                <WishlistIsbnBadge isbn={item.isbn} sem={sem} />
-              )}
-            </div>
-
-            {/* Right panel: price + delete at bottom-right */}
-            <div className="flex flex-col justify-between items-end gap-2 ml-4 flex-shrink-0">
-              <PricePanel
-                item={item}
-                entry={getEntryForItem(priceCache, item)}
-                capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
-                onCapture={ch => void handleCapture(item, ch)}
-              />
-              <button
-                onClick={() => handleDelete(item.id)}
-                title="移除"
-                className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
-          </div>
+            <WishlistCard
+              key={item.id}
+              item={item}
+              sem={sem}
+              inferredPublisher={inferredPublisher}
+              entry={getEntryForItem(priceCache, item)}
+              capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
+              onCapture={ch => void handleCapture(item, ch)}
+              onDelete={() => handleDelete(item.id)}
+            />
           )
         })}
       </div>
@@ -266,40 +219,126 @@ export function Wishlist() {
 }
 
 // ---------------------------------------------------------------------------
-// PricePanel
+// WishlistCard — compact grid card matching Library layout
 // ---------------------------------------------------------------------------
 
-function PricePanel(props: {
+function WishlistCard(props: {
   item: WishlistItem
+  sem: { language: string; region: string } | null
+  inferredPublisher: string | null
   entry?: PriceCacheEntry
   capturingChannels: Record<string, boolean>
   onCapture: (ch: CaptureChannel) => void
+  onDelete: () => void
 }) {
-  const quotes = getQuotesForRender(props.entry)
+  const { item, sem, inferredPublisher, entry, capturingChannels, onCapture, onDelete } = props
+  const [priceOpen, setPriceOpen] = useState(false)
+  const quotes = getQuotesForRender(entry)
+  const bestPrice = quotes.filter(q => q.status === 'ok' && typeof q.priceCny === 'number')
+    .sort((a, b) => (a.priceCny as number) - (b.priceCny as number))[0]
 
   return (
-    <div className="w-[380px] border border-gray-200 dark:border-gray-600 rounded-lg p-3 bg-white dark:bg-gray-800">
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm font-medium text-gray-700 dark:text-gray-300">比价</div>
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-col">
+      {/* Top: cover + info */}
+      <div className="flex flex-row flex-1">
+        {/* Cover */}
+        <div className="flex-shrink-0 w-20 bg-gray-100 dark:bg-gray-700 self-stretch flex items-center justify-center rounded-l-xl overflow-hidden">
+          {item.coverUrl ? (
+            <img src={item.coverUrl} alt={item.title} className="w-full h-full object-contain" />
+          ) : (
+            <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+              </svg>
+            </div>
+          )}
+        </div>
+
+        {/* Card body */}
+        <div className="p-3 flex flex-col flex-1 min-w-0">
+          {/* Title + priority dot */}
+          <div className="flex items-start justify-between gap-2 mb-0.5">
+            <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
+              {item.title}
+            </span>
+            <span className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${
+              item.priority === 'high'   ? 'bg-red-400' :
+              item.priority === 'medium' ? 'bg-blue-400' :
+                                          'bg-gray-300 dark:bg-gray-500'
+            }`} title={item.priority === 'high' ? '高优先级' : item.priority === 'medium' ? '中优先级' : '低优先级'} />
+          </div>
+
+          <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{item.author}</p>
+          {(item.publisher || inferredPublisher) && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
+              {item.publisher ?? <span className="italic">{inferredPublisher}</span>}
+            </p>
+          )}
+
+          <div className="flex-1" />
+
+          {/* Bottom row: ISBN badge + best price + price toggle + delete */}
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50 dark:border-gray-700 gap-1">
+            {sem && item.isbn ? (
+              <WishlistIsbnBadge isbn={item.isbn} sem={sem} />
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-1">
+              {/* Best price summary */}
+              {bestPrice && (
+                <button
+                  onClick={() => void window.app.openExternal(bestPrice.url)}
+                  className={`text-xs font-semibold ${channelColorText(bestPrice.channel)} hover:underline`}
+                >
+                  ¥{(bestPrice.priceCny as number).toFixed(2)}
+                </button>
+              )}
+              {/* Price toggle */}
+              <button
+                onClick={() => setPriceOpen(o => !o)}
+                title="比价"
+                className={`p-1 rounded transition-colors ${priceOpen ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500 dark:hover:text-gray-300'}`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+              </button>
+              {/* Delete */}
+              <button
+                onClick={onDelete}
+                title="移除"
+                className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        {channelOrder.map(ch => {
-          const quote = quotes.find(q => q.channel === ch)
-          const isCapturing = props.capturingChannels[ch] === true
-          const supported = CAPTURE_SUPPORTED.includes(ch)
-          return (
-            <ChannelRow
-              key={ch}
-              channel={ch}
-              quote={quote}
-              isCapturing={isCapturing}
-              captureSupported={supported}
-              onCapture={() => props.onCapture(ch as CaptureChannel)}
-            />
-          )
-        })}
-      </div>
+      {/* Collapsible price panel */}
+      {priceOpen && (
+        <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2 space-y-1.5">
+          {channelOrder.map(ch => {
+            const quote = quotes.find(q => q.channel === ch)
+            const isCapturing = capturingChannels[ch] === true
+            const supported = CAPTURE_SUPPORTED.includes(ch)
+            return (
+              <ChannelRow
+                key={ch}
+                channel={ch}
+                quote={quote}
+                isCapturing={isCapturing}
+                captureSupported={supported}
+                onCapture={() => onCapture(ch as CaptureChannel)}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
