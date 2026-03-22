@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeImage } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setupDatabase } from './db'
@@ -9,15 +9,6 @@ import { setupStores } from './stores'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// The built directory structure
-//
-// ├─┬─ dist
-// │ ├─┬─ electron
-// │ │ ├── main.js
-// │ │ └── preload.js
-// │ ├── index.html
-// │ ├── ...other-static-files-from-public
-// │
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(__dirname, '../public')
 
@@ -26,12 +17,20 @@ let win: BrowserWindow | null
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 
-function createWindow() {
-  // Resolve app icon: use build/icon.png relative to project root (works in both
-  // dev and packaged builds because electron-builder copies it in)
-  const iconPath = app.isPackaged
+// Resolve icon path — works in dev (../build/icon.png) and packaged (resources/build/icon.png)
+function resolveIconPath(): string {
+  return app.isPackaged
     ? path.join(process.resourcesPath, 'build', 'icon.png')
     : path.join(__dirname, '../build/icon.png')
+}
+
+function createWindow() {
+  const iconPath = resolveIconPath()
+
+  // On macOS, app.dock.setIcon() is needed to change the dock icon at runtime
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(nativeImage.createFromPath(iconPath))
+  }
 
   win = new BrowserWindow({
     width: 1200,
@@ -42,7 +41,6 @@ function createWindow() {
     },
   })
 
-  // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
   })
@@ -50,7 +48,6 @@ function createWindow() {
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    // win.loadFile('dist/index.html')
     win.loadFile(path.join(process.env.DIST as string, 'index.html'))
   }
 }

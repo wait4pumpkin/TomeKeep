@@ -74,10 +74,9 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 // ---------------------------------------------------------------------------
 
 function LogoBadge({ weather }: { weather: WeatherState | null }) {
-  const conditionLabel = weather
-    ? weather.condition.replace(/-/g, ' ') + (weather.isDay ? '' : ' · night')
-    : '…'
-  const tipLabel = `TomeKeep · ${conditionLabel}`
+  const tipLabel = weather
+    ? `TomeKeep · ${weather.condition.replace(/-/g, ' ')}${weather.isDay ? '' : ' · night'}`
+    : 'TomeKeep'
 
   return (
     <Tip label={tipLabel}>
@@ -98,14 +97,12 @@ function LogoBadge({ weather }: { weather: WeatherState | null }) {
           <text x="23" y="26" textAnchor="middle" fontSize="7" fontWeight="bold" fill="#374151" fontFamily="system-ui,sans-serif">TK</text>
         </svg>
 
-        {/* Weather badge pinned to bottom-right of the logo */}
-        <div className="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-white dark:bg-gray-800 ring-1 ring-gray-200 dark:ring-gray-600 flex items-center justify-center overflow-visible">
-          {weather ? (
+        {/* Weather badge pinned to bottom-right of the logo — only shown once loaded */}
+        {weather && (
+          <div className="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-white dark:bg-gray-800 ring-1 ring-gray-200 dark:ring-gray-600 flex items-center justify-center overflow-visible">
             <WeatherIcon className="w-[14px] h-[14px]" />
-          ) : (
-            <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-500 animate-pulse" />
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </Tip>
   )
