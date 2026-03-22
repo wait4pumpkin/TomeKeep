@@ -242,13 +242,13 @@ export function IsbnScanModal(props: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-[min(720px,95vw)] rounded-xl bg-white shadow-xl border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-          <h3 className="text-base font-semibold text-gray-900">扫描 ISBN</h3>
+      <div className="relative w-[min(720px,95vw)] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">扫描 ISBN</h3>
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100"
+            className="px-3 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
           >
             关闭
           </button>
@@ -265,7 +265,7 @@ export function IsbnScanModal(props: {
           </div>
 
           {status.state !== 'running' && (
-            <div className="text-sm text-gray-700">
+            <div className="text-sm text-gray-700 dark:text-gray-300">
               {status.state === 'starting' && '正在启动摄像头…'}
               {status.state === 'unsupported' && status.message}
               {status.state === 'permission_denied' && status.message}
@@ -273,7 +273,7 @@ export function IsbnScanModal(props: {
             </div>
           )}
           {status.state === 'running' && (
-            <div className="text-sm text-gray-400 text-center">
+            <div className="text-sm text-gray-400 dark:text-gray-500 text-center">
               将条形码对准摄像头，自动识别后关闭
             </div>
           )}
@@ -282,7 +282,7 @@ export function IsbnScanModal(props: {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100"
+              className="px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
             >
               取消
             </button>

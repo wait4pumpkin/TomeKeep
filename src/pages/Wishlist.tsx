@@ -105,12 +105,13 @@ export function Wishlist() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-800">Wishlist</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Wishlist</h2>
         <button
           onClick={() => setIsAdding(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          title="Add Item"
+          className="w-9 h-9 flex items-center justify-center bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xl leading-none"
         >
-          Add Item
+          +
         </button>
       </div>
 
@@ -123,40 +124,40 @@ export function Wishlist() {
           cancelLabel="Cancel"
         >
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
             <input
               type="text"
               required
               value={newItem.title || ''}
               onChange={e => setNewItem({ ...newItem, title: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Author</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Author</label>
             <input
               type="text"
               required
               value={newItem.author || ''}
               onChange={e => setNewItem({ ...newItem, author: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">ISBN</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ISBN</label>
             <input
               type="text"
               value={newItem.isbn || ''}
               onChange={e => setNewItem({ ...newItem, isbn: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Priority</label>
             <select
               value={newItem.priority}
               onChange={e => setNewItem({ ...newItem, priority: e.target.value as WishlistItem['priority'] })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             >
               <option value="high">High</option>
               <option value="medium">Medium</option>
@@ -185,10 +186,10 @@ export function Wishlist() {
           return (
           <div
             key={item.id}
-            className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-stretch justify-between hover:shadow-md transition-shadow"
+            className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex items-stretch justify-between hover:shadow-md transition-shadow"
           >
             {/* Cover thumbnail */}
-            <div className="flex-shrink-0 w-12 h-16 bg-gray-100 rounded overflow-hidden mr-3 flex items-center justify-center text-gray-300 self-start mt-0.5">
+            <div className="flex-shrink-0 w-12 h-16 bg-gray-100 dark:bg-gray-700 rounded overflow-hidden mr-3 flex items-center justify-center text-gray-300 dark:text-gray-600 self-start mt-0.5">
               {item.coverUrl ? (
                 <img src={item.coverUrl} alt={item.title} className="w-full h-full object-cover" />
               ) : (
@@ -201,7 +202,7 @@ export function Wishlist() {
             {/* Text info */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 mb-1">
-                <h3 className="font-semibold text-lg text-gray-900 truncate" title={item.title}>{item.title}</h3>
+                <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100 truncate" title={item.title}>{item.title}</h3>
                 <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
                   item.priority === 'high' ? 'bg-red-100 text-red-800' :
                   item.priority === 'medium' ? 'bg-blue-100 text-blue-800' :
@@ -210,9 +211,9 @@ export function Wishlist() {
                   {item.priority}
                 </span>
               </div>
-              <p className="text-gray-600 text-sm">{item.author}</p>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">{item.author}</p>
               {(item.publisher || inferredPublisher) && (
-                <p className="text-xs text-gray-400 mt-0.5 truncate" title={item.publisher ?? inferredPublisher ?? ''}>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate" title={item.publisher ?? inferredPublisher ?? ''}>
                   {item.publisher ?? <span className="italic">{inferredPublisher}</span>}
                 </p>
               )}
@@ -245,7 +246,7 @@ export function Wishlist() {
       </div>
 
       {items.length === 0 && !isAdding && (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           Your wishlist is empty.
         </div>
       )}
@@ -266,9 +267,9 @@ function PricePanel(props: {
   const quotes = getQuotesForRender(props.entry)
 
   return (
-    <div className="w-[380px] border border-gray-200 rounded-lg p-3 bg-white">
+    <div className="w-[380px] border border-gray-200 dark:border-gray-600 rounded-lg p-3 bg-white dark:bg-gray-800">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm font-medium text-gray-700">比价</div>
+        <div className="text-sm font-medium text-gray-700 dark:text-gray-300">比价</div>
       </div>
 
       <div className="space-y-2">
@@ -313,7 +314,7 @@ function ChannelRow(props: {
 
       <div className="flex items-center gap-2 ml-auto">
         {isCapturing ? (
-          <span className="text-sm text-gray-400">采价中…</span>
+          <span className="text-sm text-gray-400 dark:text-gray-500">采价中…</span>
         ) : (
           <div className="flex flex-col items-end">
             <QuoteDisplay channel={channel} quote={quote} />
@@ -329,7 +330,7 @@ function ChannelRow(props: {
           <button
             onClick={onCapture}
             title={quote?.status === 'ok' ? '重新采价' : '去采价'}
-            className="p-1 text-gray-400 rounded hover:text-gray-600 hover:bg-gray-100 flex-shrink-0"
+            className="p-1 text-gray-400 rounded hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0"
           >
             {quote?.status === 'ok' ? (
               // Refresh icon
@@ -350,7 +351,7 @@ function ChannelRow(props: {
         )}
 
         {!captureSupported && (
-          <span className="text-xs text-gray-300">暂未支持</span>
+          <span className="text-xs text-gray-300 dark:text-gray-600">暂未支持</span>
         )}
       </div>
     </div>
@@ -364,7 +365,7 @@ function ChannelRow(props: {
 function QuoteDisplay(props: { channel: PriceChannel; quote?: PriceQuote }) {
   const { quote } = props
   if (!quote) {
-    return <span className="text-sm text-gray-400">—</span>
+    return <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
   }
 
   if (quote.status === 'ok' && typeof quote.priceCny === 'number') {
@@ -381,7 +382,7 @@ function QuoteDisplay(props: { channel: PriceChannel; quote?: PriceQuote }) {
 
   // Error / not-found states — show a small open link
   return (
-    <span className="text-sm text-gray-400" title={quote.message}>
+    <span className="text-sm text-gray-400 dark:text-gray-500" title={quote.message}>
       {quote.status === 'not_found' ? '未找到' : (quote.message ?? '失败')}
     </span>
   )
@@ -475,7 +476,7 @@ function WishlistIsbnBadge(props: { isbn: string; sem: { language: string; regio
       type="button"
       onClick={handleCopy}
       title={copied ? '已复制！' : `点击复制 ISBN：${isbn}`}
-      className="text-xs text-gray-400 hover:text-blue-500 transition-colors text-left mt-1 leading-snug"
+      className="text-xs text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors text-left mt-1 leading-snug"
     >
       {copied ? (
         <span className="text-blue-500">已复制 ✓</span>

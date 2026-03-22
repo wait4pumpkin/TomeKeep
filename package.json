@@ -44,8 +44,10 @@
   "build": {
     "appId": "com.tomekeep.app",
     "productName": "TomeKeep",
+    "icon": "build/icon.png",
     "mac": {
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png"
     },
     "directories": {
       "output": "release"

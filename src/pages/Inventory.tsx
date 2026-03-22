@@ -105,12 +105,13 @@ export function Inventory() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-800">My Library</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">My Library</h2>
         <button
           onClick={() => setIsAdding(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          title="Add Book"
+          className="w-9 h-9 flex items-center justify-center bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xl leading-none"
         >
-          Add Book
+          +
         </button>
       </div>
 
@@ -124,27 +125,27 @@ export function Inventory() {
             cancelLabel="Cancel"
           >
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
               <input
                 type="text"
                 required
                 value={newBook.title || ''}
                 onChange={e => setNewBook({ ...newBook, title: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Author</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Author</label>
               <input
                 type="text"
                 required
                 value={newBook.author || ''}
                 onChange={e => setNewBook({ ...newBook, author: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ISBN</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ISBN</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -157,7 +158,7 @@ export function Inventory() {
                   onBlur={e => {
                     if (e.target.value) setIsbnFromRaw(e.target.value)
                   }}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                 />
                 <button
                   type="button"
@@ -166,7 +167,7 @@ export function Inventory() {
                     const isbn13 = setIsbnFromRaw(raw)
                     if (isbn13) void fillMetadataByIsbn(isbn13)
                   }}
-                  className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:hover:bg-gray-100"
+                  className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:hover:bg-gray-100 dark:disabled:hover:bg-gray-700"
                   disabled={!newBook.isbn}
                 >
                   Fill
@@ -174,14 +175,14 @@ export function Inventory() {
                 <button
                   type="button"
                   onClick={() => setIsScanOpen(true)}
-                  className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors"
+                  className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 >
                   Scan
                 </button>
               </div>
-              {isbnError && <p className="mt-2 text-sm text-red-600">{isbnError}</p>}
+              {isbnError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{isbnError}</p>}
               {metaStatus.state !== 'idle' && !isbnError && (
-                <p className={`mt-2 text-sm ${metaStatus.state === 'error' ? 'text-red-600' : 'text-gray-600'}`}>
+                <p className={`mt-2 text-sm ${metaStatus.state === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
                   {metaStatus.state === 'loading' ? '正在获取元信息…' : metaStatus.message}
                 </p>
               )}
@@ -194,11 +195,11 @@ export function Inventory() {
               }}
             />
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
               <select
                 value={newBook.status}
                 onChange={e => setNewBook({ ...newBook, status: e.target.value as Book['status'] })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
               >
                 <option value="unread">Unread</option>
                 <option value="reading">Reading</option>
@@ -222,9 +223,9 @@ export function Inventory() {
           const sem = book.isbn ? parseIsbnSemantics(book.isbn) : null
           const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
           return (
-          <div key={book.id} className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow overflow-hidden flex flex-col">
+          <div key={book.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow overflow-hidden flex flex-col">
             {/* Cover image */}
-            <div className="relative w-full bg-gray-100" style={{ paddingTop: '56.25%' }}>
+            <div className="relative w-full bg-gray-100 dark:bg-gray-700" style={{ paddingTop: '56.25%' }}>
               {book.coverUrl ? (
                 <img
                   src={book.coverUrl}
@@ -232,7 +233,7 @@ export function Inventory() {
                   className="absolute inset-0 w-full h-full object-contain"
                 />
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-300">
+                <div className="absolute inset-0 flex items-center justify-center text-gray-300 dark:text-gray-600">
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
                   </svg>
@@ -270,13 +271,13 @@ export function Inventory() {
 
             {/* Card body */}
             <div className="p-4 flex flex-col flex-1">
-              <h3 className="font-semibold text-base text-gray-900 line-clamp-2 leading-snug mb-1" title={book.title}>
+              <h3 className="font-semibold text-base text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug mb-1" title={book.title}>
                 {book.title}
               </h3>
 
-              <p className="text-sm text-gray-600 mb-1">{book.author}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">{book.author}</p>
               {(book.publisher || inferredPublisher) && (
-                <p className="text-xs text-gray-400 mb-1 line-clamp-1" title={book.publisher ?? inferredPublisher ?? ''}>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 line-clamp-1" title={book.publisher ?? inferredPublisher ?? ''}>
                   {book.publisher ?? <span className="italic">{inferredPublisher}</span>}
                 </p>
               )}
@@ -285,7 +286,7 @@ export function Inventory() {
               <div className="flex-1" />
 
               {/* Bottom row: ISBN semantics (clickable to copy) + delete button */}
-              <div className="flex items-end justify-between mt-2 pt-2 border-t border-gray-50">
+              <div className="flex items-end justify-between mt-2 pt-2 border-t border-gray-50 dark:border-gray-700">
                 {sem && book.isbn ? (
                   <IsbnSemanticBadge isbn={book.isbn} sem={sem} />
                 ) : (
@@ -308,8 +309,8 @@ export function Inventory() {
       </div>
 
       {books.length === 0 && !isAdding && (
-        <div className="text-center py-12 text-gray-500">
-          No books in your library yet. Click "Add Book" to get started!
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+          No books in your library yet. Click "+" to get started!
         </div>
       )}
     </div>
@@ -336,7 +337,7 @@ function IsbnSemanticBadge(props: { isbn: string; sem: { language: string; regio
       type="button"
       onClick={handleCopy}
       title={copied ? '已复制！' : `点击复制 ISBN：${isbn}`}
-      className="text-xs text-gray-400 hover:text-blue-500 transition-colors text-left leading-snug"
+      className="text-xs text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors text-left leading-snug"
     >
       {copied ? (
         <span className="text-blue-500">已复制 ✓</span>

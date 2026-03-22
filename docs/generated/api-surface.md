@@ -119,6 +119,33 @@ type IsbnSemantics = { region: string; language: string }
 
 **Coverage of `parseIsbnPublisher`**: ~100 well-known publishers within China mainland (978-7). Other groups always return null. Full coverage is not achievable without the ISBN Agency's non-public publisher registry.
 
+### Client-side theme library (`src/lib/theme.ts`)
+
+Pure functions for dark/light/auto mode management. No IPC.
+
+| Function | Signature | Description |
+|---|---|---|
+| `getStoredTheme` | `() -> ThemeMode` | Read stored preference from `localStorage` (key: `theme`); defaults to `'auto'` |
+| `setStoredTheme` | `(mode: ThemeMode) -> void` | Persist preference to `localStorage` |
+| `applyTheme` | `(mode: ThemeMode) -> void` | Add/remove `dark` class on `<html>` based on mode and system pref |
+| `cycleTheme` | `(current: ThemeMode) -> ThemeMode` | Cycle Auto → Light → Dark → Auto |
+
+**`ThemeMode`**: `'auto' | 'light' | 'dark'`
+
+### Client-side weather library (`src/lib/weather.ts`)
+
+No IPC. Uses browser Geolocation API + Open-Meteo free API (no key required).
+
+| Function | Signature | Description |
+|---|---|---|
+| `fetchWeather` | `() -> Promise<WeatherState>` | Resolves geolocation, fetches `api.open-meteo.com`, returns current condition + is_day |
+
+**`WeatherCondition`**: `'clear' | 'partly-cloudy' | 'cloudy' | 'fog' | 'drizzle' | 'rain' | 'snow' | 'thunderstorm' | 'unknown'`
+
+**`WeatherState`**: `{ condition: WeatherCondition; isDay: boolean }`
+
+WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60-69=rain, 70-79=snow, 80-86=rain/snow showers, 87-99=thunderstorm.
+
 ### IPC Channels (main process)
 | Channel | Direction | Handler |
 |---|---|---|

@@ -11,8 +11,8 @@ export function AddFormCard(props: {
   const { title, onSubmit, onCancel, submitLabel, cancelLabel, children } = props
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-      <h3 className="text-lg font-semibold mb-4">{title}</h3>
+    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+      <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">{title}</h3>
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           {children}
@@ -21,7 +21,7 @@ export function AddFormCard(props: {
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+            className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
           >
             {cancelLabel}
           </button>

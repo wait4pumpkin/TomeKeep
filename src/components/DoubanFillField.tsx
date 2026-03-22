@@ -30,7 +30,7 @@ export function DoubanFillField(props: {
 
   return (
     <div className="col-span-2">
-      <label className="block text-sm font-medium text-gray-700 mb-1">Douban URL/ID</label>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Douban URL/ID</label>
       <div className="flex gap-2">
         <input
           type="text"
@@ -39,7 +39,7 @@ export function DoubanFillField(props: {
             setInput(e.target.value)
             setStatus({ state: 'idle' })
           }}
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
         />
         <button
           type="button"
@@ -48,14 +48,14 @@ export function DoubanFillField(props: {
             if (!raw) return
             void fill(raw)
           }}
-          className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:hover:bg-gray-100"
+          className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:hover:bg-gray-100 dark:disabled:hover:bg-gray-700"
           disabled={!input.trim()}
         >
           Fill
         </button>
       </div>
       {status.state !== 'idle' && (
-        <p className={`mt-2 text-sm ${status.state === 'error' ? 'text-red-600' : 'text-gray-600'}`}>
+        <p className={`mt-2 text-sm ${status.state === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
           {status.state === 'loading' ? '正在获取豆瓣元信息…' : status.message}
         </p>
       )}
