@@ -13,19 +13,13 @@ const channelLabel: Record<PriceChannel, string> = {
   dangdang: '当当',
 }
 
-const channelBadge: Record<PriceChannel, string> = {
-  bookschina: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  jd: 'border-red-200 bg-red-50 text-red-700',
-  dangdang: 'border-orange-200 bg-orange-50 text-orange-700',
-}
-
 // Channels that have capture support in this release
 const CAPTURE_SUPPORTED: PriceChannel[] = ['jd', 'dangdang', 'bookschina']
 
 export function Wishlist() {
   const [items, setItems] = useState<WishlistItem[]>([])
   const [isAdding, setIsAdding] = useState(false)
-  const [newItem, setNewItem] = useState<Partial<WishlistItem>>({ priority: 'medium' })
+  const [newItem, setNewItem] = useState<Partial<WishlistItem>>({})
   const [priceCache, setPriceCache] = useState<Record<string, PriceCacheEntry>>({})
   // key -> channel -> whether capture window is open
   const [capturingKeys, setCapturingKeys] = useState<Record<string, Record<string, boolean>>>({})
@@ -75,7 +69,7 @@ export function Wishlist() {
     } as WishlistItem
 
     await window.db.addWishlistItem(itemToAdd)
-    setNewItem({ priority: 'medium' })
+    setNewItem({})
     setIsAdding(false)
     await loadWishlist()
   }
@@ -163,18 +157,6 @@ export function Wishlist() {
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Priority</label>
-            <select
-              value={newItem.priority}
-              onChange={e => setNewItem({ ...newItem, priority: e.target.value as WishlistItem['priority'] })}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-            >
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-          </div>
           <DoubanFillField
             onApply={meta => {
               setNewItem(prev => ({
@@ -256,17 +238,10 @@ function WishlistCard(props: {
 
         {/* Card body */}
         <div className="p-3 flex flex-col flex-1 min-w-0">
-          {/* Title + priority dot */}
-          <div className="flex items-start justify-between gap-2 mb-0.5">
+          {/* Title */}
+          <div className="mb-0.5">
             <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
               {item.title}
-            </span>
-            <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium leading-none ${
-              item.priority === 'high'   ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400' :
-              item.priority === 'medium' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400' :
-                                          'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-            }`}>
-              {item.priority === 'high' ? '高' : item.priority === 'medium' ? '中' : '低'}
             </span>
           </div>
 
@@ -357,86 +332,68 @@ function ChannelRow(props: {
   onCapture: () => void
 }) {
   const { channel, quote, isCapturing, captureSupported, onCapture } = props
+  const hasPrice = quote?.status === 'ok' && typeof quote.priceCny === 'number'
 
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className={`px-2 py-0.5 text-xs rounded border flex-shrink-0 ${channelBadge[channel]}`}>
+    <div className="flex items-center gap-2">
+      {/* Channel name */}
+      <span className="w-10 text-xs text-gray-400 dark:text-gray-500 shrink-0">
         {channelLabel[channel]}
       </span>
 
-      <div className="flex items-center gap-2 ml-auto">
+      {/* Price / status */}
+      <div className="flex-1 flex items-baseline gap-1.5">
         {isCapturing ? (
-          <span className="text-sm text-gray-400 dark:text-gray-500">采价中…</span>
-        ) : (
-          <div className="flex flex-col items-end">
-            <QuoteDisplay channel={channel} quote={quote} />
-            {quote?.status === 'ok' && quote.fetchedAt && (
-              <span className="text-[10px] text-gray-300 leading-tight">
-                {formatFetchedAt(quote.fetchedAt)}
+          <span className="text-xs text-gray-400 dark:text-gray-500 italic">采价中…</span>
+        ) : hasPrice ? (
+          <>
+            <button
+              onClick={() => void window.app.openExternal(quote!.url)}
+              className={`text-sm font-semibold ${channelColorText(channel)} hover:underline leading-none`}
+            >
+              ¥{(quote!.priceCny as number).toFixed(2)}
+            </button>
+            {quote!.fetchedAt && (
+              <span className="text-[10px] text-gray-300 dark:text-gray-600 leading-none">
+                {formatFetchedAt(quote!.fetchedAt)}
               </span>
             )}
-          </div>
-        )}
-
-        {captureSupported && !isCapturing && (
-          <button
-            onClick={onCapture}
-            title={quote?.status === 'ok' ? '重新采价' : '去采价'}
-            className="p-1 text-gray-400 rounded hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0"
-          >
-            {quote?.status === 'ok' ? (
-              // Refresh icon
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                <path d="M21 3v5h-5"/>
-                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                <path d="M3 21v-5h5"/>
-              </svg>
-            ) : (
-              // Search icon
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"/>
-                <path d="m21 21-4.35-4.35"/>
-              </svg>
-            )}
-          </button>
-        )}
-
-        {!captureSupported && (
-          <span className="text-xs text-gray-300 dark:text-gray-600">暂未支持</span>
+          </>
+        ) : quote ? (
+          <span className="text-xs text-gray-400 dark:text-gray-500">
+            {quote.status === 'not_found' ? '未找到' : (quote.message ?? '失败')}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
         )}
       </div>
+
+      {/* Action button */}
+      {captureSupported && !isCapturing && (
+        <button
+          onClick={onCapture}
+          title={hasPrice ? '重新采价' : '去采价'}
+          className="p-1 rounded text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
+        >
+          {hasPrice ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+              <path d="M21 3v5h-5"/>
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+              <path d="M3 21v-5h5"/>
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.35-4.35"/>
+            </svg>
+          )}
+        </button>
+      )}
+      {!captureSupported && (
+        <span className="text-[10px] text-gray-300 dark:text-gray-600 shrink-0">暂不支持</span>
+      )}
     </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// QuoteDisplay: shows price (linked) or error state
-// ---------------------------------------------------------------------------
-
-function QuoteDisplay(props: { channel: PriceChannel; quote?: PriceQuote }) {
-  const { quote } = props
-  if (!quote) {
-    return <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
-  }
-
-  if (quote.status === 'ok' && typeof quote.priceCny === 'number') {
-    return (
-      <button
-        onClick={() => void window.app.openExternal(quote.url)}
-        className={`text-sm font-semibold ${channelColorText(props.channel)} hover:underline`}
-        title={quote.url}
-      >
-        ¥{quote.priceCny.toFixed(2)}
-      </button>
-    )
-  }
-
-  // Error / not-found states — show a small open link
-  return (
-    <span className="text-sm text-gray-400 dark:text-gray-500" title={quote.message}>
-      {quote.status === 'not_found' ? '未找到' : (quote.message ?? '失败')}
-    </span>
   )
 }
 
