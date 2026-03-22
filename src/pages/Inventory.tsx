@@ -267,9 +267,9 @@ export function Inventory() {
                       type="button"
                       onClick={() => handleCycleStatus(book)}
                       className={`flex-shrink-0 p-0.5 rounded-full mt-0.5 hover:opacity-70 transition-opacity ${
-                        book.status === 'read'    ? 'bg-green-100 text-green-700' :
-                        book.status === 'reading' ? 'bg-yellow-100 text-yellow-700' :
-                                                    'bg-gray-100 text-gray-500'
+                        book.status === 'read'    ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400' :
+                        book.status === 'reading' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400' :
+                                                    'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                       }`}
                     >
                       {book.status === 'read' && (
