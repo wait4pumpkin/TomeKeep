@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Book } from '../../electron/db'
 import { AddFormCard } from '../components/AddFormCard'
 import { DoubanFillField } from '../components/DoubanFillField'
@@ -8,6 +8,8 @@ import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 
 export function Inventory() {
   const [books, setBooks] = useState<Book[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | Book['status']>('all')
   const [isAdding, setIsAdding] = useState(false)
   const [newBook, setNewBook] = useState<Partial<Book>>({ status: 'unread' })
   const [isScanOpen, setIsScanOpen] = useState(false)
@@ -15,6 +17,19 @@ export function Inventory() {
   const [metaStatus, setMetaStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({
     state: 'idle',
   })
+
+  const filteredBooks = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    return books.filter(b => {
+      if (statusFilter !== 'all' && b.status !== statusFilter) return false
+      if (!q) return true
+      return (
+        b.title.toLowerCase().includes(q) ||
+        b.author.toLowerCase().includes(q) ||
+        (b.isbn ?? '').includes(q)
+      )
+    })
+  }, [books, searchQuery, statusFilter])
 
   async function loadBooks() {
     const data = await window.db.getBooks()
@@ -122,6 +137,52 @@ export function Inventory() {
         </button>
       </div>
 
+      {/* Search + status filter bar */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        {/* Search input */}
+        <div className="relative flex-1">
+          <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="搜索书名、作者、ISBN…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Status tabs */}
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-sm shrink-0">
+          {([['all', '全部'], ['unread', '未读'], ['reading', '阅读中'], ['read', '已读']] as const).map(([val, label]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setStatusFilter(val)}
+              className={`px-3 py-1.5 transition-colors ${
+                statusFilter === val
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {isAdding && (
         <>
           <AddFormCard
@@ -224,7 +285,7 @@ export function Inventory() {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {books.map(book => {
+        {filteredBooks.map(book => {
           const sem = book.isbn ? parseIsbnSemantics(book.isbn) : null
           const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
           return (
@@ -323,9 +384,11 @@ export function Inventory() {
         })}
       </div>
 
-      {books.length === 0 && !isAdding && (
+      {filteredBooks.length === 0 && !isAdding && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-          No books in your library yet. Click "+" to get started!
+          {books.length === 0
+            ? 'No books in your library yet. Click "+" to get started!'
+            : '没有符合条件的书籍。'}
         </div>
       )}
     </div>
