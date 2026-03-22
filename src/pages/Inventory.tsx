@@ -138,9 +138,9 @@ export function Inventory() {
       </div>
 
       {/* Search + status filter bar */}
-      <div className="flex flex-col sm:flex-row gap-2">
+      <div className="flex items-center gap-2">
         {/* Search input */}
-        <div className="relative flex-1">
+        <div className="relative w-56">
           <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
           </svg>
@@ -149,7 +149,7 @@ export function Inventory() {
             placeholder="搜索书名、作者、ISBN…"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           {searchQuery && (
             <button
@@ -164,22 +164,72 @@ export function Inventory() {
           )}
         </div>
 
-        {/* Status tabs */}
-        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-sm shrink-0">
-          {([['all', '全部'], ['unread', '未读'], ['reading', '阅读中'], ['read', '已读']] as const).map(([val, label]) => (
+        {/* Status icon tabs */}
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0">
+          {/* All */}
+          <CardTip label="全部">
             <button
-              key={val}
               type="button"
-              onClick={() => setStatusFilter(val)}
-              className={`px-3 py-1.5 transition-colors ${
-                statusFilter === val
+              onClick={() => setStatusFilter('all')}
+              className={`px-2.5 py-1.5 rounded-l-lg transition-colors ${
+                statusFilter === 'all'
                   ? 'bg-blue-500 text-white'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
               }`}
             >
-              {label}
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+              </svg>
             </button>
-          ))}
+          </CardTip>
+          {/* Unread */}
+          <CardTip label="未读">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('unread')}
+              className={`px-2.5 py-1.5 transition-colors ${
+                statusFilter === 'unread'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+              </svg>
+            </button>
+          </CardTip>
+          {/* Reading */}
+          <CardTip label="阅读中">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('reading')}
+              className={`px-2.5 py-1.5 transition-colors ${
+                statusFilter === 'reading'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+              </svg>
+            </button>
+          </CardTip>
+          {/* Read */}
+          <CardTip label="已读">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('read')}
+              className={`px-2.5 py-1.5 rounded-r-lg transition-colors ${
+                statusFilter === 'read'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+              </svg>
+            </button>
+          </CardTip>
         </div>
       </div>
 
