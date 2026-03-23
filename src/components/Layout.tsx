@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { WeatherIcon } from './WeatherIcon'
 import { applyTheme, cycleTheme, getStoredTheme, setStoredTheme } from '../lib/theme'
 import type { ThemeMode } from '../lib/theme'
 import { fetchWeather } from '../lib/weather'
 import type { WeatherState } from '../lib/weather'
+import type { UserProfile } from '../../electron/db'
 
 // ---------------------------------------------------------------------------
 // SVG icons
@@ -27,7 +28,6 @@ function StarIcon() {
 }
 
 function ThemeAutoIcon() {
-  // Half-filled circle: represents system/auto
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
       <path d="M12 2v20" strokeLinecap="round" />
@@ -54,6 +54,14 @@ function ThemeDarkIcon() {
   )
 }
 
+function PersonIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+    </svg>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Tooltip wrapper
 // ---------------------------------------------------------------------------
@@ -75,29 +83,22 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 
 function LogoBadge({ weather }: { weather: WeatherState | null }) {
   const tipLabel = weather
-    ? `TomeKeep · ${weather.condition.replace(/-/g, ' ')}${weather.isDay ? '' : ' · night'}`
+    ? `TomeKeep · ${weather.condition.replace(/-/g, ' ')}${weather.isDay ? '' : ' · 夜间'}`
     : 'TomeKeep'
 
   return (
     <Tip label={tipLabel}>
       <div className="relative w-10 h-10 flex items-center justify-center select-none">
-        {/* Book-stack SVG — the app logo body */}
         <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-10 h-10">
-          {/* Back book (blue) */}
           <rect x="8" y="10" width="17" height="22" rx="2" fill="#93C5FD" stroke="#3B82F6" strokeWidth="1" />
-          {/* Middle book (amber) */}
           <rect x="12" y="7" width="17" height="22" rx="2" fill="#FDE68A" stroke="#F59E0B" strokeWidth="1" />
-          {/* Front book (white/light) */}
           <rect x="15" y="4" width="16" height="24" rx="2" fill="#F9FAFB" stroke="#9CA3AF" strokeWidth="1" />
-          {/* Text lines on front book */}
           <line x1="18" y1="10" x2="28" y2="10" stroke="#D1D5DB" strokeWidth="1" strokeLinecap="round" />
           <line x1="18" y1="13" x2="28" y2="13" stroke="#D1D5DB" strokeWidth="1" strokeLinecap="round" />
           <line x1="18" y1="16" x2="25" y2="16" stroke="#D1D5DB" strokeWidth="1" strokeLinecap="round" />
-          {/* TK monogram */}
           <text x="23" y="26" textAnchor="middle" fontSize="7" fontWeight="bold" fill="#374151" fontFamily="system-ui,sans-serif">TK</text>
         </svg>
 
-        {/* Weather badge pinned to bottom-right of the logo — only shown once loaded */}
         {weather && (
           <div className="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-white dark:bg-gray-800 ring-1 ring-gray-200 dark:ring-gray-600 flex items-center justify-center overflow-visible">
             <WeatherIcon className="w-[14px] h-[14px]" />
@@ -109,26 +110,228 @@ function LogoBadge({ weather }: { weather: WeatherState | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// UserSwitcher — always rendered; always ≥ 1 user (default created on startup)
+// ---------------------------------------------------------------------------
+
+function UserSwitcher() {
+  const [users, setUsers] = useState<UserProfile[]>([])
+  const [activeUser, setActiveUser] = useState<UserProfile | null>(null)
+  const [open, setOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  // Inline rename: stores the id being renamed and the draft name
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  async function load() {
+    const [us, active] = await Promise.all([window.db.getUsers(), window.db.getActiveUser()])
+    setUsers(us)
+    setActiveUser(active)
+  }
+
+  useEffect(() => { void load() }, [])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handler(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false)
+        setRenamingId(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  async function handleSwitch(user: UserProfile) {
+    await window.db.setActiveUser(user.id)
+    setActiveUser(user)
+    setOpen(false)
+    window.dispatchEvent(new CustomEvent('active-user-changed', { detail: user }))
+  }
+
+  async function handleAdd() {
+    const name = newName.trim()
+    if (!name) return
+    const user = await window.db.addUser(name)
+    setNewName('')
+    await load()
+    await handleSwitch(user)
+  }
+
+  function startRename(user: UserProfile, e: React.MouseEvent) {
+    e.stopPropagation()
+    setRenamingId(user.id)
+    setRenameDraft(user.name)
+  }
+
+  async function commitRename(id: string) {
+    const name = renameDraft.trim()
+    if (name) {
+      const updated = await window.db.renameUser(id, name)
+      if (updated) {
+        setUsers(prev => prev.map(u => u.id === id ? updated : u))
+        if (activeUser?.id === id) {
+          setActiveUser(updated)
+          window.dispatchEvent(new CustomEvent('active-user-changed', { detail: updated }))
+        }
+      }
+    }
+    setRenamingId(null)
+  }
+
+  async function handleDelete(user: UserProfile, e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm(`删除用户「${user.name}」及其所有阅读记录？此操作不可撤销。`)) return
+    const ok = await window.db.deleteUser(user.id)
+    if (!ok) return   // server rejected (last user)
+    const [us, active] = await Promise.all([window.db.getUsers(), window.db.getActiveUser()])
+    setUsers(us)
+    setActiveUser(active)
+    window.dispatchEvent(new CustomEvent('active-user-changed', { detail: active }))
+  }
+
+  return (
+    <div ref={panelRef} className="relative flex items-center justify-center">
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); setRenamingId(null) }}
+        title={activeUser ? `用户：${activeUser.name}` : '用户'}
+        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+          open
+            ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'
+            : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700/50'
+        }`}
+      >
+        <PersonIcon />
+      </button>
+
+      {open && (
+        <div className="absolute left-full bottom-0 ml-2 w-52 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl z-50 overflow-hidden">
+          <ul className="max-h-52 overflow-y-auto py-1">
+            {users.map(u => (
+              <li key={u.id}>
+                {renamingId === u.id ? (
+                  // Inline rename input
+                  <div className="flex items-center gap-1.5 px-3 py-1.5">
+                    <input
+                      type="text"
+                      value={renameDraft}
+                      autoFocus
+                      onChange={e => setRenameDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') void commitRename(u.id)
+                        if (e.key === 'Escape') setRenamingId(null)
+                      }}
+                      onBlur={() => void commitRename(u.id)}
+                      className="flex-1 min-w-0 px-2 py-0.5 text-xs rounded-md border border-blue-400 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                      u.id === activeUser?.id
+                        ? 'text-blue-600 dark:text-blue-400 font-medium'
+                        : 'text-gray-700 dark:text-gray-200'
+                    }`}
+                    onClick={() => void handleSwitch(u)}
+                    role="button"
+                  >
+                    <span className="flex-1 truncate text-left">{u.name}</span>
+                    {/* Rename */}
+                    <button
+                      type="button"
+                      onClick={e => startRename(u, e)}
+                      title="重命名"
+                      className="p-0.5 rounded text-gray-300 hover:text-blue-500 dark:hover:text-blue-400 transition-colors flex-shrink-0"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487z" />
+                      </svg>
+                    </button>
+                    {/* Delete — only shown when > 1 user */}
+                    {users.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={e => void handleDelete(u, e)}
+                        title={`删除用户 ${u.name}`}
+                        className="p-0.5 rounded text-gray-300 hover:text-red-500 dark:hover:text-red-400 transition-colors flex-shrink-0"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {/* Add user row */}
+          <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center gap-1.5">
+            <input
+              type="text"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') void handleAdd()
+                if (e.key === 'Escape') setOpen(false)
+              }}
+              placeholder="新用户…"
+              className="flex-1 min-w-0 px-2 py-1 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => void handleAdd()}
+              disabled={!newName.trim()}
+              className="p-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+              title="添加用户"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
 
 export function Layout() {
   const [theme, setTheme] = useState<ThemeMode>(getStoredTheme)
   const [weather, setWeather] = useState<WeatherState | null>(null)
+  const [watermarkName, setWatermarkName] = useState<string | null>(null)
 
-  // Keep DOM in sync with theme state, and watch system pref when in auto mode
+  useEffect(() => {
+    // Read initial active user for watermark
+    void window.db.getActiveUser().then(u => {
+      if (u) setWatermarkName(u.name)
+    })
+    function handleUserChange(e: Event) {
+      const user = (e as CustomEvent<UserProfile | null>).detail
+      setWatermarkName(user ? user.name : null)
+    }
+    window.addEventListener('active-user-changed', handleUserChange)
+    return () => window.removeEventListener('active-user-changed', handleUserChange)
+  }, [])
+
   useEffect(() => {
     applyTheme(theme)
-
     if (theme !== 'auto') return
-
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = () => applyTheme('auto')
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
   }, [theme])
 
-  // Fetch weather once on mount; silently ignore if geolocation denied / offline
   useEffect(() => {
     fetchWeather().then(setWeather).catch(() => undefined)
   }, [])
@@ -145,9 +348,9 @@ export function Layout() {
                         <ThemeAutoIcon />
 
   const themeLabel =
-    theme === 'light' ? 'Light — click for Dark' :
-    theme === 'dark'  ? 'Dark — click for Auto'  :
-                        'Auto — click for Light'
+    theme === 'light' ? '浅色 — 点击切换深色' :
+    theme === 'dark'  ? '深色 — 点击切换自动' :
+                        '自动 — 点击切换浅色'
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center justify-center w-10 h-10 rounded-xl transition-colors ${
@@ -168,17 +371,20 @@ export function Layout() {
 
         {/* Nav links */}
         <nav className="flex flex-col items-center gap-2 flex-1">
-          <Tip label="Inventory">
+          <Tip label="书库">
             <NavLink to="/" end className={navLinkClass}>
               <BookshelfIcon />
             </NavLink>
           </Tip>
-          <Tip label="Wishlist">
+          <Tip label="心愿单">
             <NavLink to="/wishlist" className={navLinkClass}>
               <StarIcon />
             </NavLink>
           </Tip>
         </nav>
+
+        {/* User switcher */}
+        <UserSwitcher />
 
         {/* Theme toggle at bottom */}
         <Tip label={themeLabel}>
@@ -196,6 +402,15 @@ export function Layout() {
       <main className="flex-1 overflow-auto p-8 bg-gray-50 dark:bg-gray-900">
         <Outlet />
       </main>
+
+      {/* Username watermark — shown when user has a non-default name */}
+      {watermarkName && watermarkName !== '匿名' && (
+        <div className="fixed bottom-6 right-8 pointer-events-none select-none z-10">
+          <span className="text-sm font-medium text-gray-300 dark:text-gray-600 opacity-60">
+            {watermarkName}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

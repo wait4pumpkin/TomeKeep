@@ -7,6 +7,7 @@ import { setupMetadata } from './metadata'
 import { setupPricing } from './pricing'
 import { resolvePreloadPath } from './preloadPath'
 import { setupStores } from './stores'
+import { setupCompanion } from './companion-server'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -92,5 +93,6 @@ app.whenReady().then(async () => {
   setupMetadata()
   setupStores()
   setupPricing()
+  setupCompanion()
   createWindow()
 })

@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PriceCacheEntry, PriceChannel, PriceQuote, WishlistItem } from '../../electron/db'
 import type { DoubanSearchHit } from '../../electron/metadata'
 import type { CaptureChannel, PricingInput } from '../../electron/pricing'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { parseIsbnSemantics as parseIsbnSem, parseIsbnPublisher } from '../lib/isbn'
 
+type ViewMode = 'detail' | 'compact'
+
 const channelOrder: PriceChannel[] = ['jd', 'bookschina', 'dangdang']
+
+type WishlistSortKey = 'addedAt' | 'title' | 'author' | 'priority'
+type SortDir = 'asc' | 'desc'
+
+const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 }
 
 const channelLabel: Record<PriceChannel, string> = {
   bookschina: '中图网',
@@ -21,8 +28,21 @@ export function Wishlist() {
   const [addMode, setAddMode] = useState<null | 'manual'>(null)
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({})
   const [priceCache, setPriceCache] = useState<Record<string, PriceCacheEntry>>({})
+  const [tagFilter, setTagFilter] = useState<string[]>([])
+  const [allTags, setAllTags] = useState<string[]>([])
+  const [sortKey, setSortKey] = useState<WishlistSortKey>('addedAt')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [searchQuery, setSearchQuery] = useState('')
   // key -> channel -> whether capture window is open
   const [capturingKeys, setCapturingKeys] = useState<Record<string, Record<string, boolean>>>({})
+
+  // View mode — persisted in localStorage
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    (localStorage.getItem('wishlistViewMode') as ViewMode | null) ?? 'detail'
+  )
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [gridCols, setGridCols] = useState(4)
 
   // Dropdown
   const [menuOpen, setMenuOpen] = useState(false)
@@ -49,18 +69,41 @@ export function Wishlist() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [menuOpen])
 
+  // Persist viewMode and reset expandedId when it changes
+  useEffect(() => {
+    localStorage.setItem('wishlistViewMode', viewMode)
+    setExpandedId(null)
+  }, [viewMode])
+
+  // Measure actual CSS grid column count via ResizeObserver
+  useEffect(() => {
+    const el = gridRef.current
+    if (!el) return
+    const measure = () => {
+      const cols = getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length
+      setGridCols(cols)
+    }
+    measure()
+    const obs = new ResizeObserver(measure)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [viewMode]) // re-attach when switching to compact (grid is only rendered in compact)
+
   async function loadWishlist() {
     const data = await window.db.getWishlist()
     setItems(data)
+    const tags = await window.db.getAllTags()
+    setAllTags(tags)
     return data
   }
 
   useEffect(() => {
     let cancelled = false
     async function init() {
-      const data = await window.db.getWishlist()
+      const [data, tags] = await Promise.all([window.db.getWishlist(), window.db.getAllTags()])
       if (cancelled) return
       setItems(data)
+      setAllTags(tags)
 
       // Load whatever is already cached — no auto-fetch
       const inputs = buildPricingInputsForItems(data)
@@ -109,10 +152,18 @@ export function Wishlist() {
   }
 
   async function handleDelete(id: string) {
-    if (confirm('Remove from wishlist?')) {
+    if (confirm('确定要从心愿单中移除吗？')) {
       await window.db.deleteWishlistItem(id)
       void loadWishlist()
     }
+  }
+
+  async function handleUpdateItemTags(item: WishlistItem, tags: string[]) {
+    const updated = { ...item, tags }
+    setItems(prev => prev.map(i => i.id === item.id ? updated : i))
+    await window.db.updateWishlistItem(updated)
+    const newAllTags = await window.db.getAllTags()
+    setAllTags(newAllTags)
   }
 
   async function handleCapture(item: WishlistItem, channel: CaptureChannel) {
@@ -213,11 +264,65 @@ export function Wishlist() {
 
   const showForm = addMode === 'manual'
 
+  const filteredItems = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    return items.filter(i => {
+      if (tagFilter.length > 0 && !tagFilter.every(t => (i.tags ?? []).includes(t))) return false
+      if (!q) return true
+      return (
+        i.title.toLowerCase().includes(q) ||
+        i.author.toLowerCase().includes(q) ||
+        (i.isbn ?? '').includes(q)
+      )
+    })
+  }, [items, tagFilter, searchQuery])
+
+  const sortedItems = useMemo(() => {
+    return [...filteredItems].sort((a, b) => {
+      let cmp: number
+      if (sortKey === 'priority') {
+        cmp = (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1)
+      } else if (sortKey === 'addedAt') {
+        cmp = a.addedAt.localeCompare(b.addedAt)
+      } else {
+        const va = (sortKey === 'title' ? a.title : a.author).toLowerCase()
+        const vb = (sortKey === 'title' ? b.title : b.author).toLowerCase()
+        cmp = va.localeCompare(vb, 'zh-CN')
+      }
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [filteredItems, sortKey, sortDir])
+
+  // Build interleaved compact render list: item cards + expanded panel inserted after its row
+  const compactRenderItems = useMemo(() => {
+    if (viewMode !== 'compact') return []
+    type RenderItem =
+      | { type: 'item'; item: WishlistItem }
+      | { type: 'expanded'; item: WishlistItem }
+
+    const result: RenderItem[] = []
+    let expandedItem: WishlistItem | null = null
+    if (expandedId) expandedItem = sortedItems.find(i => i.id === expandedId) ?? null
+
+    for (let i = 0; i < sortedItems.length; i++) {
+      result.push({ type: 'item', item: sortedItems[i] })
+      const isRowEnd = (i + 1) % gridCols === 0 || i === sortedItems.length - 1
+      if (isRowEnd && expandedItem) {
+        const rowStart = i - ((i + 1) % gridCols === 0 ? gridCols - 1 : i % gridCols)
+        const rowItems = sortedItems.slice(rowStart, i + 1)
+        if (rowItems.some(it => it.id === expandedId)) {
+          result.push({ type: 'expanded', item: expandedItem })
+        }
+      }
+    }
+    return result
+  }, [sortedItems, viewMode, expandedId, gridCols])
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
-          Wishlist
+          心愿单
           {items.length > 0 && (
             <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{items.length}</span>
           )}
@@ -225,7 +330,7 @@ export function Wishlist() {
         <div ref={menuRef} className="relative">
           <button
             onClick={() => setMenuOpen(o => !o)}
-            title="Add to Wishlist"
+            title="添加到心愿单"
             className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -242,7 +347,7 @@ export function Wishlist() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" />
                 </svg>
-                剪贴板导入
+                剪贴板
               </button>
               <button
                 type="button"
@@ -252,7 +357,7 @@ export function Wishlist() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                 </svg>
-                手动输入
+                手动
               </button>
             </div>
           )}
@@ -279,28 +384,268 @@ export function Wishlist() {
         />
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {items.map(item => {
-          const sem = item.isbn ? parseIsbnSem(item.isbn) : null
-          const inferredPublisher = item.isbn && !item.publisher ? parseIsbnPublisher(item.isbn) : null
-          return (
-            <WishlistCard
-              key={item.id}
-              item={item}
-              sem={sem}
-              inferredPublisher={inferredPublisher}
-              entry={getEntryForItem(priceCache, item)}
-              capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
-              onCapture={ch => void handleCapture(item, ch)}
-              onDelete={() => handleDelete(item.id)}
-            />
-          )
-        })}
-      </div>
+      {/* Search + sort row */}
+      <div className="flex items-center gap-2">
+        {/* Search input */}
+        <div className="relative w-56">
+          <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="搜索书名、作者、ISBN…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
 
-      {items.length === 0 && !addMode && (
+        {/* Sort button group */}
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 overflow-visible">
+          {([
+            { key: 'title',     label: '书名',    icon: (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
+              </svg>
+            ), defaultDir: 'asc' as SortDir },
+            { key: 'author',    label: '作者',    icon: (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+              </svg>
+            ), defaultDir: 'asc' as SortDir },
+            { key: 'addedAt',   label: '入库时间', icon: (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z" />
+              </svg>
+            ), defaultDir: 'desc' as SortDir },
+            { key: 'priority',  label: '优先级',  icon: (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
+              </svg>
+            ), defaultDir: 'asc' as SortDir },
+          ] as { key: WishlistSortKey; label: string; icon: React.ReactNode; defaultDir: SortDir }[]).map(({ key, label, icon, defaultDir }, idx, arr) => {
+            const active = sortKey === key
+            const isFirst = idx === 0
+            const isLast = idx === arr.length - 1
+            return (
+              <button
+                key={key}
+                type="button"
+                title={`${label}${active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}`}
+                onClick={() => {
+                  if (active) {
+                    setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                  } else {
+                    setSortKey(key)
+                    setSortDir(defaultDir)
+                  }
+                }}
+                className={`relative px-2.5 py-1.5 transition-colors ${isFirst ? 'rounded-l-lg' : ''} ${isLast ? 'rounded-r-lg' : ''} ${
+                  active
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {icon}
+                {active && (
+                  <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center text-white z-10" style={{ fontSize: 7 }}>
+                    {sortDir === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* View mode toggle */}
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 ml-2">
+          <button
+            type="button"
+            title="详细视图"
+            onClick={() => setViewMode('detail')}
+            className={`px-2.5 py-1.5 rounded-l-lg transition-colors ${
+              viewMode === 'detail'
+                ? 'bg-blue-500 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            {/* 2×2 grid icon */}
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="简要视图"
+            onClick={() => setViewMode('compact')}
+            className={`px-2.5 py-1.5 rounded-r-lg transition-colors ${
+              viewMode === 'compact'
+                ? 'bg-blue-500 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            {/* 3×3 grid icon */}
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <rect x="3" y="3" width="5" height="5" rx="0.75" />
+              <rect x="9.5" y="3" width="5" height="5" rx="0.75" />
+              <rect x="16" y="3" width="5" height="5" rx="0.75" />
+              <rect x="3" y="9.5" width="5" height="5" rx="0.75" />
+              <rect x="9.5" y="9.5" width="5" height="5" rx="0.75" />
+              <rect x="16" y="9.5" width="5" height="5" rx="0.75" />
+              <rect x="3" y="16" width="5" height="5" rx="0.75" />
+              <rect x="9.5" y="16" width="5" height="5" rx="0.75" />
+              <rect x="16" y="16" width="5" height="5" rx="0.75" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {allTags.map(tag => {
+            const active = tagFilter.includes(tag)
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() =>
+                  setTagFilter(prev =>
+                    active ? prev.filter(t => t !== tag) : [...prev, tag]
+                  )
+                }
+                className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                  active
+                    ? 'bg-violet-500 border-violet-500 text-white'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400'
+                }`}
+              >
+                {tag}
+              </button>
+            )
+          })}
+          {tagFilter.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setTagFilter([])}
+              className="px-2 py-0.5 rounded-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            >
+              清除筛选
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Detail mode grid ── */}
+      {viewMode === 'detail' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {sortedItems.map(item => {
+            const sem = item.isbn ? parseIsbnSem(item.isbn) : null
+            const inferredPublisher = item.isbn && !item.publisher ? parseIsbnPublisher(item.isbn) : null
+            return (
+              <WishlistCard
+                key={item.id}
+                item={item}
+                sem={sem}
+                inferredPublisher={inferredPublisher}
+                entry={getEntryForItem(priceCache, item)}
+                capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
+                allTags={allTags}
+                onCapture={ch => void handleCapture(item, ch)}
+                onTagsChange={tags => handleUpdateItemTags(item, tags)}
+                onDelete={() => handleDelete(item.id)}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Compact mode grid with inline expand ── */}
+      {viewMode === 'compact' && (
+        <div
+          ref={gridRef}
+          className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2"
+        >
+          {compactRenderItems.map((renderItem, idx) => {
+            if (renderItem.type === 'expanded') {
+              const item = renderItem.item
+              const sem = item.isbn ? parseIsbnSem(item.isbn) : null
+              const inferredPublisher = item.isbn && !item.publisher ? parseIsbnPublisher(item.isbn) : null
+              return (
+                <div
+                  key={`expanded-${item.id}`}
+                  className="col-span-full"
+                >
+                  <div className="max-w-sm w-full">
+                    <WishlistCard
+                      item={item}
+                      sem={sem}
+                      inferredPublisher={inferredPublisher}
+                      entry={getEntryForItem(priceCache, item)}
+                      capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
+                      allTags={allTags}
+                      onCapture={ch => void handleCapture(item, ch)}
+                      onTagsChange={tags => handleUpdateItemTags(item, tags)}
+                      onDelete={() => handleDelete(item.id)}
+                    />
+                  </div>
+                </div>
+              )
+            }
+
+            // Compact card
+            const item = renderItem.item
+            const isExpanded = expandedId === item.id
+            return (
+              <div key={`compact-${item.id}-${idx}`} className="flex flex-col cursor-pointer group">
+                {/* Cover */}
+                <div
+                  className={`aspect-[2/3] bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden relative transition-all ${
+                    isExpanded ? 'ring-2 ring-blue-500' : 'hover:ring-2 hover:ring-blue-300'
+                  }`}
+                  onClick={() => setExpandedId(prev => prev === item.id ? null : item.id)}
+                >
+                  {item.coverUrl ? (
+                    <img src={item.coverUrl} alt={item.title} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                      </svg>
+                    </div>
+                  )}
+                </div>
+                {/* Title */}
+                <button
+                  type="button"
+                  onClick={() => void window.app.openExternal(
+                    item.isbn
+                      ? `https://book.douban.com/isbn/${item.isbn}`
+                      : `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(item.title)}`
+                  )}
+                  className="mt-1 text-[11px] text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug text-center hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-0.5"
+                  title={item.title}
+                >
+                  {item.title}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {sortedItems.length === 0 && !addMode && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-          Your wishlist is empty.
+          心愿单还是空的。
         </div>
       )}
     </div>
@@ -463,10 +808,12 @@ function WishlistCard(props: {
   inferredPublisher: string | null
   entry?: PriceCacheEntry
   capturingChannels: Record<string, boolean>
+  allTags: string[]
   onCapture: (ch: CaptureChannel) => void
+  onTagsChange: (tags: string[]) => void
   onDelete: () => void
 }) {
-  const { item, sem, inferredPublisher, entry, capturingChannels, onCapture, onDelete } = props
+  const { item, sem, inferredPublisher, entry, capturingChannels, allTags, onCapture, onTagsChange, onDelete } = props
   const [priceOpen, setPriceOpen] = useState(false)
   const quotes = getQuotesForRender(entry)
   const bestPrice = quotes.filter(q => q.status === 'ok' && typeof q.priceCny === 'number')
@@ -474,10 +821,10 @@ function WishlistCard(props: {
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-col">
-      {/* Top: cover + info */}
-      <div className="flex flex-row flex-1">
-        {/* Cover */}
-        <div className="flex-shrink-0 w-20 bg-gray-100 dark:bg-gray-700 self-stretch flex items-center justify-center rounded-l-xl overflow-hidden">
+      {/* Top: A (cover) + B (text) */}
+      <div className="flex flex-row h-28">
+        {/* A — Cover */}
+        <div className="flex-shrink-0 w-20 self-stretch bg-gray-100 dark:bg-gray-700 flex items-center justify-center rounded-tl-xl overflow-hidden">
           {item.coverUrl ? (
             <img src={item.coverUrl} alt={item.title} className="w-full h-full object-contain" />
           ) : (
@@ -489,7 +836,7 @@ function WishlistCard(props: {
           )}
         </div>
 
-        {/* Card body */}
+        {/* B — Text & tags */}
         <div className="p-3 flex flex-col flex-1 min-w-0">
           {/* Title */}
           <div className="mb-0.5">
@@ -505,47 +852,52 @@ function WishlistCard(props: {
             </p>
           )}
 
-          <div className="flex-1" />
+          {/* Tag editor */}
+          <WishlistTagEditor
+            tags={item.tags ?? []}
+            allTags={allTags}
+            onChange={onTagsChange}
+          />
+        </div>
+      </div>
 
-          {/* Bottom row: ISBN badge + best price + price toggle + delete */}
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50 dark:border-gray-700 gap-1">
-            {sem && item.isbn ? (
-              <WishlistIsbnBadge isbn={item.isbn} sem={sem} />
-            ) : (
-              <span />
-            )}
-            <div className="flex items-center gap-1">
-              {/* Best price summary */}
-              {bestPrice && (
-                <button
-                  onClick={() => void window.app.openExternal(bestPrice.url)}
-                  className={`text-xs font-semibold ${channelColorText(bestPrice.channel)} hover:underline`}
-                >
-                  ¥{(bestPrice.priceCny as number).toFixed(2)}
-                </button>
-              )}
-              {/* Price toggle */}
-              <button
-                onClick={() => setPriceOpen(o => !o)}
-                title="比价"
-                className={`p-1 rounded transition-colors ${priceOpen ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500 dark:hover:text-gray-300'}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                </svg>
-              </button>
-              {/* Delete */}
-              <button
-                onClick={onDelete}
-                title="移除"
-                className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
-          </div>
+      {/* C — Full-width bottom bar: ISBN badge + best price + price toggle + delete */}
+      <div className="flex items-center justify-between px-3 py-1 border-t border-gray-100 dark:border-gray-700">
+        {sem && item.isbn ? (
+          <WishlistIsbnBadge isbn={item.isbn} sem={sem} />
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-1">
+          {/* Best price summary */}
+          {bestPrice && (
+            <button
+              onClick={() => void window.app.openExternal(bestPrice.url)}
+              className={`text-xs font-semibold ${channelColorText(bestPrice.channel)} hover:underline`}
+            >
+              ¥{(bestPrice.priceCny as number).toFixed(2)}
+            </button>
+          )}
+          {/* Price toggle */}
+          <button
+            onClick={() => setPriceOpen(o => !o)}
+            title="比价"
+            className={`p-1 rounded transition-colors ${priceOpen ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500 dark:hover:text-gray-300'}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+          </button>
+          {/* Delete */}
+          <button
+            onClick={onDelete}
+            title="移除"
+            className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -607,7 +959,7 @@ function ChannelRow(props: {
               ¥{(quote!.priceCny as number).toFixed(2)}
             </button>
             {quote!.fetchedAt && (
-              <span className="text-[10px] text-gray-300 dark:text-gray-600 leading-none">
+              <span className="text-[10px] text-gray-300 dark:text-gray-600 leading-none" title={formatExact(quote!.fetchedAt)}>
                 {formatFetchedAt(quote!.fetchedAt)}
               </span>
             )}
@@ -662,15 +1014,32 @@ function channelColorText(ch: PriceChannel): string {
   }
 }
 
+/** Return a human-readable relative time string, e.g. "3 天前" */
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 1)  return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24)   return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  if (days < 30)    return `${days} 天前`
+  const months = Math.floor(days / 30)
+  if (months < 12)  return `${months} 个月前`
+  const years = Math.floor(days / 365)
+  return `${years} 年前`
+}
+
+function formatExact(iso: string): string {
+  return new Date(iso).toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
 /** Format an ISO timestamp as a compact local date+time, e.g. "3/21 19:30" */
 function formatFetchedAt(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const sameYear = d.getFullYear() === now.getFullYear()
-  if (sameYear) {
-    return d.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  }
-  return d.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return relativeTime(iso)
 }
 
 function getEntryForItem(cache: Record<string, PriceCacheEntry>, item: WishlistItem): PriceCacheEntry | undefined {
@@ -746,5 +1115,118 @@ function WishlistIsbnBadge(props: { isbn: string; sem: { language: string; regio
         <span>{sem.language} · {sem.region}</span>
       )}
     </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// WishlistTagEditor — inline tag chips with add/remove on a wishlist card.
+// ---------------------------------------------------------------------------
+
+function WishlistTagEditor({
+  tags,
+  allTags,
+  onChange,
+}: {
+  tags: string[]
+  allTags: string[]
+  onChange: (tags: string[]) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [inputValue, setInputValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listId = useRef(`wl-tag-list-${Math.random().toString(36).slice(2)}`)
+
+  function commitInput() {
+    const trimmed = inputValue.trim()
+    if (trimmed && !tags.includes(trimmed)) {
+      onChange([...tags, trimmed])
+    }
+    setInputValue('')
+    setAdding(false)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitInput()
+    } else if (e.key === 'Escape') {
+      setInputValue('')
+      setAdding(false)
+    }
+  }
+
+  function removeTag(tag: string) {
+    onChange(tags.filter(t => t !== tag))
+  }
+
+  const suggestions = allTags.filter(t => !tags.includes(t))
+
+  if (tags.length === 0 && !adding) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setAdding(true); setTimeout(() => inputRef.current?.focus(), 0) }}
+        className="mt-1.5 text-xs text-gray-300 dark:text-gray-600 hover:text-violet-400 dark:hover:text-violet-500 transition-colors flex items-center gap-0.5"
+        title="添加标签"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+        </svg>
+        标签
+      </button>
+    )
+  }
+
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1 items-center">
+      {tags.map(tag => (
+        <span
+          key={tag}
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700"
+        >
+          {tag}
+          <button
+            type="button"
+            onClick={() => removeTag(tag)}
+            className="ml-0.5 text-violet-400 hover:text-violet-700 dark:hover:text-violet-100 transition-colors leading-none"
+            title={`移除标签 ${tag}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <>
+          <datalist id={listId.current}>
+            {suggestions.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <input
+            ref={inputRef}
+            type="text"
+            list={listId.current}
+            value={inputValue}
+            onChange={e => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={commitInput}
+            placeholder="输入标签…"
+            className="w-20 px-1.5 py-0.5 text-xs rounded-full border border-violet-300 dark:border-violet-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-violet-400"
+          />
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => { setAdding(true); setTimeout(() => inputRef.current?.focus(), 0) }}
+          title="添加标签"
+          className="w-5 h-5 flex items-center justify-center rounded-full border border-dashed border-gray-300 dark:border-gray-600 text-gray-300 dark:text-gray-600 hover:border-violet-400 hover:text-violet-400 transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        </button>
+      )}
+    </div>
   )
 }

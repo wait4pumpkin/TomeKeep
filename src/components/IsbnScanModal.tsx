@@ -129,11 +129,15 @@ export function IsbnScanModal(props: {
   const streamRef = useRef<MediaStream | null>(null)
   const rafRef = useRef<number | null>(null)
   const [status, setStatus] = useState<ScanStatus>({ state: 'idle' })
+  // Whether to mirror the video horizontally (true when front-facing camera is active)
+  const [isMirrored, setIsMirrored] = useState(false)
 
   // Batch mode: list of scanned ISBNs this session
   const [scanned, setScanned] = useState<string[]>([])
   // Cooldown: after a successful scan, ignore new detections for N ms to avoid double-scanning
   const cooldownRef = useRef(false)
+  // Guard: prevent concurrent detect() calls from piling up across animation frames
+  const isDetectingRef = useRef(false)
 
   const BarcodeDetectorCtor = useMemo(() => {
     const maybe = (globalThis as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector
@@ -164,7 +168,12 @@ export function IsbnScanModal(props: {
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          },
           audio: false,
         })
 
@@ -174,6 +183,12 @@ export function IsbnScanModal(props: {
         }
 
         streamRef.current = stream
+
+        // Mirror the preview unless the camera is explicitly identified as rear-facing.
+        // On desktop (Electron/Mac), facingMode is typically empty string or undefined —
+        // the built-in camera is always front-facing, so we default to mirrored.
+        const facing = stream.getVideoTracks()[0]?.getSettings().facingMode
+        setIsMirrored(facing !== 'environment')
 
         const video = videoRef.current
         if (!video) {
@@ -195,44 +210,50 @@ export function IsbnScanModal(props: {
           const cvs = canvasRef.current
           if (!v) return
 
-          try {
-            const barcodes = await detector.detect(v)
+          // Skip this frame if a previous detect() is still running to prevent async pile-up
+          if (!isDetectingRef.current) {
+            isDetectingRef.current = true
+            try {
+              const barcodes = await detector.detect(v)
 
-            // Draw candidate overlays on every frame
-            if (cvs) drawOverlay(cvs, v, barcodes)
+              // Draw candidate overlays on every frame
+              if (cvs) drawOverlay(cvs, v, barcodes)
 
-            const first = barcodes[0]
-            if (first?.rawValue && !cooldownRef.current) {
-              cooldownRef.current = true
-              if (cvs) drawOverlay(cvs, v, [first])
-              playBeep()
+              const first = barcodes[0]
+              if (first?.rawValue && !cooldownRef.current) {
+                cooldownRef.current = true
+                if (cvs) drawOverlay(cvs, v, [first])
+                playBeep()
 
-              if (mode === 'single') {
-                // Single mode: close after detection (original behaviour)
-                setTimeout(() => {
+                if (mode === 'single') {
+                  // Single mode: close after detection (original behaviour)
+                  setTimeout(() => {
+                    onDetected(first.rawValue)
+                    onClose()
+                  }, 180)
+                  return
+                } else {
+                  // Batch mode: fire callback, append to list, resume scanning after cooldown
                   onDetected(first.rawValue)
-                  onClose()
-                }, 180)
-                return
-              } else {
-                // Batch mode: fire callback, append to list, resume scanning after cooldown
-                onDetected(first.rawValue)
-                setScanned(prev =>
-                  prev.includes(first.rawValue) ? prev : [...prev, first.rawValue]
-                )
-                setTimeout(() => {
-                  cooldownRef.current = false
-                  if (!cancelled) {
-                    rafRef.current = requestAnimationFrame(() => { void tick() })
-                  }
-                }, 1200)
-                return
+                  setScanned(prev =>
+                    prev.includes(first.rawValue) ? prev : [...prev, first.rawValue]
+                  )
+                  setTimeout(() => {
+                    cooldownRef.current = false
+                    if (!cancelled) {
+                      rafRef.current = requestAnimationFrame(() => { void tick() })
+                    }
+                  }, 1200)
+                  return
+                }
               }
+            } catch (e) {
+              const message = e instanceof Error ? e.message : '未知错误'
+              setStatus({ state: 'error', message })
+              return
+            } finally {
+              isDetectingRef.current = false
             }
-          } catch (e) {
-            const message = e instanceof Error ? e.message : '未知错误'
-            setStatus({ state: 'error', message })
-            return
           }
 
           rafRef.current = requestAnimationFrame(() => {
@@ -292,10 +313,17 @@ export function IsbnScanModal(props: {
         <div className="p-4 space-y-3">
           {/* Video + canvas overlay stacked */}
           <div className="relative rounded-lg bg-black overflow-hidden aspect-video">
-            <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              style={isMirrored ? { transform: 'scaleX(-1)' } : undefined}
+              muted
+              playsInline
+            />
             <canvas
               ref={canvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none"
+              style={isMirrored ? { transform: 'scaleX(-1)' } : undefined}
             />
           </div>
 

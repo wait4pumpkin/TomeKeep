@@ -30,7 +30,7 @@ export function DoubanFillField(props: {
 
   return (
     <div className="col-span-2">
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Douban URL/ID</label>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">豆瓣链接/ID</label>
       <div className="flex gap-2">
         <input
           type="text"
@@ -51,7 +51,7 @@ export function DoubanFillField(props: {
           className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:hover:bg-gray-100 dark:disabled:hover:bg-gray-700"
           disabled={!input.trim()}
         >
-          Fill
+          填入
         </button>
       </div>
       {status.state !== 'idle' && (

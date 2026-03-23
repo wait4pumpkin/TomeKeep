@@ -8,9 +8,11 @@ export interface Book {
   author: string
   isbn?: string
   publisher?: string
-  status: 'unread' | 'reading' | 'read'
+  /** @deprecated Use ReadingState per-user records instead. Kept for migration only. */
+  status?: 'unread' | 'reading' | 'read'
   rating?: number
   coverUrl?: string
+  tags?: string[]
   addedAt: string
 }
 
@@ -21,8 +23,23 @@ export interface WishlistItem {
   isbn?: string
   publisher?: string
   coverUrl?: string
+  tags?: string[]
   priority: 'high' | 'medium' | 'low'
   addedAt: string
+}
+
+export interface UserProfile {
+  id: string
+  name: string
+  createdAt: string
+}
+
+export interface ReadingState {
+  userId: string
+  bookId: string
+  status: 'unread' | 'reading' | 'read'
+  /** ISO datetime string set when status first transitions to 'read'. Cleared when status moves away from 'read'. */
+  completedAt?: string
 }
 
 export type PriceChannel = 'jd' | 'bookschina' | 'dangdang'
@@ -58,9 +75,19 @@ export interface DatabaseSchema {
   books: Book[]
   wishlist: WishlistItem[]
   priceCache: Record<string, PriceCacheEntry>
+  users: UserProfile[]
+  readingStates: ReadingState[]
+  activeUserId: string | null
 }
 
-const defaultData: DatabaseSchema = { books: [], wishlist: [], priceCache: {} }
+const defaultData: DatabaseSchema = {
+  books: [],
+  wishlist: [],
+  priceCache: {},
+  users: [],
+  readingStates: [],
+  activeUserId: null,
+}
 
 let dbInstance: Awaited<ReturnType<typeof JSONFilePreset<DatabaseSchema>>> | null = null
 
@@ -72,18 +99,57 @@ export function getDb() {
 export async function setupDatabase() {
   const userDataPath = app.getPath('userData')
   const dbPath = path.join(userDataPath, 'db.json')
-  
+
   console.log('Database path:', dbPath)
 
   const db = await JSONFilePreset<DatabaseSchema>(dbPath, defaultData)
   db.data.books ??= []
   db.data.wishlist ??= []
   db.data.priceCache ??= {}
+  db.data.users ??= []
+  db.data.readingStates ??= []
+  if (db.data.activeUserId === undefined) db.data.activeUserId = null
   dbInstance = db
 
-  // Register IPC handlers
+  // ---------------------------------------------------------------------------
+  // One-time migration: lift Book.status → ReadingState rows for the default user
+  // Only runs when there are books with non-default status and no users yet.
+  // ---------------------------------------------------------------------------
+  if (db.data.users.length === 0) {
+    const defaultUser: UserProfile = {
+      id: crypto.randomUUID(),
+      name: '匿名',
+      createdAt: new Date().toISOString(),
+    }
+    db.data.users.push(defaultUser)
+    db.data.activeUserId = defaultUser.id
+    // Migrate any existing Book.status values
+    for (const book of db.data.books) {
+      if (book.status && book.status !== 'unread') {
+        db.data.readingStates.push({
+          userId: defaultUser.id,
+          bookId: book.id,
+          status: book.status,
+        })
+      }
+    }
+    await db.write()
+  }
+
+  // Guard: ensure activeUserId points to a real user
+  if (
+    db.data.activeUserId !== null &&
+    !db.data.users.find(u => u.id === db.data.activeUserId)
+  ) {
+    db.data.activeUserId = db.data.users[0]?.id ?? null
+    await db.write()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Book IPC handlers
+  // ---------------------------------------------------------------------------
   ipcMain.handle('db:get-books', () => db.data.books)
-  
+
   ipcMain.handle('db:add-book', async (_, book: Book) => {
     db.data.books.push(book)
     await db.write()
@@ -104,13 +170,17 @@ export async function setupDatabase() {
     const index = db.data.books.findIndex(b => b.id === id)
     if (index !== -1) {
       db.data.books.splice(index, 1)
+      // Clean up readingStates for this book across all users
+      db.data.readingStates = db.data.readingStates.filter(rs => rs.bookId !== id)
       await db.write()
       return true
     }
     return false
   })
 
+  // ---------------------------------------------------------------------------
   // Wishlist handlers
+  // ---------------------------------------------------------------------------
   ipcMain.handle('db:get-wishlist', () => db.data.wishlist)
 
   ipcMain.handle('db:add-wishlist-item', async (_, item: WishlistItem) => {
@@ -127,5 +197,93 @@ export async function setupDatabase() {
       return true
     }
     return false
+  })
+
+  ipcMain.handle('db:update-wishlist-item', async (_, updatedItem: WishlistItem) => {
+    const index = db.data.wishlist.findIndex(w => w.id === updatedItem.id)
+    if (index !== -1) {
+      db.data.wishlist[index] = updatedItem
+      await db.write()
+      return updatedItem
+    }
+    return null
+  })
+
+  ipcMain.handle('db:get-all-tags', () => {
+    const tagSet = new Set<string>()
+    for (const book of db.data.books) {
+      for (const tag of book.tags ?? []) tagSet.add(tag)
+    }
+    for (const item of db.data.wishlist) {
+      for (const tag of item.tags ?? []) tagSet.add(tag)
+    }
+    return [...tagSet].sort((a, b) => a.localeCompare(b))
+  })
+
+  // ---------------------------------------------------------------------------
+  // User IPC handlers
+  // ---------------------------------------------------------------------------
+  ipcMain.handle('db:get-users', () => db.data.users)
+
+  ipcMain.handle('db:add-user', async (_, name: string) => {
+    const user: UserProfile = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      createdAt: new Date().toISOString(),
+    }
+    db.data.users.push(user)
+    await db.write()
+    return user
+  })
+
+  ipcMain.handle('db:rename-user', async (_, id: string, name: string) => {
+    const user = db.data.users.find(u => u.id === id)
+    if (!user) return null
+    user.name = name.trim()
+    await db.write()
+    return user
+  })
+
+  ipcMain.handle('db:delete-user', async (_, id: string) => {
+    if (db.data.users.length <= 1) return false   // must keep at least one user
+    const index = db.data.users.findIndex(u => u.id === id)
+    if (index === -1) return false
+    db.data.users.splice(index, 1)
+    db.data.readingStates = db.data.readingStates.filter(rs => rs.userId !== id)
+    if (db.data.activeUserId === id) {
+      db.data.activeUserId = db.data.users[0]?.id ?? null
+    }
+    await db.write()
+    return true
+  })
+
+  ipcMain.handle('db:get-active-user', () => {
+    if (!db.data.activeUserId) return null
+    return db.data.users.find(u => u.id === db.data.activeUserId) ?? null
+  })
+
+  ipcMain.handle('db:set-active-user', async (_, id: string) => {
+    const user = db.data.users.find(u => u.id === id)
+    if (!user) return null
+    db.data.activeUserId = id
+    await db.write()
+    return user
+  })
+
+  ipcMain.handle('db:get-reading-states', (_, userId: string) =>
+    db.data.readingStates.filter(rs => rs.userId === userId)
+  )
+
+  ipcMain.handle('db:set-reading-state', async (_, state: ReadingState) => {
+    const existing = db.data.readingStates.findIndex(
+      rs => rs.userId === state.userId && rs.bookId === state.bookId
+    )
+    if (existing !== -1) {
+      db.data.readingStates[existing] = state
+    } else {
+      db.data.readingStates.push(state)
+    }
+    await db.write()
+    return state
   })
 }

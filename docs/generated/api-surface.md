@@ -31,9 +31,10 @@ interface UserProfile {
 #### ReadingState
 ```ts
 interface ReadingState {
-  userId: string   // UserProfile.id
-  bookId: string   // Book.id
+  userId: string       // UserProfile.id
+  bookId: string       // Book.id
   status: 'unread' | 'reading' | 'read'
+  completedAt?: string // ISO 8601; set automatically when status transitions to 'read', cleared otherwise
 }
 ```
 
@@ -71,7 +72,7 @@ interface WishlistItem {
     - getActiveUser() -> UserProfile | null
     - setActiveUser(id: string) -> UserProfile | null
     - getReadingStates(userId: string) -> ReadingState[]
-    - setReadingState(state: ReadingState) -> ReadingState  (upsert)
+    - setReadingState(state: ReadingState) -> ReadingState  (upsert; pass completedAt to record finish date)
 
 - window.meta
   - purpose: fetch book metadata by ISBN (best-effort)
@@ -174,6 +175,14 @@ type IsbnSemantics = { region: string; language: string }
 **Coverage of `parseIsbnSemantics`**: 978-0/1 (English), 978-2 (French), 978-3 (German), 978-4 (Japanese), 978-5 (Russian), 978-7 (China mainland), 978-957/986 (Taiwan), 978-988 (Hong Kong), 978-99937 (Macau), major 978 two- and three-digit groups, 979-8/10/11/12 block.
 
 **Coverage of `parseIsbnPublisher`**: ~100 well-known publishers within China mainland (978-7). Other groups always return null. Full coverage is not achievable without the ISBN Agency's non-public publisher registry.
+
+### Client-side localStorage keys
+
+| Key | Values | Default | Description |
+|---|---|---|---|
+| `theme` | `'auto' \| 'light' \| 'dark'` | `'auto'` | UI theme preference; managed by `src/lib/theme.ts` |
+| `inventoryViewMode` | `'detail' \| 'compact'` | `'detail'` | View mode for the Library page; persisted on toggle, restored on next visit |
+| `wishlistViewMode` | `'detail' \| 'compact'` | `'detail'` | View mode for the Wishlist page; persisted on toggle, restored on next visit |
 
 ### Client-side theme library (`src/lib/theme.ts`)
 
