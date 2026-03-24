@@ -92,4 +92,13 @@ contextBridge.exposeInMainWorld('companion', {
   sendScanAck: (isbn: string, hasMetadata: boolean, title?: string) => {
     ipcRenderer.send('companion:scan-ack', { isbn, hasMetadata, title })
   },
+  /**
+   * Register a callback invoked when the phone requests deletion of a failed scan entry.
+   * Returns a dispose function that removes the listener.
+   */
+  onDeleteEntryReceived: (cb: (isbn: string) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, isbn: string) => cb(isbn)
+    ipcRenderer.on('companion:delete-entry', listener)
+    return () => ipcRenderer.off('companion:delete-entry', listener)
+  },
 })

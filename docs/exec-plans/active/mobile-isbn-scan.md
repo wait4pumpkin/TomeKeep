@@ -150,3 +150,4 @@ else
 - [x] 手动测试：iOS Safari 端到端
 - [x] 修复 `companion:scan-ack` IPC handler 未转发 `title` 字段导致手机端无法显示书名的 bug
 - [x] 手机端、桌面端扫描列表 UI 简化：移除状态文字，书名与 ISBN 同行显示，图标表达状态
+- [x] 手机端删除失败扫描条目：`POST /delete-entry` 路由、`companion:delete-entry` IPC、`onDeleteEntryReceived` preload 方法、手机端删除按钮（含超时回退项）及 `removeItem()` 辅助函数、`delete-ack` SSE 消息处理

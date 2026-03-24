@@ -88,5 +88,10 @@ interface Window {
     onIsbnReceived: (cb: (isbn: string) => void) => () => void
     /** Send scan result acknowledgement back to the phone (displayed on phone UI). */
     sendScanAck: (isbn: string, hasMetadata: boolean, title?: string) => void
+    /**
+     * Register a callback invoked when the phone requests deletion of a failed scan entry.
+     * Returns a dispose function that removes the listener.
+     */
+    onDeleteEntryReceived: (cb: (isbn: string) => void) => () => void
   }
 }

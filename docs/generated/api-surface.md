@@ -158,6 +158,22 @@ interface WishlistItem {
       - notifies the phone (via SSE) whether the ISBN was saved with full metadata
       - optional `title` is displayed on the phone scan list when metadata was resolved
       - phone UI updates the scan list item accordingly
+    - onDeleteEntryReceived(cb: (isbn: string) => void) -> () => void
+      - registers a callback invoked when the phone sends a `POST /delete-entry` request
+      - the callback receives the isbn to remove; the renderer should remove it from the scan list and delete it from the library
+      - returns a dispose function; call it to remove the listener
+
+### Client-side author library (`src/lib/author.ts`)
+
+Pure functions exported for renderer use. Also inlined in `electron/db.ts` for the startup migration (no cross-boundary import).
+
+| Function | Signature | Description |
+|---|---|---|
+| `normalizeAuthor` | `(raw: string) -> string` | Normalize an author string: ensures exactly one space after nationality bracket prefixes (`[美]`, `（英）`, `(日)`, etc.), collapses internal whitespace, splits multi-author strings on `,` / `/` / `、` and re-joins with `, ` |
+
+**Normalization rule — nationality prefix spacing**: Bracket patterns `[X]`, `【X】`, `(X)`, `（X）` where X is 1–6 CJK characters are treated as nationality prefixes. If the name immediately follows the closing bracket with no space (or multiple spaces), exactly one space is inserted.
+
+**Applied at**: `commitBook`, `commitBookFromRef`, `handleSaveEdit` in `Inventory.tsx`; `handleAdd` in `Wishlist.tsx`. Also run as a startup migration in `electron/db.ts` `setupDatabase()` to fix existing records.
 
 ### Client-side ISBN library (`src/lib/isbn.ts`)
 
@@ -255,4 +271,15 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | companion:status | renderer→main | returns `{ running, url? }` without side effects |
 | companion:isbn-received | main→renderer | pushed for each ISBN received from the phone scanner |
 | companion:scan-ack | renderer→main | renderer notifies main to broadcast SSE ack to phone; payload `{ isbn, hasMetadata, title? }` |
+| companion:delete-entry | main→renderer | pushed when phone requests deletion of a failed scan entry; payload `isbn: string` |
+
+### Companion HTTP Routes (companion-server.ts)
+| Method + Path | Auth | Description |
+|---|---|---|
+| `GET /` | — | serves `public/mobile-scan.html` |
+| `GET /events?token=T` | token | SSE stream; sends `{ type:'ack', isbn, hasMetadata, title? }` and `{ type:'delete-ack', isbn }` events |
+| `POST /scan?token=T` | token | receives `{ isbn }`, fires `companion:isbn-received` IPC |
+| `POST /delete-entry?token=T` | token | receives `{ isbn }`, fires `companion:delete-entry` IPC and broadcasts `{ type:'delete-ack', isbn }` SSE |
+| `GET /vendor/*` | — | serves local static assets (e.g. `zxing-library.min.js`) |
+| `GET /ping` | — | health check, returns `{ alive: true }` |
 

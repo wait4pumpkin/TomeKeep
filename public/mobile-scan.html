@@ -171,6 +171,18 @@
     .item-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; min-width: 0; }
     .item-isbn  { font-family: monospace; font-size: 12px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
 
+    .item-delete {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      border: none; background: none; cursor: pointer;
+      color: var(--text-muted); border-radius: 6px;
+      transition: color .15s, background .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .item-delete:hover { color: var(--red); background: rgba(239,68,68,.10); }
+    .item-delete:disabled { opacity: .35; pointer-events: none; }
+
     .item-icon.sending svg { animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -378,6 +390,22 @@
         if (iconEl && iconEl.className.includes('sending')) {
           iconEl.className = 'item-icon no-meta'
           iconEl.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>`
+          // Also add the delete button for timeout-failed entries
+          if (!entry.li.querySelector('.item-delete')) {
+            const btn = document.createElement('button')
+            btn.className = 'item-delete'
+            btn.title = '删除此条目'
+            btn.innerHTML = `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16"/></svg>`
+            btn.addEventListener('click', () => {
+              btn.disabled = true
+              fetch(`${baseUrl}/delete-entry?token=${token}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isbn }),
+              }).catch(() => { btn.disabled = false })
+            })
+            entry.li.appendChild(btn)
+          }
         }
       }
     }, 20000)
@@ -410,7 +438,38 @@
     } else {
       iconEl.className = 'item-icon no-meta'
       iconEl.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>`
+
+      // Add delete button — only for failed entries, only once
+      if (!entry.li.querySelector('.item-delete')) {
+        const btn = document.createElement('button')
+        btn.className = 'item-delete'
+        btn.title = '删除此条目'
+        btn.innerHTML = `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16"/></svg>`
+        btn.addEventListener('click', () => {
+          btn.disabled = true
+          fetch(`${baseUrl}/delete-entry?token=${token}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isbn }),
+          }).catch(() => {
+            // If the request fails, re-enable the button so the user can retry
+            btn.disabled = false
+          })
+        })
+        entry.li.appendChild(btn)
+      }
     }
+  }
+
+  function removeItem(isbn) {
+    const entry = scannedMap.get(isbn)
+    if (!entry) return
+    clearTimeout(entry.ackTimer)
+    entry.li.remove()
+    scannedMap.delete(isbn)
+    totalScanned--
+    listCount.textContent = totalScanned + ' 本'
+    if (totalScanned === 0) listSection.style.display = 'none'
   }
 
   // ── SSE: listen for ack from server ───────────────────────────────────────
@@ -422,6 +481,8 @@
         const data = JSON.parse(e.data)
         if (data.type === 'ack' && data.isbn) {
           updateItem(data.isbn, !!data.hasMetadata, data.title)
+        } else if (data.type === 'delete-ack' && data.isbn) {
+          removeItem(data.isbn)
         }
       } catch (_) { /* ignore */ }
     }

@@ -8,6 +8,7 @@
  *   GET  /                     → serves public/mobile-scan.html
  *   GET  /events?token=T       → SSE stream; sends { type:'ack', isbn, hasMetadata } per scan
  *   POST /scan?token=T         → receives { isbn: string }; fires companion:isbn-received via IPC
+ *   POST /delete-entry?token=T → receives { isbn: string }; fires companion:delete-entry via IPC; SSE delete-ack
  *   GET  /ping                 → { alive: true } health check
  *
  * Security:
@@ -262,6 +263,40 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
         if (wins[0]) {
           wins[0].webContents.send('companion:isbn-received', isbn)
         }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'invalid_json' }))
+      }
+    })
+    return
+  }
+
+  // --- POST /delete-entry → phone requests deletion of a failed scan entry ---
+  if (req.method === 'POST' && pathname === '/delete-entry') {
+    if (!requireToken(urlObj, res)) return
+
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { isbn } = JSON.parse(body) as { isbn?: unknown }
+        if (typeof isbn !== 'string' || !isbn) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'missing_isbn' }))
+          return
+        }
+
+        // Forward to renderer via IPC so the desktop library removes the entry
+        const wins = BrowserWindow.getAllWindows()
+        if (wins[0]) {
+          wins[0].webContents.send('companion:delete-entry', isbn)
+        }
+
+        // Acknowledge back to the phone immediately so it can remove the item from its list
+        broadcastSse({ type: 'delete-ack', isbn })
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: true }))

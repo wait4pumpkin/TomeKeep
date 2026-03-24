@@ -76,7 +76,15 @@ export function MobileScanPanel(props: {
         )
         onDetected(isbn)
       })
-      disposeRef.current = dispose
+
+      // Register phone-initiated delete listener
+      const disposeDelete = window.companion.onDeleteEntryReceived((isbn) => {
+        if (unmounted) return
+        setScanned(prev => prev.filter(e => e.isbn !== isbn))
+        onDeleteEntry?.(isbn)
+      })
+
+      disposeRef.current = () => { dispose(); disposeDelete() }
     }
 
     void start()
