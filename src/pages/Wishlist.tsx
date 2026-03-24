@@ -764,7 +764,7 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
         <div className="flex gap-3">
           {/* Cover column: thumbnail with overlaid capture buttons */}
           <div className="flex-shrink-0 self-start">
-            <div className="relative w-14 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+            <div className="relative w-12 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
               {(coverDataUrl || item.coverUrl) ? (
                 <img src={coverDataUrl ?? item.coverUrl} alt="" className="w-full h-full object-contain" />
               ) : (

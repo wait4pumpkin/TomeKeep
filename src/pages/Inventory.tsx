@@ -1546,7 +1546,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
         <div className="flex gap-3">
           {/* Cover column: thumbnail with overlaid capture buttons */}
           <div className="flex-shrink-0 self-start">
-            <div className="relative w-14 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+            <div className="relative w-12 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
               {(coverDataUrl || book.coverUrl) ? (
                 <img src={coverDataUrl ?? book.coverUrl} alt="" className="w-full h-full object-contain" />
               ) : (
