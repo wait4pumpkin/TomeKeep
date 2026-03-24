@@ -6,6 +6,7 @@ import type { CaptureChannel, PricingInput } from '../../electron/pricing'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { parseIsbnSemantics as parseIsbnSem, parseIsbnPublisher } from '../lib/isbn'
 import { normalizeAuthor } from '../lib/author'
+import { CoverCropModal } from '../components/CoverCropModal'
 
 type ViewMode = 'detail' | 'compact'
 
@@ -30,6 +31,15 @@ export function Wishlist() {
   const [items, setItems] = useState<WishlistItem[]>([])
   const [addMode, setAddMode] = useState<null | 'manual'>(null)
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({})
+  const [newItemCoverDataUrl, setNewItemCoverDataUrl] = useState<string | null>(null)
+
+  // Toast for title navigation failures
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
+  useEffect(() => {
+    if (!toastMsg) return
+    const t = setTimeout(() => setToastMsg(null), 2500)
+    return () => clearTimeout(t)
+  }, [toastMsg])
   const [priceCache, setPriceCache] = useState<Record<string, PriceCacheEntry>>({})
   const [tagFilter, setTagFilter] = useState<string[]>([])
   const [allTags, setAllTags] = useState<string[]>([])
@@ -122,6 +132,7 @@ export function Wishlist() {
 
   function resetForm() {
     setNewItem({})
+    setNewItemCoverDataUrl(null)
     setSearchHits([])
     setSearchState('idle')
     setFillState('idle')
@@ -135,9 +146,11 @@ export function Wishlist() {
 
     const id = crypto.randomUUID()
 
-    // Download cover to local storage before saving the record
+    // Download/save cover to local storage before saving the record
     let coverUrl = newItem.coverUrl
-    if (coverUrl && !coverUrl.startsWith('app://')) {
+    if (newItemCoverDataUrl) {
+      coverUrl = await window.covers.saveCoverData(id, newItemCoverDataUrl) ?? coverUrl
+    } else if (coverUrl && !coverUrl.startsWith('app://')) {
       coverUrl = await window.covers.saveCover(id, coverUrl)
     }
 
@@ -328,6 +341,12 @@ export function Wishlist() {
 
   return (
     <div className="space-y-6">
+      {/* Toast */}
+      {toastMsg && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg pointer-events-none">
+          {toastMsg}
+        </div>
+      )}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
           心愿单
@@ -396,6 +415,8 @@ export function Wishlist() {
           onSelectHit={handleSelectHit}
           onSubmit={handleAdd}
           onCancel={() => { setAddMode(null); resetForm() }}
+          coverDataUrl={newItemCoverDataUrl}
+          onCoverDataUrl={setNewItemCoverDataUrl}
         />
       )}
 
@@ -578,6 +599,13 @@ export function Wishlist() {
                 onCapture={ch => void handleCapture(item, ch)}
                 onTagsChange={tags => handleUpdateItemTags(item, tags)}
                 onDelete={() => handleDelete(item.id)}
+                onTitleClick={() => {
+                  if (item.isbn) {
+                    void window.app.openExternal(`https://openlibrary.org/isbn/${item.isbn}`)
+                  } else {
+                    setToastMsg('无法跳转：未填写 ISBN')
+                  }
+                }}
               />
             )
           })}
@@ -611,6 +639,13 @@ export function Wishlist() {
                       onCapture={ch => void handleCapture(item, ch)}
                       onTagsChange={tags => handleUpdateItemTags(item, tags)}
                       onDelete={() => handleDelete(item.id)}
+                      onTitleClick={() => {
+                        if (item.isbn) {
+                          void window.app.openExternal(`https://openlibrary.org/isbn/${item.isbn}`)
+                        } else {
+                          setToastMsg('无法跳转：未填写 ISBN')
+                        }
+                      }}
                     />
                   </div>
                 </div>
@@ -642,11 +677,13 @@ export function Wishlist() {
                 {/* Title */}
                 <button
                   type="button"
-                  onClick={() => void window.app.openExternal(
-                    item.isbn
-                      ? `https://book.douban.com/isbn/${item.isbn}`
-                      : `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(item.title)}`
-                  )}
+                  onClick={() => {
+                    if (item.isbn) {
+                      void window.app.openExternal(`https://openlibrary.org/isbn/${item.isbn}`)
+                    } else {
+                      setToastMsg('无法跳转：未填写 ISBN')
+                    }
+                  }}
                   className="mt-1 text-[11px] text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug text-center hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-0.5"
                   title={item.title}
                 >
@@ -674,18 +711,24 @@ export function Wishlist() {
 
 type WishlistAddFormProps = {
   item: Partial<WishlistItem>
+  coverDataUrl: string | null
   searchHits: DoubanSearchHit[]
   searchState: 'idle' | 'loading' | 'error'
   fillState: 'idle' | 'loading'
   clipStatus: { state: 'idle' | 'loading' | 'success' | 'error'; message?: string }
   onItemChange: (patch: Partial<WishlistItem>) => void
+  onCoverDataUrl: (dataUrl: string) => void
   onSelectHit: (hit: DoubanSearchHit) => void
   onSubmit: (e: React.FormEvent) => void
   onCancel: () => void
 }
 
-function WishlistAddForm({ item, searchHits, searchState, fillState, clipStatus, onItemChange, onSelectHit, onSubmit, onCancel }: WishlistAddFormProps) {
+function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillState, clipStatus, onItemChange, onCoverDataUrl, onSelectHit, onSubmit, onCancel }: WishlistAddFormProps) {
   const inputCls = 'w-full px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+  const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
+  const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const metaFilled = !!(item.coverUrl || item.isbn || item.publisher)
 
@@ -701,15 +744,57 @@ function WishlistAddForm({ item, searchHits, searchState, fillState, clipStatus,
       <form onSubmit={onSubmit}>
         {/* Row 1: cover preview + fields */}
         <div className="flex gap-3">
-          {/* Cover thumbnail */}
-          <div className="flex-shrink-0 w-12 h-16 rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
-            {item.coverUrl ? (
-              <img src={item.coverUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-              </svg>
-            )}
+          {/* Cover column: thumbnail + capture buttons */}
+          <div className="flex-shrink-0 flex flex-col items-center gap-1">
+            <div className="w-14 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+              {(coverDataUrl || item.coverUrl) ? (
+                <img src={coverDataUrl ?? item.coverUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+              )}
+            </div>
+            {/* Capture buttons */}
+            <div className="flex gap-1">
+              {/* File picker */}
+              <button
+                type="button"
+                title="从文件选择封面"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1 rounded text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                </svg>
+              </button>
+              {/* Camera */}
+              <button
+                type="button"
+                title="拍摄封面"
+                onClick={() => setCropMode('camera')}
+                className="p-1 rounded text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                </svg>
+              </button>
+            </div>
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={e => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setPendingFile(file)
+                setCropMode('file')
+                e.target.value = ''
+              }}
+            />
           </div>
 
           {/* Input fields */}
@@ -769,8 +854,35 @@ function WishlistAddForm({ item, searchHits, searchState, fillState, clipStatus,
               onChange={e => onItemChange({ author: e.target.value })}
               className={inputCls}
             />
+
+            {/* Publisher */}
+            <input
+              type="text"
+              placeholder="出版社"
+              value={item.publisher ?? ''}
+              onChange={e => onItemChange({ publisher: e.target.value })}
+              className={inputCls}
+            />
+
+            {/* ISBN */}
+            <input
+              type="text"
+              placeholder="ISBN"
+              value={item.isbn ?? ''}
+              onChange={e => onItemChange({ isbn: e.target.value })}
+              className={inputCls}
+            />
           </div>
         </div>
+
+        {/* CoverCropModal */}
+        <CoverCropModal
+          isOpen={cropMode !== null}
+          onClose={() => { setCropMode(null); setPendingFile(undefined) }}
+          onConfirm={dataUrl => { onCoverDataUrl(dataUrl); setCropMode(null); setPendingFile(undefined) }}
+          mode={cropMode ?? 'file'}
+          initialFile={pendingFile}
+        />
 
         {/* Fill loading indicator */}
         {fillState === 'loading' && (
@@ -827,8 +939,9 @@ function WishlistCard(props: {
   onCapture: (ch: CaptureChannel) => void
   onTagsChange: (tags: string[]) => void
   onDelete: () => void
+  onTitleClick: () => void
 }) {
-  const { item, sem, inferredPublisher, entry, capturingChannels, allTags, onCapture, onTagsChange, onDelete } = props
+  const { item, sem, inferredPublisher, entry, capturingChannels, allTags, onCapture, onTagsChange, onDelete, onTitleClick } = props
   const [priceOpen, setPriceOpen] = useState(false)
   const quotes = getQuotesForRender(entry)
   const bestPrice = quotes.filter(q => q.status === 'ok' && typeof q.priceCny === 'number')
@@ -855,9 +968,13 @@ function WishlistCard(props: {
         <div className="p-3 flex flex-col flex-1 min-w-0">
           {/* Title */}
           <div className="mb-0.5">
-            <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
+            <button
+              type="button"
+              onClick={onTitleClick}
+              className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
+            >
               {item.title}
-            </span>
+            </button>
           </div>
 
           <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{item.author}</p>
