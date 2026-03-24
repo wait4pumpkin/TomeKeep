@@ -763,8 +763,8 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
         {/* Row 1: cover preview + fields */}
         <div className="flex gap-3">
           {/* Cover column: thumbnail with overlaid capture buttons */}
-          <div className="flex-shrink-0">
-            <div className="relative w-16 h-24 rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+          <div className="flex-shrink-0 self-start">
+            <div className="relative w-14 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
               {(coverDataUrl || item.coverUrl) ? (
                 <img src={coverDataUrl ?? item.coverUrl} alt="" className="w-full h-full object-contain" />
               ) : (
@@ -900,23 +900,6 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
           initialFile={pendingFile}
         />
 
-        {/* Single status line */}
-        {statusLine && (
-          <p className={`text-xs mt-2 flex items-center gap-1.5 ${
-            statusLine.type === 'error'   ? 'text-red-500 dark:text-red-400' :
-            statusLine.type === 'success' ? 'text-green-600 dark:text-green-400' :
-                                            'text-gray-400 dark:text-gray-500'
-          }`}>
-            {statusLine.type === 'loading' && (
-              <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-            )}
-            {statusLine.text}
-          </p>
-        )}
-
         {/* Actions row — no status control for wishlist */}
         <div className="flex items-center justify-end gap-2 mt-2.5">
           {/* Cancel */}
@@ -937,6 +920,23 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
             添加
           </button>
         </div>
+
+        {/* Status line — below actions so it never overlaps the input fields */}
+        {statusLine && (
+          <p className={`text-xs mt-1.5 flex items-center gap-1.5 ${
+            statusLine.type === 'error'   ? 'text-red-500 dark:text-red-400' :
+            statusLine.type === 'success' ? 'text-green-600 dark:text-green-400' :
+                                            'text-gray-400 dark:text-gray-500'
+          }`}>
+            {statusLine.type === 'loading' && (
+              <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+            )}
+            {statusLine.text}
+          </p>
+        )}
       </form>
     </div>
   )
