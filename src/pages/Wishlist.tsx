@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import type { PriceCacheEntry, PriceChannel, PriceQuote, WishlistItem } from '../../electron/db'
 import type { DoubanSearchHit } from '../../electron/metadata'
 import type { CaptureChannel, PricingInput } from '../../electron/pricing'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { parseIsbnSemantics as parseIsbnSem, parseIsbnPublisher } from '../lib/isbn'
+import { normalizeAuthor } from '../lib/author'
 
 type ViewMode = 'detail' | 'compact'
 
@@ -24,6 +26,7 @@ const channelLabel: Record<PriceChannel, string> = {
 const CAPTURE_SUPPORTED: PriceChannel[] = ['jd', 'dangdang', 'bookschina']
 
 export function Wishlist() {
+  const { watermarkName } = useOutletContext<{ watermarkName: string | null }>()
   const [items, setItems] = useState<WishlistItem[]>([])
   const [addMode, setAddMode] = useState<null | 'manual'>(null)
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({})
@@ -140,6 +143,7 @@ export function Wishlist() {
 
     const itemToAdd = {
       ...newItem,
+      author: normalizeAuthor(newItem.author ?? ''),
       coverUrl,
       id,
       addedAt: new Date().toISOString(),
@@ -288,6 +292,10 @@ export function Wishlist() {
         const va = (sortKey === 'title' ? a.title : a.author).toLowerCase()
         const vb = (sortKey === 'title' ? b.title : b.author).toLowerCase()
         cmp = va.localeCompare(vb, 'zh-CN')
+        // Secondary sort: when authors are equal, sort by title
+        if (cmp === 0 && sortKey === 'author') {
+          cmp = a.title.toLowerCase().localeCompare(b.title.toLowerCase(), 'zh-CN')
+        }
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
@@ -327,7 +335,13 @@ export function Wishlist() {
             <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{items.length}</span>
           )}
         </h2>
-        <div ref={menuRef} className="relative">
+        <div className="flex items-center gap-2">
+          {watermarkName && watermarkName !== '匿名' && (
+            <span className="h-9 flex items-center px-2 text-base font-medium text-gray-400 dark:text-gray-500 select-none">
+              {watermarkName}
+            </span>
+          )}
+          <div ref={menuRef} className="relative">
           <button
             onClick={() => setMenuOpen(o => !o)}
             title="添加到心愿单"
@@ -357,10 +371,11 @@ export function Wishlist() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                 </svg>
-                手动
+                 手动
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
 

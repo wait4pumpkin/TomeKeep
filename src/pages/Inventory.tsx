@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import type { Book, ReadingState, UserProfile } from '../../electron/db'
 import type { DoubanSearchHit } from '../../electron/metadata'
 
@@ -10,8 +11,10 @@ import { IsbnScanModal } from '../components/IsbnScanModal'
 import { MobileScanPanel } from '../components/MobileScanPanel'
 import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from '../lib/isbn'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
+import { normalizeAuthor } from '../lib/author'
 
 export function Inventory() {
+  const { watermarkName } = useOutletContext<{ watermarkName: string | null }>()
   const [books, setBooks] = useState<Book[]>([])
   // Refs that always hold the latest values without being closure dependencies.
   // Used by the stable onMobileScanDetected callback so the companion server
@@ -219,6 +222,10 @@ export function Inventory() {
         const va = (sortKey === 'title' ? a.title : a.author).toLowerCase()
         const vb = (sortKey === 'title' ? b.title : b.author).toLowerCase()
         cmp = va.localeCompare(vb, 'zh-CN')
+        // Secondary sort: when authors are equal, sort by title
+        if (cmp === 0 && sortKey === 'author') {
+          cmp = a.title.toLowerCase().localeCompare(b.title.toLowerCase(), 'zh-CN')
+        }
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
@@ -391,6 +398,7 @@ export function Inventory() {
     const { status: _status, ...rest } = draft as Book
     const bookToAdd = {
       ...rest,
+      author: normalizeAuthor(draft.author),
       coverUrl,
       id,
       addedAt: draft.addedAt ?? new Date().toISOString(),
@@ -476,6 +484,7 @@ export function Inventory() {
     const { status: _status, ...rest } = draft as Book
     const bookToAdd = {
       ...rest,
+      author: normalizeAuthor(draft.author),
       coverUrl,
       id,
       addedAt: draft.addedAt ?? new Date().toISOString(),
@@ -551,7 +560,7 @@ export function Inventory() {
     const updated: Book = {
       ...book,
       title: editDraft.title.trim() || book.title,
-      author: editDraft.author.trim() || book.author,
+      author: normalizeAuthor(editDraft.author.trim() || book.author),
       publisher: editDraft.publisher.trim() || book.publisher,
       doubanUrl: editDraft.doubanUrl.trim() || undefined,
       coverUrl,
@@ -869,7 +878,13 @@ export function Inventory() {
             <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{books.length}</span>
           )}
         </h2>
-        <div ref={menuRef} className="relative">
+        <div className="flex items-center gap-2">
+          {watermarkName && watermarkName !== '匿名' && (
+            <span className="h-9 flex items-center px-2 text-base font-medium text-gray-400 dark:text-gray-500 select-none">
+              {watermarkName}
+            </span>
+          )}
+          <div ref={menuRef} className="relative">
           <button
             onClick={() => setMenuOpen(o => !o)}
             title="添加书籍"
@@ -930,10 +945,11 @@ export function Inventory() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                 </svg>
-                手动
+                 手动
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
 

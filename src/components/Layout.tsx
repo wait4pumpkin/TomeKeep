@@ -400,17 +400,8 @@ export function Layout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto p-8 bg-gray-50 dark:bg-gray-900">
-        <Outlet />
+        <Outlet context={{ watermarkName }} />
       </main>
-
-      {/* Username watermark — shown when user has a non-default name */}
-      {watermarkName && watermarkName !== '匿名' && (
-        <div className="fixed bottom-6 right-8 pointer-events-none select-none z-10">
-          <span className="text-sm font-medium text-gray-300 dark:text-gray-600 opacity-60">
-            {watermarkName}
-          </span>
-        </div>
-      )}
     </div>
   )
 }
