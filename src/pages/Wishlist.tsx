@@ -741,23 +741,20 @@ type WishlistAddFormProps = {
 }
 
 function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillState, clipStatus, onItemChange, onCoverDataUrl, onSelectHit, onSubmit, onCancel }: WishlistAddFormProps) {
-  const inputCls = 'w-full px-2 py-0.5 text-sm rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
+  const inputCls = 'w-full px-1 py-px text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const metaFilled = !!(item.coverUrl || item.isbn || item.publisher)
-
-  // Single status line: clipboard takes priority, then fill state, then meta-filled confirmation
+  // Single status line: clipboard takes priority, then fill state.
+  // Meta-filled confirmation only shows after a clipboard import (clipStatus.state === 'success'),
+  // not when fields are filled via manual Douban search-as-you-type.
   const statusLine: { text: string; type: 'info' | 'error' | 'success' | 'loading' } | null =
     clipStatus.state === 'loading' ? { text: '正在从剪贴板导入…', type: 'loading' } :
     clipStatus.state === 'error'   ? { text: clipStatus.message ?? '导入失败', type: 'error' } :
     fillState === 'loading'        ? { text: '正在从豆瓣获取详情…', type: 'loading' } :
-    metaFilled && fillState === 'idle' && clipStatus.state !== 'idle'
-                                   ? { text: clipStatus.message ?? '已从豆瓣填充元信息', type: 'success' } :
-    metaFilled && fillState === 'idle'
-                                   ? { text: '已从豆瓣填充元信息', type: 'success' } :
+    clipStatus.state === 'success' ? { text: clipStatus.message ?? '已从豆瓣填充元信息', type: 'success' } :
     null
 
   return (
