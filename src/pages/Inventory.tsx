@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Book, ReadingState, UserProfile } from '../../electron/db'
 import type { DoubanSearchHit } from '../../electron/metadata'
 
@@ -13,6 +13,11 @@ import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 
 export function Inventory() {
   const [books, setBooks] = useState<Book[]>([])
+  // Refs that always hold the latest values without being closure dependencies.
+  // Used by the stable onMobileScanDetected callback so the companion server
+  // is never restarted (and the session token never rotated) mid-session.
+  const booksRef = useRef<Book[]>([])
+  const activeUserIdRef = useRef<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | BookStatus>('all')
   const [tagFilter, setTagFilter] = useState<string[]>([])
@@ -30,8 +35,17 @@ export function Inventory() {
     (localStorage.getItem('inventoryViewMode') as ViewMode | null) ?? 'detail'
   )
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [closingId, setClosingId] = useState<string | null>(null)
+  const closingIdRef = useRef<string | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const [gridCols, setGridCols] = useState(4)
+
+  // Inline edit state for expanded compact panel
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState<{ title: string; author: string; publisher: string; doubanUrl: string; coverDataUrl: string }>({ title: '', author: '', publisher: '', doubanUrl: '', coverDataUrl: '' })
+  // Cache-bust map: bookId → timestamp. Appended to app:// cover URLs after a local file save
+  // so the browser doesn't serve a stale cached image.
+  const [coverBustMap, setCoverBustMap] = useState<Map<string, number>>(new Map())
 
   // add mode: null = closed, 'manual' = form, 'scan-single' | 'scan-batch' = modal
   const [addMode, setAddMode] = useState<null | 'manual' | 'scan-single' | 'scan-batch'>(null)
@@ -56,19 +70,50 @@ export function Inventory() {
     setExpandedId(null)
   }, [viewMode])
 
+  // Toggle compact card expand with close animation
+  function handleToggleExpand(bookId: string) {
+    if (expandedId === bookId) {
+      // Closing same book — animate out then remove
+      closingIdRef.current = bookId
+      setClosingId(bookId)
+      setTimeout(() => {
+        if (closingIdRef.current === bookId) {
+          closingIdRef.current = null
+          setClosingId(null)
+          setExpandedId(null)
+        }
+      }, 160)
+    } else {
+      // Switching to a different book — start exit on old panel and enter on new simultaneously
+      if (expandedId) {
+        const prev = expandedId
+        closingIdRef.current = prev
+        setClosingId(prev)
+        setTimeout(() => {
+          if (closingIdRef.current === prev) {
+            closingIdRef.current = null
+            setClosingId(null)
+          }
+        }, 160)
+      }
+      setExpandedId(bookId)
+    }
+  }
+
   // Measure actual CSS grid column count via ResizeObserver
   useEffect(() => {
     const el = gridRef.current
     if (!el) return
     const measure = () => {
-      const cols = getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length
-      setGridCols(cols)
+      const computed = getComputedStyle(el).gridTemplateColumns.trim()
+      const parts = computed.split(/\s+/)
+      setGridCols(parts.length)
     }
     measure()
     const obs = new ResizeObserver(measure)
     obs.observe(el)
     return () => obs.disconnect()
-  }, [viewMode]) // re-attach when switching to compact (grid is only rendered in compact)
+  }, [viewMode, sortKey]) // re-attach when switching view or sort key (grouped sections swap which element holds the ref)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -179,30 +224,73 @@ export function Inventory() {
     })
   }, [filteredBooks, sortKey, sortDir, completedAtMap])
 
-  // Build interleaved compact render list: book cards + expanded panel inserted after its row
-  const compactRenderItems = useMemo(() => {
-    if (viewMode !== 'compact') return []
-    type RenderItem =
-      | { type: 'book'; book: Book }
-      | { type: 'expanded'; book: Book }
+  // Group books by year+month when sorting by a time key.
+  // Returns flat list when sorting by title/author.
+  type BookSection = { year: string; month: string; books: Book[] }
+  const groupedSections = useMemo((): BookSection[] | null => {
+    if (sortKey !== 'addedAt' && sortKey !== 'completedAt') return null
+    const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+    const sections: BookSection[] = []
+    let unknownBooks: Book[] = []
 
-    const result: RenderItem[] = []
+    for (const book of sortedBooks) {
+      const dateStr = sortKey === 'completedAt' ? completedAtMap.get(book.id) : book.addedAt
+      if (!dateStr) {
+        unknownBooks.push(book)
+        continue
+      }
+      const d = new Date(dateStr)
+      const year = String(d.getFullYear())
+      const month = MONTH_NAMES[d.getMonth()]
+      const last = sections[sections.length - 1]
+      if (last && last.year === year && last.month === month) {
+        last.books.push(book)
+      } else {
+        sections.push({ year, month, books: [book] })
+      }
+    }
+    if (unknownBooks.length > 0) {
+      // For completedAt sort these are unfinished books; for addedAt they should never appear here
+      sections.push({ year: '未读完', month: '', books: unknownBooks })
+    }
+    return sections
+  }, [sortedBooks, sortKey, completedAtMap])
+
+  // Build interleaved compact render list for a given slice of books
+  type CompactRenderItem =
+    | { type: 'book'; book: Book }
+    | { type: 'expanded'; book: Book; expandedLocalIndex: number }
+  function buildCompactItems(booksSlice: Book[]): CompactRenderItem[] {
+    const result: CompactRenderItem[] = []
     let expandedBook: Book | null = null
-    if (expandedId) expandedBook = sortedBooks.find(b => b.id === expandedId) ?? null
-
-    for (let i = 0; i < sortedBooks.length; i++) {
-      result.push({ type: 'book', book: sortedBooks[i] })
-      const isRowEnd = (i + 1) % gridCols === 0 || i === sortedBooks.length - 1
+    let expandedLocalIndex = -1
+    if (expandedId) {
+      expandedLocalIndex = booksSlice.findIndex(b => b.id === expandedId)
+      if (expandedLocalIndex !== -1) expandedBook = booksSlice[expandedLocalIndex]
+    }
+    // Read live column count directly from the DOM so it's always accurate
+    const liveCols = gridRef.current
+      ? getComputedStyle(gridRef.current).gridTemplateColumns.trim().split(/\s+/).length
+      : gridCols
+    for (let i = 0; i < booksSlice.length; i++) {
+      result.push({ type: 'book', book: booksSlice[i] })
+      const isRowEnd = (i + 1) % liveCols === 0 || i === booksSlice.length - 1
       if (isRowEnd && expandedBook) {
-        // Check if expandedBook is in this row
-        const rowStart = i - ((i + 1) % gridCols === 0 ? gridCols - 1 : i % gridCols)
-        const rowBooks = sortedBooks.slice(rowStart, i + 1)
+        const rowStart = i - ((i + 1) % liveCols === 0 ? liveCols - 1 : i % liveCols)
+        const rowBooks = booksSlice.slice(rowStart, i + 1)
         if (rowBooks.some(b => b.id === expandedId)) {
-          result.push({ type: 'expanded', book: expandedBook })
+          result.push({ type: 'expanded', book: expandedBook, expandedLocalIndex })
         }
       }
     }
     return result
+  }
+
+  // Build interleaved compact render list: book cards + expanded panel inserted after its row
+  const compactRenderItems = useMemo(() => {
+    if (viewMode !== 'compact') return []
+    return buildCompactItems(sortedBooks)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedBooks, viewMode, expandedId, gridCols])
 
   function buildStatusMap(states: ReadingState[]): Map<string, BookStatus> {
@@ -222,8 +310,97 @@ export function Inventory() {
   async function loadBooks() {
     const data = await window.db.getBooks()
     setBooks(data)
+    booksRef.current = data
     const tags = await window.db.getAllTags()
     setAllTags(tags)
+  }
+
+  /**
+   * Stable callback passed to MobileScanPanel.
+   * Uses refs (booksRef, activeUserIdRef) instead of closed-over state so its
+   * identity never changes across re-renders — preventing MobileScanPanel from
+   * tearing down and restarting the companion server (and rotating the session
+   * token) every time commitBook calls loadBooks.
+   */
+  const onMobileScanDetected = useCallback((raw: string) => {
+    void (async () => {
+      const ack = (window as unknown as Record<string, unknown>).__mobileScanAck as
+        ((isbn: string, hasMetadata: boolean, title?: string) => void) | undefined
+
+      try {
+        const normalized = normalizeIsbn(raw)
+        if (!normalized.ok) { ack?.(raw, false); return }
+        const isbn13 = toIsbn13(normalized.value)
+        if (!isbn13) { ack?.(raw, false); return }
+
+        // Use ref so we always see the latest books without this callback changing identity
+        const existing = booksRef.current.find(b => b.isbn === isbn13)
+        if (existing) { ack?.(isbn13, true, existing.title); return }
+
+        // Try Douban first for richer metadata
+        const searchRes = await window.meta.searchDouban(isbn13)
+        if (searchRes.ok && searchRes.value.length > 0) {
+          const hit = searchRes.value[0]
+          const doubanRes = await window.meta.lookupDouban(
+            `https://book.douban.com/subject/${hit.subjectId}/`
+          )
+          if (doubanRes.ok) {
+            await commitBookFromRef({ ...doubanRes.value, isbn: isbn13 })
+            ack?.(isbn13, true, doubanRes.value.title)
+            return
+          }
+        }
+
+        // Fallback: isbnsearch.org
+        const isbnSearchRes = await window.meta.lookupIsbnSearch(isbn13)
+        if (isbnSearchRes.ok) {
+          const draft = mergeBookDraftWithMetadata({}, isbnSearchRes.value)
+          await commitBookFromRef({ ...draft, isbn: isbn13 } as Partial<Book>)
+          ack?.(isbn13, true, draft.title)
+          return
+        }
+
+        // Fallback: OpenLibrary
+        const isbnRes = await window.meta.lookupIsbn(isbn13)
+        if (isbnRes.ok) {
+          const draft = mergeBookDraftWithMetadata({}, isbnRes.value)
+          await commitBookFromRef({ ...draft, isbn: isbn13 } as Partial<Book>)
+          ack?.(isbn13, true, draft.title)
+          return
+        }
+
+        // Last resort: save ISBN only (no metadata)
+        await commitBookFromRef({ title: isbn13, author: '—', isbn: isbn13 })
+        ack?.(isbn13, false)
+      } catch {
+        ack?.(raw, false)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** commitBook variant that reads activeUserId from ref (for use inside stable callbacks). */
+  async function commitBookFromRef(draft: Partial<Book>, initialStatus?: BookStatus) {
+    if (!draft.title || !draft.author) return
+    const id = draft.id ?? crypto.randomUUID()
+    let coverUrl = draft.coverUrl
+    if (coverUrl && !coverUrl.startsWith('app://')) {
+      coverUrl = await window.covers.saveCover(id, coverUrl)
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { status: _status, ...rest } = draft as Book
+    const bookToAdd = {
+      ...rest,
+      coverUrl,
+      id,
+      addedAt: draft.addedAt ?? new Date().toISOString(),
+    } as Book
+    await window.db.addBook(bookToAdd)
+    if (activeUserIdRef.current && initialStatus && initialStatus !== 'unread') {
+      await window.db.setReadingState({ userId: activeUserIdRef.current, bookId: id, status: initialStatus })
+      setStatusMap(prev => new Map(prev).set(id, initialStatus))
+    }
+    loadBooks()
   }
 
   async function loadReadingStates(userId: string) {
@@ -242,9 +419,11 @@ export function Inventory() {
       ])
       if (cancelled) return
       setBooks(data)
+      booksRef.current = data
       setAllTags(tags)
       if (activeUser) {
         setActiveUserId(activeUser.id)
+        activeUserIdRef.current = activeUser.id
         const states = await window.db.getReadingStates(activeUser.id)
         if (!cancelled) {
           setStatusMap(buildStatusMap(states))
@@ -262,9 +441,11 @@ export function Inventory() {
       const user = (e as CustomEvent<UserProfile | null>).detail
       if (user) {
         setActiveUserId(user.id)
+        activeUserIdRef.current = user.id
         void loadReadingStates(user.id)
       } else {
         setActiveUserId(null)
+        activeUserIdRef.current = null
         setStatusMap(new Map())
       }
     }
@@ -357,6 +538,31 @@ export function Inventory() {
     setAllTags(newAllTags)
   }
 
+  async function handleSaveEdit(book: Book) {
+    let coverUrl = book.coverUrl
+    if (editDraft.coverDataUrl) {
+      const saved = await window.covers.saveCoverData(book.id, editDraft.coverDataUrl)
+      if (saved) {
+        coverUrl = saved
+        // Bust the browser's cached image for this book's app:// URL
+        setCoverBustMap(prev => new Map(prev).set(book.id, Date.now()))
+      }
+    }
+    const updated: Book = {
+      ...book,
+      title: editDraft.title.trim() || book.title,
+      author: editDraft.author.trim() || book.author,
+      publisher: editDraft.publisher.trim() || book.publisher,
+      doubanUrl: editDraft.doubanUrl.trim() || undefined,
+      coverUrl,
+    }
+    setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
+    booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
+    await window.db.updateBook(updated)
+    setEditingId(null)
+    void loadBooks()
+  }
+
   /** Trigger debounced Douban search based on current title + author fields. */
   function triggerSearch(title: string, author: string) {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
@@ -396,8 +602,9 @@ export function Inventory() {
     setFillState('idle')
   }
 
-  // Helper: build Douban URL for a book
+  // Helper: build Douban URL for a book (prefers custom override)
   function buildDoubanUrl(book: Book): string {
+    if (book.doubanUrl) return book.doubanUrl
     return book.isbn
       ? `https://book.douban.com/isbn/${book.isbn}`
       : `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(book.title)}`
@@ -408,18 +615,73 @@ export function Inventory() {
   const scanBatchOpen = addMode === 'scan-batch'
 
   // Shared detail card JSX — used in both detail grid and compact expanded panel
-  function renderDetailCard(book: Book, extraClass = '') {
+  // Append cache-bust param to app:// cover URLs after a local file save
+  function bustCoverUrl(bookId: string, url: string | undefined): string | undefined {
+    if (!url) return undefined
+    const bust = coverBustMap.get(bookId)
+    return bust ? `${url}?t=${bust}` : url
+  }
+
+  // When onEdit is provided (compact expanded panel), shows edit/save buttons.
+  // When isEditing is true, fields become editable inputs in-place.
+  function renderDetailCard(book: Book, extraClass = '', onEdit?: () => void) {
     const sem = book.isbn ? parseIsbnSemantics(book.isbn) : null
     const inferredPublisher = book.isbn && !book.publisher ? parseIsbnPublisher(book.isbn) : null
     const bookStatus: BookStatus = statusMap.get(book.id) ?? 'unread'
+    const isEditing = onEdit !== undefined && editingId === book.id
+    const displayCoverUrl = bustCoverUrl(book.id, book.coverUrl)
     return (
       <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-col ${extraClass}`}>
         {/* Top: A (cover) + B (text) */}
-        <div className="flex flex-row h-28">
+        <div className="flex flex-row h-28 overflow-hidden">
           {/* A — Cover */}
-          <div className="flex-shrink-0 w-20 self-stretch bg-gray-100 dark:bg-gray-700 flex items-center justify-center rounded-tl-xl overflow-hidden">
-            {book.coverUrl ? (
-              <img src={book.coverUrl} alt={book.title} className="w-full h-full object-contain" />
+          <div className="flex-shrink-0 w-20 self-stretch bg-gray-100 dark:bg-gray-700 flex items-center justify-center rounded-tl-xl overflow-hidden relative">
+            {isEditing ? (
+              <>
+                {/* Preview: chosen file first, then existing cover, then placeholder */}
+                {(editDraft.coverDataUrl || displayCoverUrl) ? (
+                  <img
+                    src={editDraft.coverDataUrl || displayCoverUrl}
+                    alt={book.title}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                    </svg>
+                  </div>
+                )}
+                {/* Clickable overlay */}
+                <label
+                  className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
+                  title="更换封面图片"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                  </svg>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = ev => {
+                        const result = ev.target?.result
+                        if (typeof result === 'string') {
+                          setEditDraft(d => ({ ...d, coverDataUrl: result }))
+                        }
+                      }
+                      reader.readAsDataURL(file)
+                    }}
+                  />
+                </label>
+              </>
+            ) : displayCoverUrl ? (
+              <img src={displayCoverUrl} alt={book.title} className="w-full h-full object-contain" />
             ) : (
               <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
@@ -430,17 +692,26 @@ export function Inventory() {
           </div>
 
           {/* B — Text & actions */}
-          <div className="p-3 flex flex-col flex-1 min-w-0">
+          <div className="flex flex-col flex-1 min-w-0 p-3 overflow-hidden">
             {/* Title + status badge */}
             <div className="flex items-start justify-between gap-2 mb-0.5">
-              <button
-                type="button"
-                onClick={() => void window.app.openExternal(buildDoubanUrl(book))}
-                className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
-              >
-                {book.title}
-              </button>
-              <CardTip label={
+              {isEditing ? (
+                <input
+                  type="text"
+                  value={editDraft.title}
+                  onChange={e => setEditDraft(d => ({ ...d, title: e.target.value }))}
+                  className="font-semibold text-sm text-gray-800 dark:text-gray-100 leading-snug flex-1 min-w-0 rounded border border-blue-400 px-1 py-px -m-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void window.app.openExternal(buildDoubanUrl(book))}
+                  className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
+                >
+                  {book.title}
+                </button>
+              )}
+              {!isEditing && <CardTip label={
                 bookStatus === 'read'    ? '已读 · 点击改为未读' :
                 bookStatus === 'reading' ? '阅读中 · 点击改为已读' :
                                            '未读 · 点击改为阅读中'
@@ -470,34 +741,61 @@ export function Inventory() {
                     </svg>
                   )}
                 </button>
-              </CardTip>
+              </CardTip>}
             </div>
 
-            <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{book.author}</p>
-            {(book.publisher || inferredPublisher) && (
-              <p className="text-xs text-gray-400 dark:text-gray-500 truncate" title={book.publisher ?? inferredPublisher ?? ''}>
-                {book.publisher ?? <span className="italic">{inferredPublisher}</span>}
-              </p>
+            {isEditing ? (
+              <div className="flex flex-col gap-0.5 -mx-px">
+                <input
+                  type="text"
+                  value={editDraft.author}
+                  onChange={e => setEditDraft(d => ({ ...d, author: e.target.value }))}
+                  placeholder="作者"
+                  className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
+                <input
+                  type="text"
+                  value={editDraft.publisher}
+                  onChange={e => setEditDraft(d => ({ ...d, publisher: e.target.value }))}
+                  placeholder="出版社"
+                  className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
+                <input
+                  type="url"
+                  value={editDraft.doubanUrl}
+                  onChange={e => setEditDraft(d => ({ ...d, doubanUrl: e.target.value }))}
+                  placeholder={`豆瓣链接（${buildDoubanUrl(book)}）`}
+                  className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{book.author}</p>
+                {(book.publisher || inferredPublisher) && (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 truncate" title={book.publisher ?? inferredPublisher ?? ''}>
+                    {book.publisher ?? <span className="italic">{inferredPublisher}</span>}
+                  </p>
+                )}
+                {/* Tag editor */}
+                <BookTagEditor
+                  tags={book.tags ?? []}
+                  allTags={allTags}
+                  onChange={tags => handleUpdateBookTags(book, tags)}
+                />
+              </>
             )}
-
-            {/* Tag editor */}
-            <BookTagEditor
-              tags={book.tags ?? []}
-              allTags={allTags}
-              onChange={tags => handleUpdateBookTags(book, tags)}
-            />
           </div>
         </div>
 
-        {/* C — ISBN badge + completedAt + delete, full-width bottom bar */}
-        <div className="flex items-center justify-between px-3 py-1 border-t border-gray-100 dark:border-gray-700">
+        {/* C — bottom bar */}
+        <div className="flex items-center justify-between px-3 h-8 border-t border-gray-100 dark:border-gray-700">
           <div className="flex items-center gap-3 min-w-0">
             {sem && book.isbn ? (
               <IsbnSemanticBadge isbn={book.isbn} sem={sem} />
             ) : (
               <span />
             )}
-            {completedAtMap.get(book.id) && (
+            {!isEditing && completedAtMap.get(book.id) && (
               <span className="flex items-center gap-1 text-[10px] text-green-600 dark:text-green-400 font-medium whitespace-nowrap group/ca">
                 <span title={formatExact(completedAtMap.get(book.id)!)}>
                   ✓ {relativeTime(completedAtMap.get(book.id)!)}
@@ -515,15 +813,48 @@ export function Inventory() {
               </span>
             )}
           </div>
-          <button
-            onClick={() => handleDelete(book.id)}
-            title="删除"
-            className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-            </svg>
-          </button>
+          {isEditing ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setEditingId(null)}
+                className="px-2 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveEdit(book)}
+                className="px-2 py-0.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              >
+                保存
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-0.5">
+              {onEdit && (
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  title="编辑"
+                  className="p-1 text-gray-300 hover:text-blue-500 rounded transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+                  </svg>
+                </button>
+              )}
+              <button
+                onClick={() => handleDelete(book.id)}
+                title="删除"
+                className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -922,96 +1253,105 @@ export function Inventory() {
       {mobileScanOpen && (
         <MobileScanPanel
           onClose={() => { setMobileScanOpen(false); loadBooks() }}
-          onDetected={raw => {
-            void (async () => {
-              const ack = (window as unknown as Record<string, unknown>).__mobileScanAck as
-                ((isbn: string, hasMetadata: boolean, title?: string) => void) | undefined
-
-              const normalized = normalizeIsbn(raw)
-              if (!normalized.ok) { ack?.(raw, false); return }
-              const isbn13 = toIsbn13(normalized.value)
-              if (!isbn13) { ack?.(raw, false); return }
-
-              // Skip duplicates already in library
-              const existing = books.find(b => b.isbn === isbn13)
-              if (existing) { ack?.(isbn13, true, existing.title); return }
-
-              // Try Douban first for richer metadata
-              let hasMetadata = false
-              let resolvedTitle: string | undefined
-              const searchRes = await window.meta.searchDouban(isbn13)
-              if (searchRes.ok && searchRes.value.length > 0) {
-                const hit = searchRes.value[0]
-                const doubanRes = await window.meta.lookupDouban(
-                  `https://book.douban.com/subject/${hit.subjectId}/`
-                )
-                if (doubanRes.ok) {
-                  await commitBook({ ...doubanRes.value, isbn: isbn13 })
-                  hasMetadata = true
-                  resolvedTitle = doubanRes.value.title
-                  ack?.(isbn13, true, resolvedTitle)
-                  return
-                }
-              }
-
-              // Fallback: OpenLibrary
-              const isbnRes = await window.meta.lookupIsbn(isbn13)
-              if (isbnRes.ok) {
-                const draft = mergeBookDraftWithMetadata({}, isbnRes.value)
-                await commitBook({ ...draft, isbn: isbn13 } as Partial<Book>)
-                hasMetadata = true
-                resolvedTitle = draft.title
-              } else {
-                // Save ISBN only
-                await commitBook({ title: isbn13, author: '—', isbn: isbn13 })
-              }
-              ack?.(isbn13, hasMetadata, resolvedTitle)
-            })()
+          onDetected={onMobileScanDetected}
+          onDeleteEntry={isbn => {
+            const book = booksRef.current.find(b => b.isbn === isbn)
+            if (book) void handleDelete(book.id)
           }}
         />
       )}
 
       {/* ── Detail mode grid ── */}
       {viewMode === 'detail' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {sortedBooks.map(book => renderDetailCard(book))}
-        </div>
+        groupedSections
+          ? groupedSections.map((section, si) => {
+              const prevSection = si > 0 ? groupedSections[si - 1] : null
+              const showYear = !prevSection || prevSection.year !== section.year
+              return (
+                <div key={`${section.year}-${section.month}`} className="flex flex-col gap-2">
+                  {/* Year header — only when year changes */}
+                  {showYear && section.year !== '未读完' && (
+                    <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200 pt-2 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                      {section.year}年
+                    </h2>
+                  )}
+                  {/* Month sub-header */}
+                  {section.month && (
+                    <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+                      {section.month}
+                    </h3>
+                  )}
+                  {section.year === '未读完' && (
+                    <h2 className="text-base font-semibold text-gray-400 dark:text-gray-500 pt-2 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                      未读完
+                    </h2>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {section.books.map(book => renderDetailCard(book))}
+                  </div>
+                </div>
+              )
+            })
+          : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {sortedBooks.map(book => renderDetailCard(book))}
+            </div>
+          )
       )}
 
       {/* ── Compact mode grid with inline expand ── */}
-      {viewMode === 'compact' && (
-        <div
-          ref={gridRef}
-          className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2"
-        >
-          {compactRenderItems.map((item, idx) => {
+      {viewMode === 'compact' && (() => {
+        // Helper: render a list of CompactRenderItems into grid cells
+        function renderCompactItems(items: CompactRenderItem[]) {
+          return items.map((item, idx) => {
             if (item.type === 'expanded') {
+              const { book, expandedLocalIndex } = item
+
+              const gap = 8 // gap-2 = 8px
+              const gridEl = gridRef.current
+              const computedCols = gridEl
+                ? getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/)
+                : []
+              const liveColWidth = computedCols.length > 0 ? parseFloat(computedCols[0]) : 0
+              const liveCols = computedCols.length > 0 ? computedCols.length : gridCols
+              const colIndex = expandedLocalIndex % liveCols
+              const gridTotalWidth = gridEl ? gridEl.getBoundingClientRect().width : 0
+              const panelWidth = 320
+              const rawSpacer = colIndex * (liveColWidth + gap)
+              const spacerPx = Math.min(rawSpacer, Math.max(0, gridTotalWidth - panelWidth))
               return (
                 <div
-                  key={`expanded-${item.book.id}`}
-                  className="col-span-full"
+                  key={`expanded-${book.id}`}
+                  className={`col-span-full flex ${closingId === book.id ? 'compact-panel-exit' : 'compact-panel-enter'}`}
                 >
-                  <div className="max-w-sm w-full">
-                    {renderDetailCard(item.book)}
+                  <div className="flex-shrink-0" style={{ width: spacerPx }} />
+                  <div className="w-80 flex-shrink-0 pb-2">
+                    {renderDetailCard(book, '', () => {
+                      setEditDraft({
+                        title: book.title,
+                        author: book.author,
+                        publisher: book.publisher ?? '',
+                        doubanUrl: book.doubanUrl ?? '',
+                        coverDataUrl: '',
+                      })
+                      setEditingId(book.id)
+                    })}
                   </div>
                 </div>
               )
             }
-
-            // Compact card
             const book = item.book
             const isExpanded = expandedId === book.id
             return (
               <div key={`compact-${book.id}-${idx}`} className="flex flex-col cursor-pointer group">
-                {/* Cover */}
                 <div
                   className={`aspect-[2/3] bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden relative transition-all ${
                     isExpanded ? 'ring-2 ring-blue-500' : 'hover:ring-2 hover:ring-blue-300'
                   }`}
-                  onClick={() => setExpandedId(prev => prev === book.id ? null : book.id)}
+                  onClick={() => handleToggleExpand(book.id)}
                 >
-                  {book.coverUrl ? (
-                    <img src={book.coverUrl} alt={book.title} className="w-full h-full object-cover" />
+                  {bustCoverUrl(book.id, book.coverUrl) ? (
+                    <img src={bustCoverUrl(book.id, book.coverUrl)} alt={book.title} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
                       <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
@@ -1020,7 +1360,6 @@ export function Inventory() {
                     </div>
                   )}
                 </div>
-                {/* Title */}
                 <button
                   type="button"
                   onClick={() => void window.app.openExternal(buildDoubanUrl(book))}
@@ -1031,9 +1370,51 @@ export function Inventory() {
                 </button>
               </div>
             )
-          })}
-        </div>
-      )}
+          })
+        }
+
+        if (groupedSections) {
+          // Grouped: one sub-grid per section, each with its own headers
+          return (
+            <div className="flex flex-col gap-4">
+              {groupedSections.map((section, si) => {
+                const prevSection = si > 0 ? groupedSections[si - 1] : null
+                const showYear = !prevSection || prevSection.year !== section.year
+                const items = buildCompactItems(section.books)
+                return (
+                  <div key={`${section.year}-${section.month}`} className="flex flex-col gap-2">
+                    {showYear && section.year !== '未读完' && (
+                      <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200 pt-1 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                        {section.year}年
+                      </h2>
+                    )}
+                    {section.month && (
+                      <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+                        {section.month}
+                      </h3>
+                    )}
+                    {section.year === '未读完' && (
+                      <h2 className="text-base font-semibold text-gray-400 dark:text-gray-500 pt-1 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                        未读完
+                      </h2>
+                    )}
+                    <div ref={si === 0 ? gridRef : undefined} className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+                      {renderCompactItems(items)}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        }
+
+        // Flat (title/author sort)
+        return (
+          <div ref={gridRef} className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+            {renderCompactItems(compactRenderItems)}
+          </div>
+        )
+      })()}
 
       {sortedBooks.length === 0 && !addMode && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">

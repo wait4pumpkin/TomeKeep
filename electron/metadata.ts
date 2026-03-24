@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { extractDoubanSubjectId, parseDoubanSubjectHtml, parseDoubanSearchHtml, type DoubanSearchHit } from '../src/lib/douban'
 import { parseOpenLibraryBooksApiResponse, type BookMetadata } from '../src/lib/openLibrary'
+import { parseIsbnSearchHtml } from '../src/lib/isbnSearch'
 
 type LookupIsbnResult =
   | { ok: true; value: BookMetadata }
@@ -57,6 +58,37 @@ export function setupMetadata() {
       if (!parsed.ok) return parsed.error === 'not_found' ? { ok: false, error: 'not_found' } : { ok: false, error: 'bad_response' }
       return parsed
     } catch (e) {
+      const name = e instanceof DOMException ? e.name : ''
+      if (name === 'AbortError') return { ok: false, error: 'timeout' }
+      return { ok: false, error: 'network' }
+    }
+  })
+
+  ipcMain.handle('meta:lookup-isbnsearch', async (_event, isbn13: string): Promise<LookupIsbnResult> => {
+    if (!isValidIsbn13(isbn13)) return { ok: false, error: 'invalid_isbn' }
+
+    const url = `https://isbnsearch.org/isbn/${isbn13}`
+    console.log('[meta:lookup-isbnsearch] fetching %s', url)
+
+    try {
+      const res = await fetchWithTimeout(url, 8000, {
+        headers: {
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+      })
+      if (res.status === 404) return { ok: false, error: 'not_found' }
+      if (!res.ok) return { ok: false, error: 'network' }
+
+      const html = await res.text()
+      const parsed = parseIsbnSearchHtml(isbn13, html)
+      console.log('[meta:lookup-isbnsearch] http=%d parsed=%o', res.status, parsed)
+      if (!parsed.ok) return { ok: false, error: 'not_found' }
+      return parsed
+    } catch (e) {
+      console.error('[meta:lookup-isbnsearch] error', e)
       const name = e instanceof DOMException ? e.name : ''
       if (name === 'AbortError') return { ok: false, error: 'timeout' }
       return { ok: false, error: 'network' }

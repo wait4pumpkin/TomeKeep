@@ -28,6 +28,10 @@ interface Window {
       | { ok: true; value: import('./lib/openLibrary').BookMetadata }
       | { ok: false; error: 'invalid_isbn' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
     >
+    lookupIsbnSearch: (isbn13: string) => Promise<
+      | { ok: true; value: import('./lib/openLibrary').BookMetadata }
+      | { ok: false; error: 'invalid_isbn' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
+    >
     lookupDouban: (input: string) => Promise<
       | { ok: true; value: import('./lib/openLibrary').BookMetadata }
       | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
@@ -58,6 +62,11 @@ interface Window {
      * Returns an app:// URL for the saved file, or the original URL on failure.
      */
     saveCover: (id: string, url: string) => Promise<string>
+    /**
+     * Save a cover from a base64 data URL (from a local file picker).
+     * Returns an app:// URL for the saved file, or null on failure.
+     */
+    saveCoverData: (id: string, dataUrl: string) => Promise<string | null>
   }
   companion: {
     /** Start the HTTPS companion server. Returns the LAN URL (with token) to share with the phone. */

@@ -119,4 +119,36 @@ export function setupCovers() {
     console.log('[covers:save-cover] result=%s', result)
     return result
   })
+
+  /**
+   * Save a cover from a base64 data URL (e.g. from a local file picker).
+   * Accepts data:image/<ext>;base64,<data> and writes to userData/covers/<id>.<ext>.
+   * Returns the app:// URL for the saved file.
+   */
+  ipcMain.handle('covers:save-cover-data', async (_, { id, dataUrl }: { id: string; dataUrl: string }) => {
+    console.log('[covers:save-cover-data] id=%s dataUrl length=%d', id, dataUrl.length)
+    const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+    if (!match) {
+      console.error('[covers:save-cover-data] invalid data URL format')
+      return null
+    }
+    const ext = match[1] === 'jpeg' ? 'jpg' : match[1]
+    const base64Data = match[2]
+    const coversDir = path.join(app.getPath('userData'), 'covers')
+    try {
+      fs.mkdirSync(coversDir, { recursive: true })
+    } catch (e) {
+      console.error('[covers:save-cover-data] mkdirSync failed', e)
+      return null
+    }
+    const destPath = path.join(coversDir, `${id}.${ext}`)
+    try {
+      fs.writeFileSync(destPath, Buffer.from(base64Data, 'base64'))
+      console.log('[covers:save-cover-data] saved %s → app://covers/%s.%s', destPath, id, ext)
+      return `app://covers/${id}.${ext}`
+    } catch (e) {
+      console.error('[covers:save-cover-data] write failed', e)
+      return null
+    }
+  })
 }

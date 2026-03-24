@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('db', {
 
 contextBridge.exposeInMainWorld('meta', {
   lookupIsbn: (isbn13: string) => ipcRenderer.invoke('meta:lookup-isbn', isbn13),
+  lookupIsbnSearch: (isbn13: string) => ipcRenderer.invoke('meta:lookup-isbnsearch', isbn13),
   lookupDouban: (input: string) => ipcRenderer.invoke('meta:lookup-douban', input),
   searchDouban: (query: string) => ipcRenderer.invoke('meta:search-douban', query),
 })
@@ -70,6 +71,8 @@ contextBridge.exposeInMainWorld('app', {
 contextBridge.exposeInMainWorld('covers', {
   saveCover: (id: string, url: string) =>
     ipcRenderer.invoke('covers:save-cover', { id, url }) as Promise<string>,
+  saveCoverData: (id: string, dataUrl: string) =>
+    ipcRenderer.invoke('covers:save-cover-data', { id, dataUrl }) as Promise<string | null>,
 })
 
 contextBridge.exposeInMainWorld('companion', {

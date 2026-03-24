@@ -27,9 +27,11 @@ export function MobileScanPanel(props: {
   onDetected: (isbn: string) => void
   /** Called with (isbn, hasMetadata) after the desktop finishes processing a scan. */
   onScanProcessed?: (isbn: string, hasMetadata: boolean) => void
+  /** Called when the user wants to remove a failed (no-metadata) entry from the library. */
+  onDeleteEntry?: (isbn: string) => void
   onClose: () => void
 }) {
-  const { onDetected, onScanProcessed, onClose } = props
+  const { onDetected, onScanProcessed, onDeleteEntry, onClose } = props
 
   const [serverState, setServerState] = useState<ServerState>({ phase: 'starting' })
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -269,6 +271,22 @@ export function MobileScanPanel(props: {
                           {entry.isbn}
                         </span>
                       </div>
+                      {/* Delete button — only for failed entries */}
+                      {entry.hasMetadata === false && onDeleteEntry && (
+                        <button
+                          type="button"
+                          title="从书库移除"
+                          onClick={() => {
+                            onDeleteEntry(entry.isbn)
+                            setScanned(prev => prev.filter(e => e.isbn !== entry.isbn))
+                          }}
+                          className="flex-shrink-0 p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>

@@ -16,6 +16,7 @@ interface Book {
   coverUrl?: string    // app:// local path (new records) or remote URL (legacy records)
   status?: 'unread' | 'reading' | 'read'  // legacy field; per-user status now stored in ReadingState
   tags?: string[]      // free-form labels, e.g. ["科幻", "经典"]; undefined = no tags
+  doubanUrl?: string   // optional custom Douban URL override; if absent, derived from isbn or title
   addedAt: string      // ISO 8601
 }
 ```
@@ -78,9 +79,10 @@ interface WishlistItem {
   - purpose: fetch book metadata by ISBN (best-effort)
   - methods:
     - lookupIsbn(isbn13) -> { ok: true, value: BookMetadata } | { ok: false, error }
+    - lookupIsbnSearch(isbn13) -> { ok: true, value: BookMetadata } | { ok: false, error }
     - lookupDouban(input) -> { ok: true, value: BookMetadata } | { ok: false, error }
   - errors:
-    - lookupIsbn:
+    - lookupIsbn / lookupIsbnSearch:
       - invalid_isbn
       - not_found
       - timeout
@@ -132,6 +134,10 @@ interface WishlistItem {
       - downloads the image at `url` to `userData/covers/<id>.jpg`
       - returns `app://covers/<id>.jpg` on success
       - returns original `url` unchanged if `url` is empty, already starts with `app://`, download fails, or times out (10 s)
+      - never throws; always resolves
+    - saveCoverData(id, dataUrl) -> string | null
+      - writes a base64 data URL (e.g. from a local file picker) to `userData/covers/<id>.<ext>`
+      - returns `app://covers/<id>.<ext>` on success, or `null` on failure
       - never throws; always resolves
 
 - window.companion
@@ -231,6 +237,7 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | db:get-reading-states | renderer→main | returns ReadingState[] for a userId |
 | db:set-reading-state | renderer→main | upserts a ReadingState, returns ReadingState |
 | meta:lookup-isbn | renderer→main | fetches metadata from Open Library |
+| meta:lookup-isbnsearch | renderer→main | fetches metadata from isbnsearch.org HTML |
 | meta:lookup-douban | renderer→main | fetches metadata from Douban HTML |
 | pricing:get | renderer→main | reads priceCache for given keys |
 | pricing:open-capture | renderer→main | opens capture BrowserWindow, awaits user confirmation |
@@ -242,6 +249,7 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | stores:clear-cookies | renderer→main | clears cookies for a retailer |
 | app:open-external | renderer→main | opens URL in system browser |
 | covers:save-cover | renderer→main | downloads remote cover image to userData/covers/, returns app:// URL |
+| covers:save-cover-data | renderer→main | writes base64 data URL cover to userData/covers/, returns app:// URL or null |
 | companion:start | renderer→main | starts HTTPS companion server; returns `{ ok, url, token }` |
 | companion:stop | renderer→main | stops companion server and invalidates session token |
 | companion:status | renderer→main | returns `{ running, url? }` without side effects |

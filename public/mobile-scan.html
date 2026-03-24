@@ -369,12 +369,29 @@
       </div>
     `
     scanList.prepend(li)
-    scannedMap.set(isbn, { li })
+
+    // If no ack arrives within 20s, mark item as failed so it doesn't spin forever
+    const ackTimer = setTimeout(() => {
+      const entry = scannedMap.get(isbn)
+      if (entry && !entry.acked) {
+        const iconEl = document.getElementById('icon-' + isbn)
+        if (iconEl && iconEl.className.includes('sending')) {
+          iconEl.className = 'item-icon no-meta'
+          iconEl.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>`
+        }
+      }
+    }, 20000)
+
+    scannedMap.set(isbn, { li, ackTimer, acked: false })
   }
 
   function updateItem(isbn, hasMetadata, title) {
     const entry = scannedMap.get(isbn)
     if (!entry) return
+    // Cancel the pending timeout so it doesn't overwrite this real ack
+    clearTimeout(entry.ackTimer)
+    entry.acked = true
+
     const iconEl = document.getElementById('icon-' + isbn)
     const rowEl  = document.getElementById('row-' + isbn)
 
@@ -424,14 +441,27 @@
     }
   }
 
-  // ── Shared: handle a decoded ISBN value ──────────────────────────────────
+  // ── Validate that rawValue looks like an EAN-13 or UPC-A barcode ─────────
+  // Rejects QR codes, URLs, and any other non-numeric / wrong-length values.
+  // UPC-A (12 digits) is zero-padded to 13 by prepending '0'.
+  function normalizeBarcode(rawValue) {
+    if (!rawValue || typeof rawValue !== 'string') return null
+    const digits = rawValue.trim()
+    if (/^\d{13}$/.test(digits)) return digits          // EAN-13 as-is
+    if (/^\d{12}$/.test(digits)) return '0' + digits   // UPC-A → EAN-13
+    return null
+  }
+
+  // ── Shared: handle a decoded barcode value ───────────────────────────────
   function onDetected(rawValue) {
     if (cooldown || !rawValue) return
+    const isbn = normalizeBarcode(rawValue)
+    if (!isbn) return   // skip QR codes, URLs, short/long codes, etc.
     cooldown = true
     playBeep()
-    if (!scannedMap.has(rawValue)) {
-      addToList(rawValue)
-      void sendIsbn(rawValue)
+    if (!scannedMap.has(isbn)) {
+      addToList(isbn)
+      void sendIsbn(isbn)
     }
     setTimeout(() => { cooldown = false }, 1200)
   }
@@ -484,16 +514,23 @@
 
   // Decode one frame from the video element via canvas snapshot.
   // Uses HTMLCanvasElementLuminanceSource (the correct API in @zxing/library).
+  // The offscreen canvas is drawn at half the camera resolution (capped at 640×360)
+  // to reduce ZXing's per-frame CPU work by ~75% with negligible impact on EAN-13
+  // recognition, since 1-D barcodes only need horizontal resolution.
   function decodeFrame(zxingReader, offscreenCanvas, offscreenCtx) {
     if (video.readyState < video.HAVE_CURRENT_DATA) return null
     const vw = video.videoWidth
     const vh = video.videoHeight
     if (!vw || !vh) return null
-    if (offscreenCanvas.width !== vw || offscreenCanvas.height !== vh) {
-      offscreenCanvas.width = vw
-      offscreenCanvas.height = vh
+    // Decode at half resolution, capped at 640 wide
+    const scale = Math.min(0.5, 640 / vw)
+    const dw = Math.round(vw * scale)
+    const dh = Math.round(vh * scale)
+    if (offscreenCanvas.width !== dw || offscreenCanvas.height !== dh) {
+      offscreenCanvas.width = dw
+      offscreenCanvas.height = dh
     }
-    offscreenCtx.drawImage(video, 0, 0, vw, vh)
+    offscreenCtx.drawImage(video, 0, 0, dw, dh)
     try {
       const luminanceSource = new window.ZXing.HTMLCanvasElementLuminanceSource(offscreenCanvas)
       const binaryBitmap = new window.ZXing.BinaryBitmap(new window.ZXing.HybridBinarizer(luminanceSource))
@@ -538,7 +575,6 @@
         window.ZXing.BarcodeFormat.EAN_13,
         window.ZXing.BarcodeFormat.UPC_A,
       ])
-      hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true)
       zxingReader = new window.ZXing.MultiFormatReader()
       zxingReader.setHints(hints)
     } catch (e) {
@@ -570,13 +606,8 @@
             const { clientWidth: w, clientHeight: h } = video
             drawOverlay([{ boundingBox: { x: w * 0.1, y: h * 0.3, width: w * 0.8, height: h * 0.4 } }])
             onDetected(raw)
-            setTimeout(() => {
-              drawOverlay([])
-              if (!cancelled) rafId = requestAnimationFrame(zxingTick)
-            }, 1200)
-            isDetecting = false
-            return
-          } else {
+            // onDetected sets a 1200ms cooldown — no extra delay needed here;
+            // just clear the overlay and immediately queue the next frame.
             drawOverlay([])
           }
         } catch (_) {

@@ -13,6 +13,8 @@ export interface Book {
   rating?: number
   coverUrl?: string
   tags?: string[]
+  /** Optional custom Douban URL override. If absent, derived from isbn or title. */
+  doubanUrl?: string
   addedAt: string
 }
 
