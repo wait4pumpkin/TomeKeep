@@ -386,9 +386,12 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
   const rafRef = useRef<number | null>(null)
   const stageRef = useRef<Stage>('loading')
   const consecutiveHitsRef = useRef(0)
+  // Ref mirror of isMirrored so rAF callbacks always read the latest value
+  const isMirroredRef = useRef(false)
 
-  // Keep stageRef in sync
+  // Keep stageRef and isMirroredRef in sync
   useEffect(() => { stageRef.current = stage }, [stage])
+  useEffect(() => { isMirroredRef.current = isMirrored }, [isMirrored])
 
   // ── Reset on open/close ──────────────────────────────────────────────────
   useEffect(() => {
@@ -448,13 +451,18 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
         audio: false,
       })
       streamRef.current = stream
-      if (!videoRef.current) { stream.getTracks().forEach(t => t.stop()); return }
       const track = stream.getVideoTracks()[0]
       const settings = track.getSettings()
       const facingMode = settings.facingMode ?? ''
-      setIsMirrored(facingMode === 'user')
-      videoRef.current.srcObject = stream
-      await videoRef.current.play()
+      const mirrored = facingMode === 'user'
+      setIsMirrored(mirrored)
+      isMirroredRef.current = mirrored
+
+      // The <video> element is always rendered (hidden when not in use),
+      // so videoRef.current is guaranteed to exist here.
+      const video = videoRef.current!
+      video.srcObject = stream
+      await video.play()
       setStage('detecting')
       consecutiveHitsRef.current = 0
       let frameCount = 0
@@ -485,7 +493,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
     canvas.height = Math.round(video.videoHeight * 0.5)
     if (!canvas.width || !canvas.height) return
     const ctx = canvas.getContext('2d')!
-    if (isMirrored) {
+    if (isMirroredRef.current) {
       ctx.translate(canvas.width, 0); ctx.scale(-1, 1)
     }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
@@ -511,7 +519,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
     canvas.width  = video.videoWidth  || 640
     canvas.height = video.videoHeight || 480
     const ctx = canvas.getContext('2d')!
-    if (isMirrored) {
+    if (isMirroredRef.current) {
       ctx.translate(canvas.width, 0); ctx.scale(-1, 1)
     }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
@@ -591,9 +599,9 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
             </div>
           )}
 
-          {/* Camera detecting */}
-          {stage === 'detecting' && (
-            <div className="space-y-2">
+          {/* Camera: video element always mounted so videoRef is available before play() */}
+          {mode === 'camera' && (
+            <div className={stage === 'detecting' ? 'space-y-2' : 'hidden'}>
               <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
                 <video
                   ref={videoRef}
