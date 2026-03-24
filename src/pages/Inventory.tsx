@@ -1517,7 +1517,8 @@ type ManualAddFormProps = {
 }
 
 function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, onBookChange, onCoverDataUrl, onSelectHit, onSubmit, onCancel }: ManualAddFormProps) {
-  const inputCls = 'w-full px-1 py-px text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
+  const inputCls = 'w-full px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
+  const titleInputCls = 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
@@ -1546,7 +1547,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
         <div className="flex gap-3">
           {/* Cover column: thumbnail with overlaid capture buttons */}
           <div className="flex-shrink-0 self-start">
-            <div className="relative w-12 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+            <div className="relative w-20 h-[7.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
               {(coverDataUrl || book.coverUrl) ? (
                 <img src={coverDataUrl ?? book.coverUrl} alt="" className="w-full h-full object-contain" />
               ) : (
@@ -1596,7 +1597,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
           </div>
 
           {/* Input fields */}
-          <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex-1 min-w-0 flex flex-col justify-between h-[7.5rem]">
             {/* Title */}
             <div className="relative">
               <input
@@ -1605,7 +1606,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
                 placeholder="书名 *"
                 value={book.title ?? ''}
                 onChange={e => onBookChange({ title: e.target.value })}
-                className={inputCls}
+                className={titleInputCls}
                 autoFocus
               />
               {/* Search indicator */}
