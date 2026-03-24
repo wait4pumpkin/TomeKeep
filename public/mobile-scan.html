@@ -186,6 +186,20 @@
     .item-icon.sending svg { animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── Camera toggle button ── */
+    .cam-toggle {
+      display: flex; align-items: center; justify-content: center; gap: 7px;
+      width: 100%; padding: 10px 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); cursor: pointer;
+      font-size: 14px; font-weight: 500; color: var(--text-muted);
+      transition: background .15s, color .15s, border-color .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .cam-toggle:hover { background: rgba(255,255,255,.05); color: var(--text); }
+    .cam-toggle.resuming { color: var(--blue); border-color: rgba(59,130,246,.4); }
+    .cam-toggle.resuming:hover { background: rgba(59,130,246,.08); }
+
     /* ── Unsupported state ── */
     .unsupported-box {
       background: var(--surface); border: 1px solid var(--border);
@@ -235,6 +249,13 @@
     </div>
   </div>
 
+  <button class="cam-toggle" id="cam-toggle" style="display:none">
+    <svg id="cam-toggle-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5"/>
+    </svg>
+    <span id="cam-toggle-label">暂停摄像头</span>
+  </button>
+
   <div class="status-msg" id="status-msg"></div>
 
   <!-- Unsupported browser message (hidden by default) -->
@@ -277,6 +298,9 @@
   const scanList    = document.getElementById('scan-list')
   const listCount   = document.getElementById('list-count')
   const unsupBox    = document.getElementById('unsupported-box')
+  const camToggle      = document.getElementById('cam-toggle')
+  const camToggleIcon  = document.getElementById('cam-toggle-icon')
+  const camToggleLabel = document.getElementById('cam-toggle-label')
 
   // ── State ─────────────────────────────────────────────────────────────────
   let totalScanned = 0
@@ -286,6 +310,7 @@
   let cancelled = false
   let rafId = null
   let stream = null
+  let paused = false
 
   // ── Utilities ─────────────────────────────────────────────────────────────
   function setBadge(state, label) {
@@ -305,6 +330,43 @@
   function hideOverlay() {
     camOverlay.classList.add('hidden')
   }
+
+  // ── Camera toggle (pause / resume) ───────────────────────────────────────
+  const ICON_PAUSE  = `<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5"/>`
+  const ICON_RESUME = `<path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.082C5.25 4.034 6.356 3.4 7.25 3.926l12.188 6.918a1 1 0 0 1 0 1.732L7.25 19.494C6.356 20.02 5.25 19.386 5.25 18.338V5.082Z"/>`
+
+  function setPausedState(isPaused) {
+    paused = isPaused
+    if (isPaused) {
+      camToggleIcon.innerHTML = ICON_RESUME
+      camToggleLabel.textContent = '继续扫描'
+      camToggle.classList.add('resuming')
+    } else {
+      camToggleIcon.innerHTML = ICON_PAUSE
+      camToggleLabel.textContent = '暂停摄像头'
+      camToggle.classList.remove('resuming')
+    }
+  }
+
+  camToggle.addEventListener('click', () => {
+    if (!paused) {
+      // Pause: stop rAF loop and release camera
+      cancelled = true
+      if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null }
+      showOverlay('已暂停')
+      setBadge('idle', '已暂停')
+      setStatus('')
+      setPausedState(true)
+    } else {
+      // Resume: restart camera and decoder
+      cancelled = false
+      cooldown = false
+      isDetecting = false
+      setPausedState(false)
+      void init()
+    }
+  })
 
   // Short two-tone beep using Web Audio API
   function playBeep() {
@@ -725,6 +787,9 @@
     const cameraOk = await startCamera()
     if (!cameraOk) return
 
+    camToggle.style.display = ''
+    setPausedState(false)
+
     if (window.BarcodeDetector) {
       // Native path: Chrome Android, etc.
       setStatus('将条形码对准摄像头，识别后自动入库')
@@ -741,7 +806,7 @@
       cancelled = true
       if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
       if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null }
-    } else {
+    } else if (!paused) {
       cancelled = false
       cooldown = false
       isDetecting = false

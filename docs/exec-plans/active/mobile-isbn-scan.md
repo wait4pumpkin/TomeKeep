@@ -151,3 +151,4 @@ else
 - [x] 修复 `companion:scan-ack` IPC handler 未转发 `title` 字段导致手机端无法显示书名的 bug
 - [x] 手机端、桌面端扫描列表 UI 简化：移除状态文字，书名与 ISBN 同行显示，图标表达状态
 - [x] 手机端删除失败扫描条目：`POST /delete-entry` 路由、`companion:delete-entry` IPC、`onDeleteEntryReceived` preload 方法、手机端删除按钮（含超时回退项）及 `removeItem()` 辅助函数、`delete-ack` SSE 消息处理
+- [x] 手机端摄像头暂停/恢复：摄像头区域下方增加切换按钮，暂停时停止 rAF 循环并释放摄像头，恢复时重新启动；页面切回后台时若已手动暂停则不自动恢复
