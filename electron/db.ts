@@ -148,6 +148,37 @@ export async function setupDatabase() {
   }
 
   // ---------------------------------------------------------------------------
+  // Migration: normalise author strings — ensure a space follows nationality
+  // bracket prefixes such as [美]、（英）、(日) etc.
+  // Idempotent: already-normalised strings are left unchanged.
+  // ---------------------------------------------------------------------------
+  {
+    // Inline copy of the same logic as src/lib/author.ts so we don't import
+    // renderer-side code from the main process.
+    const NATIONALITY_RE = /^([\[【(（][\u4e00-\u9fff]{1,6}[\]】)）])(\s*)([\s\S]+)$/u
+    function normalizeSegment(s: string): string {
+      const trimmed = s.replace(/\s+/g, ' ').trim()
+      return trimmed.replace(NATIONALITY_RE, (_, prefix, _ws, name) => `${prefix} ${name.trim()}`)
+    }
+    function normalizeAuthorStr(raw: string): string {
+      if (!raw) return raw
+      const parts = raw.split(/,\s*|\/|、/g).map(normalizeSegment).filter(Boolean)
+      return parts.length === 0 ? raw : parts.join(', ')
+    }
+
+    let dirty = false
+    for (const book of db.data.books) {
+      const fixed = normalizeAuthorStr(book.author)
+      if (fixed !== book.author) { book.author = fixed; dirty = true }
+    }
+    for (const item of db.data.wishlist) {
+      const fixed = normalizeAuthorStr(item.author)
+      if (fixed !== item.author) { item.author = fixed; dirty = true }
+    }
+    if (dirty) await db.write()
+  }
+
+  // ---------------------------------------------------------------------------
   // Book IPC handlers
   // ---------------------------------------------------------------------------
   ipcMain.handle('db:get-books', () => db.data.books)
