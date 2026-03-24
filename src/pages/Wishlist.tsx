@@ -32,6 +32,22 @@ export function Wishlist() {
   const [addMode, setAddMode] = useState<null | 'manual'>(null)
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({})
   const [newItemCoverDataUrl, setNewItemCoverDataUrl] = useState<string | null>(null)
+  // Stable ID for the current add-form session — generated once when form opens,
+  // reused for both the cover preview download and the final handleAdd call.
+  const newItemIdRef = useRef<string>(crypto.randomUUID())
+
+  // Auto-download remote coverUrl to app:// so the preview <img> can display it
+  // (Douban CDN requires a Referer header that the renderer can't send directly).
+  useEffect(() => {
+    const url = newItem.coverUrl
+    if (!url || url.startsWith('app://') || url.startsWith('data:')) return
+    let cancelled = false
+    void window.covers.saveCover(newItemIdRef.current, url).then(appUrl => {
+      if (cancelled || !appUrl) return
+      setNewItem(prev => prev.coverUrl === url ? { ...prev, coverUrl: appUrl } : prev)
+    })
+    return () => { cancelled = true }
+  }, [newItem.coverUrl])
 
   // Toast for title navigation failures
   const [toastMsg, setToastMsg] = useState<string | null>(null)
@@ -138,13 +154,14 @@ export function Wishlist() {
     setFillState('idle')
     setClipStatus({ state: 'idle' })
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    newItemIdRef.current = crypto.randomUUID()
   }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
     if (!newItem.title || !newItem.author) return
 
-    const id = crypto.randomUUID()
+    const id = newItemIdRef.current
 
     // Download/save cover to local storage before saving the record
     let coverUrl = newItem.coverUrl
@@ -724,7 +741,7 @@ type WishlistAddFormProps = {
 }
 
 function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillState, clipStatus, onItemChange, onCoverDataUrl, onSelectHit, onSubmit, onCancel }: WishlistAddFormProps) {
-  const inputCls = 'w-full px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const inputCls = 'w-full px-2.5 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
@@ -746,7 +763,7 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
         <div className="flex gap-3">
           {/* Cover column: thumbnail + capture buttons */}
           <div className="flex-shrink-0 flex flex-col items-center gap-1">
-            <div className="w-14 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+            <div className="w-16 h-32 rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
               {(coverDataUrl || item.coverUrl) ? (
                 <img src={coverDataUrl ?? item.coverUrl} alt="" className="w-full h-full object-cover" />
               ) : (

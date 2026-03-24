@@ -59,6 +59,22 @@ export function Inventory() {
 
   const [newBook, setNewBook] = useState<Partial<Book>>({})
   const [newBookCoverDataUrl, setNewBookCoverDataUrl] = useState<string | null>(null)
+  // Stable ID for the current add-form session — generated once when form opens,
+  // reused for both the cover preview download and the final commitBook call.
+  const newBookIdRef = useRef<string>(crypto.randomUUID())
+
+  // Auto-download remote coverUrl to app:// so the preview <img> can display it
+  // (Douban CDN requires a Referer header that the renderer can't send directly).
+  useEffect(() => {
+    const url = newBook.coverUrl
+    if (!url || url.startsWith('app://') || url.startsWith('data:')) return
+    let cancelled = false
+    void window.covers.saveCover(newBookIdRef.current, url).then(appUrl => {
+      if (cancelled || !appUrl) return
+      setNewBook(prev => prev.coverUrl === url ? { ...prev, coverUrl: appUrl } : prev)
+    })
+    return () => { cancelled = true }
+  }, [newBook.coverUrl])
 
   // Toast for title navigation failures
   const [toastMsg, setToastMsg] = useState<string | null>(null)
@@ -481,6 +497,7 @@ export function Inventory() {
     setFillState('idle')
     setClipStatus({ state: 'idle' })
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    newBookIdRef.current = crypto.randomUUID()
   }
 
   /** Save a book draft to db, downloading the cover if needed. */
@@ -511,7 +528,7 @@ export function Inventory() {
   async function handleAddBook(e: React.FormEvent) {
     e.preventDefault()
     if (!newBook.title || !newBook.author) return
-    const id = crypto.randomUUID()
+    const id = newBookIdRef.current
     let coverUrl = newBook.coverUrl
     if (newBookCoverDataUrl) {
       coverUrl = await window.covers.saveCoverData(id, newBookCoverDataUrl) ?? coverUrl
@@ -1500,7 +1517,7 @@ type ManualAddFormProps = {
 }
 
 function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, onBookChange, onCoverDataUrl, onSelectHit, onSubmit, onCancel }: ManualAddFormProps) {
-  const inputCls = 'w-full px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const inputCls = 'w-full px-2.5 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
@@ -1528,7 +1545,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
         <div className="flex gap-3">
           {/* Cover column: thumbnail + capture buttons */}
           <div className="flex-shrink-0 flex flex-col items-center gap-1">
-            <div className="w-14 h-[4.5rem] rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+            <div className="w-16 h-32 rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
               {(coverDataUrl || book.coverUrl) ? (
                 <img src={coverDataUrl ?? book.coverUrl} alt="" className="w-full h-full object-cover" />
               ) : (
