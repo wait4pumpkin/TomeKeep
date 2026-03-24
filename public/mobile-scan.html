@@ -186,19 +186,30 @@
     .item-icon.sending svg { animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Camera toggle button ── */
+    /* ── Camera toggle button (overlaid bottom-right of camera) ── */
     .cam-toggle {
-      display: flex; align-items: center; justify-content: center; gap: 7px;
-      width: 100%; padding: 10px 0;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); cursor: pointer;
-      font-size: 14px; font-weight: 500; color: var(--text-muted);
-      transition: background .15s, color .15s, border-color .15s;
+      position: absolute; bottom: 10px; right: 10px; z-index: 10;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.18);
+      border-radius: 50%; cursor: pointer; color: rgba(255,255,255,.75);
+      transition: background .15s, color .15s;
       -webkit-tap-highlight-color: transparent;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
     }
-    .cam-toggle:hover { background: rgba(255,255,255,.05); color: var(--text); }
-    .cam-toggle.resuming { color: var(--blue); border-color: rgba(59,130,246,.4); }
-    .cam-toggle.resuming:hover { background: rgba(59,130,246,.08); }
+    .cam-toggle:hover { background: rgba(0,0,0,.65); color: #fff; }
+    .cam-toggle.resuming { color: #fff; background: rgba(59,130,246,.55); border-color: rgba(59,130,246,.6); }
+
+    /* ── Server-down error banner ── */
+    .server-error {
+      display: none;
+      align-items: center; gap: 10px;
+      background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.35);
+      border-radius: var(--radius); padding: 11px 14px;
+      font-size: 13px; color: var(--red); line-height: 1.4;
+    }
+    .server-error.visible { display: flex; }
+    .server-error svg { flex-shrink: 0; opacity: .85; }
 
     /* ── Unsupported state ── */
     .unsupported-box {
@@ -247,14 +258,19 @@
       </svg>
       <p id="overlay-msg">正在启动摄像头…</p>
     </div>
+    <button class="cam-toggle" id="cam-toggle" style="display:none">
+      <svg id="cam-toggle-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5"/>
+      </svg>
+    </button>
   </div>
 
-  <button class="cam-toggle" id="cam-toggle" style="display:none">
-    <svg id="cam-toggle-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5"/>
+  <div class="server-error" id="server-error">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
     </svg>
-    <span id="cam-toggle-label">暂停摄像头</span>
-  </button>
+    <span>桌面端已关闭扫码服务，请在应用中重新开启手机扫码。</span>
+  </div>
 
   <div class="status-msg" id="status-msg"></div>
 
@@ -300,7 +316,7 @@
   const unsupBox    = document.getElementById('unsupported-box')
   const camToggle      = document.getElementById('cam-toggle')
   const camToggleIcon  = document.getElementById('cam-toggle-icon')
-  const camToggleLabel = document.getElementById('cam-toggle-label')
+  const serverError    = document.getElementById('server-error')
 
   // ── State ─────────────────────────────────────────────────────────────────
   let totalScanned = 0
@@ -339,11 +355,9 @@
     paused = isPaused
     if (isPaused) {
       camToggleIcon.innerHTML = ICON_RESUME
-      camToggleLabel.textContent = '继续扫描'
       camToggle.classList.add('resuming')
     } else {
       camToggleIcon.innerHTML = ICON_PAUSE
-      camToggleLabel.textContent = '暂停摄像头'
       camToggle.classList.remove('resuming')
     }
   }
@@ -548,19 +562,39 @@
         }
       } catch (_) { /* ignore */ }
     }
-    // EventSource auto-reconnects on error
+    es.onerror = () => {
+      // EventSource auto-reconnects — but if server is truly gone, confirm with a ping
+      if (serverDown) return
+      fetch(`${baseUrl}/ping`).catch(() => showServerError())
+    }
   }
 
   // ── Send ISBN to Electron ─────────────────────────────────────────────────
+  let serverDown = false
+
+  function showServerError() {
+    if (serverDown) return
+    serverDown = true
+    serverError.classList.add('visible')
+    setBadge('error', '服务已关闭')
+    // Stop scanning — no point continuing
+    cancelled = true
+    if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null }
+    showOverlay('桌面端扫码服务已关闭')
+    camToggle.style.display = 'none'
+  }
+
   async function sendIsbn(isbn) {
     try {
-      await fetch(`${baseUrl}/scan?token=${token}`, {
+      const res = await fetch(`${baseUrl}/scan?token=${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isbn }),
       })
-    } catch (err) {
-      console.warn('send failed', err)
+      if (!res.ok && res.status !== 200) showServerError()
+    } catch (_) {
+      showServerError()
     }
   }
 
