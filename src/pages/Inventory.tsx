@@ -1517,7 +1517,7 @@ type ManualAddFormProps = {
 }
 
 function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, onBookChange, onCoverDataUrl, onSelectHit, onSubmit, onCancel }: ManualAddFormProps) {
-  const inputCls = 'w-full px-2.5 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const inputCls = 'w-full px-2 py-0.5 text-sm rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
@@ -1531,54 +1531,56 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
 
   const metaFilled = !!(book.coverUrl || book.isbn || book.publisher)
 
+  // Single status line: clipboard takes priority, then fill state, then meta-filled confirmation
+  const statusLine: { text: string; type: 'info' | 'error' | 'success' | 'loading' } | null =
+    clipStatus.state === 'loading' ? { text: '正在从剪贴板导入…', type: 'loading' } :
+    clipStatus.state === 'error'   ? { text: clipStatus.message ?? '导入失败', type: 'error' } :
+    fillState === 'loading'        ? { text: '正在从豆瓣获取详情…', type: 'loading' } :
+    metaFilled && fillState === 'idle' && clipStatus.state !== 'idle'
+                                   ? { text: clipStatus.message ?? '已从豆瓣填充元信息', type: 'success' } :
+    metaFilled && fillState === 'idle'
+                                   ? { text: '已从豆瓣填充元信息', type: 'success' } :
+    null
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-3 max-w-xs">
-      {/* Clipboard status banner */}
-      {clipStatus.state !== 'idle' && (
-        <p className={`text-xs mb-2 px-0.5 ${clipStatus.state === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
-          {clipStatus.state === 'loading' ? '正在从剪贴板导入…' : clipStatus.message}
-        </p>
-      )}
-
       <form onSubmit={onSubmit}>
         {/* Row 1: cover preview + fields */}
         <div className="flex gap-3">
-          {/* Cover column: thumbnail + capture buttons */}
-          <div className="flex-shrink-0 flex flex-col items-center gap-1">
-            <div className="w-16 h-32 rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
+          {/* Cover column: thumbnail with overlaid capture buttons */}
+          <div className="flex-shrink-0">
+            <div className="relative w-16 h-24 rounded-md bg-gray-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center">
               {(coverDataUrl || book.coverUrl) ? (
-                <img src={coverDataUrl ?? book.coverUrl} alt="" className="w-full h-full object-cover" />
+                <img src={coverDataUrl ?? book.coverUrl} alt="" className="w-full h-full object-contain" />
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
                 </svg>
               )}
-            </div>
-            {/* Capture buttons */}
-            <div className="flex gap-1">
-              {/* File picker */}
-              <button
-                type="button"
-                title="从文件选择封面"
-                onClick={() => fileInputRef.current?.click()}
-                className="p-1 rounded text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                </svg>
-              </button>
-              {/* Camera */}
-              <button
-                type="button"
-                title="拍摄封面"
-                onClick={() => setCropMode('camera')}
-                className="p-1 rounded text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
-                </svg>
-              </button>
+              {/* Bottom overlay: file + camera buttons */}
+              <div className="absolute bottom-0 inset-x-0 flex justify-center gap-1 py-1 bg-black/40">
+                <button
+                  type="button"
+                  title="从文件选择封面"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  title="拍摄封面"
+                  onClick={() => setCropMode('camera')}
+                  className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                  </svg>
+                </button>
+              </div>
             </div>
             {/* Hidden file input */}
             <input
@@ -1597,7 +1599,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
           </div>
 
           {/* Input fields */}
-          <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="flex-1 min-w-0 space-y-1">
             {/* Title */}
             <div className="relative">
               <input
@@ -1611,8 +1613,8 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
               />
               {/* Search indicator */}
               {searchState === 'loading' && (
-                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
-                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                   </svg>
@@ -1627,12 +1629,12 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
                       key={hit.subjectId}
                       type="button"
                       onClick={() => onSelectHit(hit)}
-                      className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0"
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0"
                     >
                       {hit.coverUrl ? (
-                        <img src={hit.coverUrl} alt="" className="w-7 h-9 object-cover rounded flex-shrink-0" />
+                        <img src={hit.coverUrl} alt="" className="w-6 h-8 object-cover rounded flex-shrink-0" />
                       ) : (
-                        <div className="w-7 h-9 rounded bg-gray-100 dark:bg-gray-700 flex-shrink-0" />
+                        <div className="w-6 h-8 rounded bg-gray-100 dark:bg-gray-700 flex-shrink-0" />
                       )}
                       <div className="min-w-0">
                         <p className="text-sm text-gray-900 dark:text-gray-100 truncate leading-snug">{hit.title}</p>
@@ -1683,32 +1685,33 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
           initialFile={pendingFile}
         />
 
-        {/* Fill loading indicator */}
-        {fillState === 'loading' && (
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 flex items-center gap-1.5">
-            <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-            </svg>
-            正在从豆瓣获取详情…
+        {/* Single status line */}
+        {statusLine && (
+          <p className={`text-xs mt-2 flex items-center gap-1.5 ${
+            statusLine.type === 'error'   ? 'text-red-500 dark:text-red-400' :
+            statusLine.type === 'success' ? 'text-green-600 dark:text-green-400' :
+                                            'text-gray-400 dark:text-gray-500'
+          }`}>
+            {statusLine.type === 'loading' && (
+              <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+            )}
+            {statusLine.text}
           </p>
         )}
 
-        {/* Metadata filled confirmation */}
-        {metaFilled && fillState === 'idle' && (
-          <p className="text-xs text-green-600 dark:text-green-400 mt-2">已从豆瓣填充元信息</p>
-        )}
-
         {/* Row 2: status + actions */}
-        <div className="flex items-center gap-2 mt-3">
+        <div className="flex items-center gap-2 mt-2.5">
           {/* Status segmented control */}
-          <div className="flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden shrink-0">
+          <div className="flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden shrink-0">
             {statusOptions.map(opt => (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => onBookChange({ status: opt.value })}
-                  className={`px-2.5 py-1 text-xs transition-colors ${
+                className={`px-2 py-0.5 text-xs transition-colors ${
                   (book.status ?? 'unread') === opt.value
                     ? 'bg-blue-500 text-white'
                     : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
@@ -1725,7 +1728,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
           <button
             type="button"
             onClick={onCancel}
-            className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="px-2 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             取消
           </button>
@@ -1734,7 +1737,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
           <button
             type="submit"
             disabled={!book.title || !book.author}
-            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="px-2 py-0.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             添加
           </button>
