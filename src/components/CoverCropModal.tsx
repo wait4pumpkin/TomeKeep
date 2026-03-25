@@ -132,36 +132,35 @@ function insetCorners(w: number, h: number, f = 0.08): [Point, Point, Point, Poi
 }
 
 // ---------------------------------------------------------------------------
-// Perspective transform (homography) — pure Canvas 2D
-// Adapted from standard 4-point DLT algorithm.
+// Perspective transform (homography) — pure Canvas 2D backward mapping
 // ---------------------------------------------------------------------------
 
 type Mat3 = [number, number, number, number, number, number, number, number, number]
 
-/** Compute the homography H mapping srcPts → [0,0,1,0,1,1,0,1] unit square */
-function computeHomography(src: [Point, Point, Point, Point], dstW: number, dstH: number): Mat3 {
-  // We solve H such that H * src[i] ~ dst[i] using the 4-point normalized DLT.
-  // For simplicity we use the closed-form unit-square approach.
-  // dst points: (0,0),(dstW,0),(dstW,dstH),(0,dstH)
-  const dst: [Point, Point, Point, Point] = [
-    { x: 0,    y: 0 },
-    { x: dstW, y: 0 },
-    { x: dstW, y: dstH },
-    { x: 0,    y: dstH },
-  ]
-
-  // Build 8×9 matrix A for the DLT, solve via Gaussian elimination
+/**
+ * Solve the 8-DOF homography H such that H * srcPts[i] ≈ dstPts[i]
+ * using the standard DLT (Direct Linear Transform) with Gaussian elimination.
+ *
+ * H is stored row-major: [h0 h1 h2 / h3 h4 h5 / h6 h7 1]
+ * so that:  w*u = h0*x + h1*y + h2
+ *           w*v = h3*x + h4*y + h5
+ *           w   = h6*x + h7*y + 1
+ */
+function solveHomography(
+  srcPts: [Point, Point, Point, Point],
+  dstPts: [Point, Point, Point, Point],
+): Mat3 {
   const A: number[][] = []
   for (let i = 0; i < 4; i++) {
-    const { x: sx, y: sy } = src[i]
-    const { x: dx, y: dy } = dst[i]
-    A.push([-sx, -sy, -1,   0,   0,  0, dx*sx, dx*sy, dx])
-    A.push([  0,   0,  0, -sx, -sy, -1, dy*sx, dy*sy, dy])
+    const { x, y } = srcPts[i]
+    const { x: u, y: v } = dstPts[i]
+    A.push([ x,  y,  1,  0,  0,  0, -u*x, -u*y, u])
+    A.push([ 0,  0,  0,  x,  y,  1, -v*x, -v*y, v])
   }
-
-  // Gaussian elimination with partial pivoting on 8×9 augmented matrix
+  // Gaussian elimination with partial pivoting (8×9 augmented matrix)
   const n = 8
   for (let col = 0; col < n; col++) {
+    // Find pivot
     let maxRow = col
     for (let row = col + 1; row < n; row++) {
       if (Math.abs(A[row][col]) > Math.abs(A[maxRow][col])) maxRow = row
@@ -172,18 +171,21 @@ function computeHomography(src: [Point, Point, Point, Point], dstW: number, dstH
     for (let j = col; j <= n; j++) A[col][j] /= pivot
     for (let row = 0; row < n; row++) {
       if (row === col) continue
-      const factor = A[row][col]
-      for (let j = col; j <= n; j++) A[row][j] -= factor * A[col][j]
+      const f = A[row][col]
+      for (let j = col; j <= n; j++) A[row][j] -= f * A[col][j]
     }
   }
-
   const h = A.map(r => r[n])
   return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1] as Mat3
 }
 
 /**
- * Warp source ImageData using the inverse homography via per-pixel sampling.
- * Output is a new canvas of size outW × outH.
+ * Perspective-warp srcCanvas using backward mapping:
+ * for each output pixel (dx,dy) we compute the source coordinate via the
+ * homography that maps output-rectangle corners → source quad corners,
+ * then bilinearly sample the source.
+ *
+ * corners order: [tl, tr, br, bl] in source-image pixel space.
  */
 function perspectiveWarp(
   srcCanvas: HTMLCanvasElement,
@@ -191,46 +193,52 @@ function perspectiveWarp(
   outW: number,
   outH: number,
 ): HTMLCanvasElement {
-  const H = computeHomography(corners, outW, outH)
-
-  // Compute inverse H for backward mapping
-  // Inverse of 3×3 via cofactors
-  const [h0,h1,h2,h3,h4,h5,h6,h7,h8] = H
-  const det = h0*(h4*h8-h5*h7) - h1*(h3*h8-h5*h6) + h2*(h3*h7-h4*h6)
-  const inv: Mat3 = [
-     (h4*h8-h5*h7)/det, -(h1*h8-h2*h7)/det,  (h1*h5-h2*h4)/det,
-    -(h3*h8-h5*h6)/det,  (h0*h8-h2*h6)/det, -(h0*h5-h2*h3)/det,
-     (h3*h7-h4*h6)/det, -(h0*h7-h1*h6)/det,  (h0*h4-h1*h3)/det,
+  // dst (output rectangle) → src (the quad the user drew)
+  const dstPts: [Point, Point, Point, Point] = [
+    { x: 0,    y: 0    },  // tl
+    { x: outW, y: 0    },  // tr
+    { x: outW, y: outH },  // br
+    { x: 0,    y: outH },  // bl
   ]
+  // H maps output coords → source coords
+  const H = solveHomography(dstPts, corners)
 
   const srcCtx = srcCanvas.getContext('2d')!
   const srcData = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height)
+  const sw = srcCanvas.width, sh = srcCanvas.height
 
   const out = document.createElement('canvas')
   out.width = outW; out.height = outH
   const outCtx = out.getContext('2d')!
   const outData = outCtx.createImageData(outW, outH)
 
+  const [h0,h1,h2,h3,h4,h5,h6,h7] = H
+
   for (let dy = 0; dy < outH; dy++) {
     for (let dx = 0; dx < outW; dx++) {
-      const wx = inv[0]*dx + inv[1]*dy + inv[2]
-      const wy = inv[3]*dx + inv[4]*dy + inv[5]
-      const ww = inv[6]*dx + inv[7]*dy + inv[8]
-      const sx = wx / ww
-      const sy = wy / ww
-      // Bilinear sample
+      const ww = h6*dx + h7*dy + 1
+      const sx = (h0*dx + h1*dy + h2) / ww
+      const sy = (h3*dx + h4*dy + h5) / ww
+
+      // Bilinear interpolation
       const x0 = Math.floor(sx), y0 = Math.floor(sy)
-      const x1 = x0 + 1, y1 = y0 + 1
-      const fx = sx - x0, fy = sy - y0
-      const sw = srcCanvas.width, sh = srcCanvas.height
-      const clamp = (v: number, max: number) => Math.max(0, Math.min(max - 1, v))
-      const idx = (x: number, y: number) => (clamp(y, sh) * sw + clamp(x, sw)) * 4
-      const i00 = idx(x0,y0), i10 = idx(x1,y0), i01 = idx(x0,y1), i11 = idx(x1,y1)
-      const oi = (dy * outW + dx) * 4
+      const x1 = x0 + 1,        y1 = y0 + 1
+      const fx = sx - x0,        fy = sy - y0
+      const cx0 = Math.max(0, Math.min(sw - 1, x0))
+      const cy0 = Math.max(0, Math.min(sh - 1, y0))
+      const cx1 = Math.max(0, Math.min(sw - 1, x1))
+      const cy1 = Math.max(0, Math.min(sh - 1, y1))
+      const i00 = (cy0 * sw + cx0) * 4
+      const i10 = (cy0 * sw + cx1) * 4
+      const i01 = (cy1 * sw + cx0) * 4
+      const i11 = (cy1 * sw + cx1) * 4
+      const oi  = (dy  * outW + dx) * 4
       for (let c = 0; c < 3; c++) {
         outData.data[oi+c] = Math.round(
-          srcData.data[i00+c]*(1-fx)*(1-fy) + srcData.data[i10+c]*fx*(1-fy) +
-          srcData.data[i01+c]*(1-fx)*fy     + srcData.data[i11+c]*fx*fy
+          srcData.data[i00+c] * (1-fx) * (1-fy) +
+          srcData.data[i10+c] *    fx  * (1-fy) +
+          srcData.data[i01+c] * (1-fx) *    fy  +
+          srcData.data[i11+c] *    fx  *    fy
         )
       }
       outData.data[oi+3] = 255
@@ -240,10 +248,8 @@ function perspectiveWarp(
   return out
 }
 
-/**
- * Compress a canvas to a JPEG data URL.
- * Output is capped at maxW×maxH, preserving aspect ratio.
- */
+
+
 function compressCanvas(src: HTMLCanvasElement, maxW = 600, maxH = 800, quality = 0.85): string {
   const scale = Math.min(1, maxW / src.width, maxH / src.height)
   const w = Math.round(src.width * scale)
@@ -421,6 +427,9 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
       const dataUrl = ev.target?.result as string
       const img = new Image()
       img.onload = () => {
+        // Electron/Chromium automatically applies EXIF orientation when rendering
+        // an <img> element and when calling drawImage() — naturalWidth/Height
+        // already reflect the corrected (visual) dimensions.
         const canvas = document.createElement('canvas')
         canvas.width = img.naturalWidth
         canvas.height = img.naturalHeight
@@ -428,7 +437,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
         const imgData = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
         const { corners: detected, confidence } = detectRect(imgData)
         setSourceCanvas(canvas)
-        setSourceUrl(dataUrl)
+        setSourceUrl(canvas.toDataURL('image/jpeg', 0.92))
         setCorners(confidence >= 0.4 ? detected : insetCorners(canvas.width, canvas.height))
         setStage('adjusting')
       }
@@ -495,6 +504,9 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
     setStage('loading')
     const img = new Image()
     img.onload = () => {
+      // The phone's mobile-cover.html uses drawImage() via an object URL,
+      // which also lets the browser normalise EXIF before toDataURL().
+      // On the desktop side Chromium likewise normalises via drawImage().
       const canvas = document.createElement('canvas')
       canvas.width = img.naturalWidth
       canvas.height = img.naturalHeight
@@ -502,7 +514,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
       const imgData = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
       const { corners: detected, confidence } = detectRect(imgData)
       setSourceCanvas(canvas)
-      setSourceUrl(dataUrl)
+      setSourceUrl(canvas.toDataURL('image/jpeg', 0.92))
       setCorners(confidence >= 0.4 ? detected : insetCorners(canvas.width, canvas.height))
       setStage('adjusting')
     }
