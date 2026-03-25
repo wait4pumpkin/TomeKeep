@@ -10,6 +10,7 @@ type ViewMode = 'detail' | 'compact'
 import { IsbnScanModal } from '../components/IsbnScanModal'
 import { MobileScanPanel } from '../components/MobileScanPanel'
 import { CoverCropModal } from '../components/CoverCropModal'
+import { CoverLightbox } from '../components/CoverLightbox'
 import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from '../lib/isbn'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { normalizeAuthor } from '../lib/author'
@@ -50,6 +51,9 @@ export function Inventory() {
   // Cache-bust map: bookId → timestamp. Appended to app:// cover URLs after a local file save
   // so the browser doesn't serve a stale cached image.
   const [coverBustMap, setCoverBustMap] = useState<Map<string, number>>(new Map())
+
+  // Lightbox: show cover full-screen
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
   // add mode: null = closed, 'manual' = form, 'scan-single' | 'scan-batch' = modal
   const [addMode, setAddMode] = useState<null | 'manual' | 'scan-single' | 'scan-batch'>(null)
@@ -221,7 +225,10 @@ export function Inventory() {
     return books.filter(b => {
       const status: BookStatus = statusMap.get(b.id) ?? 'unread'
       if (statusFilter !== 'all' && status !== statusFilter) return false
-      if (tagFilter.length > 0 && !tagFilter.every(t => (b.tags ?? []).includes(t))) return false
+      if (tagFilter.length > 0 && !tagFilter.every(t => {
+        if (t === '__untagged__') return (b.tags ?? []).length === 0
+        return (b.tags ?? []).includes(t)
+      })) return false
       if (!q) return true
       return (
         b.title.toLowerCase().includes(q) ||
@@ -686,9 +693,10 @@ export function Inventory() {
     const isEditing = onEdit !== undefined && editingId === book.id
     const displayCoverUrl = bustCoverUrl(book.id, book.coverUrl)
     return (
-      <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-col ${extraClass}`}>
+      <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-col group ${extraClass}`}>
         {/* Top: A (cover) + B (text) */}
-        <div className="flex flex-row h-28 overflow-hidden">
+        {/* overflow-visible so CardTip tooltips in the text column can escape upward */}
+        <div className="flex flex-row h-28 overflow-visible">
           {/* A — Cover */}
           <div className="flex-shrink-0 w-20 self-stretch bg-gray-100 dark:bg-gray-700 flex items-center justify-center rounded-tl-xl overflow-hidden relative">
             {isEditing ? (
@@ -736,7 +744,19 @@ export function Inventory() {
                 </label>
               </>
             ) : displayCoverUrl ? (
-              <img src={displayCoverUrl} alt={book.title} className="w-full h-full object-contain" />
+              <>
+                <img src={displayCoverUrl} alt={book.title} className="w-full h-full object-contain" />
+                <button
+                  type="button"
+                  title="查看大图"
+                  className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 z-10"
+                  onClick={e => { e.stopPropagation(); setLightboxUrl(displayCoverUrl) }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                  </svg>
+                </button>
+              </>
             ) : (
               <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
@@ -747,7 +767,8 @@ export function Inventory() {
           </div>
 
           {/* B — Text & actions */}
-          <div className="flex flex-col flex-1 min-w-0 p-3 overflow-hidden">
+          {/* overflow-visible so CardTip tooltips can escape upward out of the fixed-height row */}
+          <div className="flex flex-col flex-1 min-w-0 p-3 overflow-visible">
             {/* Title + status badge */}
             <div className="flex items-start justify-between gap-2 mb-0.5">
               {isEditing ? (
@@ -1204,6 +1225,35 @@ export function Inventory() {
       {/* Tag filter bar — shown only when there are tags in use */}
       {allTags.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
+          {/* "No tags" filter — matches books with an empty tags array */}
+          {(() => {
+            const active = tagFilter.includes('__untagged__')
+            return (
+              <button
+                key="__untagged__"
+                type="button"
+                title="无标签"
+                onClick={() =>
+                  setTagFilter(prev =>
+                    active ? prev.filter(t => t !== '__untagged__') : ['__untagged__', ...prev]
+                  )
+                }
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                  active
+                    ? 'bg-violet-500 border-violet-500 text-white'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400'
+                }`}
+              >
+                {/* tag-slash icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L9.568 3Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+                  <line x1="3" y1="3" x2="21" y2="21" strokeLinecap="round" />
+                </svg>
+                无标签
+              </button>
+            )
+          })()}
           {allTags.map(tag => {
             const active = tagFilter.includes(tag)
             return (
@@ -1392,10 +1442,11 @@ export function Inventory() {
               return (
                 <div
                   key={`expanded-${book.id}`}
-                  className={`col-span-full flex ${closingId === book.id ? 'compact-panel-exit' : 'compact-panel-enter'}`}
+                  className={`col-span-full flex w-full cursor-default ${closingId === book.id ? 'compact-panel-exit' : 'compact-panel-enter'}`}
+                  onClick={() => handleToggleExpand(book.id)}
                 >
                   <div className="flex-shrink-0" style={{ width: spacerPx }} />
-                  <div className="w-80 flex-shrink-0 pb-2">
+                  <div className="w-80 flex-shrink-0 pb-2" onClick={e => e.stopPropagation()}>
                     {renderDetailCard(book, '', () => {
                       setEditDraft({
                         title: book.title,
@@ -1421,7 +1472,19 @@ export function Inventory() {
                   onClick={() => handleToggleExpand(book.id)}
                 >
                   {bustCoverUrl(book.id, book.coverUrl) ? (
-                    <img src={bustCoverUrl(book.id, book.coverUrl)} alt={book.title} className="w-full h-full object-cover" />
+                    <>
+                      <img src={bustCoverUrl(book.id, book.coverUrl)} alt={book.title} className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        title="查看大图"
+                        className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 z-10"
+                        onClick={e => { e.stopPropagation(); setLightboxUrl(bustCoverUrl(book.id, book.coverUrl)!) }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                        </svg>
+                      </button>
+                    </>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
                       <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
@@ -1492,6 +1555,11 @@ export function Inventory() {
             ? '书库还是空的，点击 "+" 开始添加吧！'
             : '没有符合条件的书籍。'}
         </div>
+      )}
+
+      {/* Cover lightbox */}
+      {lightboxUrl && (
+        <CoverLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
       )}
     </div>
   )
