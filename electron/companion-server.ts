@@ -124,15 +124,15 @@ async function getOrCreateCert(): Promise<{ cert: string; key: string }> {
   return { cert: pems.cert, key: pems.private }
 }
 
-/** Serve the mobile-scan.html page. */
-function serveHtml(res: http.ServerResponse) {
+/** Serve a bundled HTML file from the public/ directory. */
+function servePublicHtml(filename: string, res: http.ServerResponse) {
   const htmlPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar', 'public', 'mobile-scan.html')
-    : path.join(app.getAppPath(), 'public', 'mobile-scan.html')
+    ? path.join(process.resourcesPath, 'app.asar', 'public', filename)
+    : path.join(app.getAppPath(), 'public', filename)
 
   if (!fs.existsSync(htmlPath)) {
     res.writeHead(404, { 'Content-Type': 'text/plain' })
-    res.end('mobile-scan.html not found')
+    res.end(`${filename} not found`)
     return
   }
 
@@ -209,7 +209,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
 
   // --- GET / → serve the mobile scan page ---
   if (req.method === 'GET' && pathname === '/') {
-    serveHtml(res)
+    servePublicHtml('mobile-scan.html', res)
     return
   }
 
@@ -223,6 +223,46 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
   if (req.method === 'GET' && pathname === '/ping') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ alive: true }))
+    return
+  }
+
+  // --- GET /cover → serve the mobile cover-capture page ---
+  if (req.method === 'GET' && pathname === '/cover') {
+    if (!requireToken(urlObj, res)) return
+    servePublicHtml('mobile-cover.html', res)
+    return
+  }
+
+  // --- POST /upload-cover → receive a JPEG data URL from the phone ---
+  if (req.method === 'POST' && pathname === '/upload-cover') {
+    if (!requireToken(urlObj, res)) return
+
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { dataUrl, session } = JSON.parse(body) as { dataUrl?: unknown; session?: unknown }
+        if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'missing_or_invalid_dataUrl' }))
+          return
+        }
+
+        const wins = BrowserWindow.getAllWindows()
+        if (wins[0]) {
+          wins[0].webContents.send('companion:cover-received', {
+            dataUrl,
+            session: typeof session === 'string' ? session : '',
+          })
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'invalid_json' }))
+      }
+    })
     return
   }
 

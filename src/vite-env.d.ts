@@ -93,5 +93,10 @@ interface Window {
      * Returns a dispose function that removes the listener.
      */
     onDeleteEntryReceived: (cb: (isbn: string) => void) => () => void
+    /**
+     * Register a callback invoked when the phone sends a captured cover photo.
+     * Returns a dispose function that removes the listener.
+     */
+    onCoverReceived: (cb: (payload: { dataUrl: string; session: string }) => void) => () => void
   }
 }

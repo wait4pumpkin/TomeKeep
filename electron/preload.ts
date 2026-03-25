@@ -101,4 +101,14 @@ contextBridge.exposeInMainWorld('companion', {
     ipcRenderer.on('companion:delete-entry', listener)
     return () => ipcRenderer.off('companion:delete-entry', listener)
   },
+  /**
+   * Register a callback for cover photos received from the phone.
+   * Payload: { dataUrl: string (JPEG data URL), session: string }
+   * Returns a dispose function that removes the listener.
+   */
+  onCoverReceived: (cb: (payload: { dataUrl: string; session: string }) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { dataUrl: string; session: string }) => cb(payload)
+    ipcRenderer.on('companion:cover-received', listener)
+    return () => ipcRenderer.off('companion:cover-received', listener)
+  },
 })

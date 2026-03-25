@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import QRCode from 'qrcode'
 
 // ---------------------------------------------------------------------------
 // CoverCropModal
@@ -366,49 +367,48 @@ function CropAdjuster({ imageUrl, initCorners, onChange }: CropAdjusterProps) {
 // ---------------------------------------------------------------------------
 
 type Stage =
-  | 'loading'       // decoding file / starting camera
-  | 'detecting'     // camera: running live detection
-  | 'adjusting'     // showing 4-point adjuster (file or frozen camera frame)
+  | 'loading'       // decoding file / starting companion
+  | 'qr'            // camera mode: showing QR code, waiting for phone photo
+  | 'adjusting'     // showing 4-point adjuster
   | 'processing'    // running perspective warp + compress
   | 'error'
 
 export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }: CoverCropModalProps) {
   const [stage, setStage] = useState<Stage>('loading')
   const [errorMsg, setErrorMsg] = useState('')
-  const [sourceUrl, setSourceUrl] = useState<string | null>(null)      // data URL of the source image for adjuster
+  const [sourceUrl, setSourceUrl] = useState<string | null>(null)
   const [sourceCanvas, setSourceCanvas] = useState<HTMLCanvasElement | null>(null)
   const [corners, setCorners] = useState<[Point, Point, Point, Point]>([[0,0],[1,0],[1,1],[0,1]].map(([x,y])=>({x,y})) as [Point,Point,Point,Point])
-  const [detectLabel, setDetectLabel] = useState('检测中…')
-  const [isMirrored, setIsMirrored] = useState(false)
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [coverUrl, setCoverUrl] = useState<string | null>(null)
 
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const rafRef = useRef<number | null>(null)
-  const stageRef = useRef<Stage>('loading')
-  const consecutiveHitsRef = useRef(0)
-  // Ref mirror of isMirrored so rAF callbacks always read the latest value
-  const isMirroredRef = useRef(false)
+  // Stable session ID — identifies this particular modal open so stale IPC
+  // callbacks from a previous session don't clobber a new one.
+  const sessionRef = useRef('')
 
-  // Keep stageRef and isMirroredRef in sync
-  useEffect(() => { stageRef.current = stage }, [stage])
-  useEffect(() => { isMirroredRef.current = isMirrored }, [isMirrored])
+  // Dispose function returned by companion.onCoverReceived
+  const disposeListenerRef = useRef<(() => void) | null>(null)
 
-  // ── Reset on open/close ──────────────────────────────────────────────────
+  // ── Reset / setup on open/close ───────────────────────────────────────────
   useEffect(() => {
     if (!isOpen) {
-      stopCamera()
+      // Tear down listener on close
+      disposeListenerRef.current?.()
+      disposeListenerRef.current = null
       setStage('loading')
+      setErrorMsg('')
       setSourceUrl(null)
       setSourceCanvas(null)
-      setErrorMsg('')
-      setDetectLabel('检测中…')
-      consecutiveHitsRef.current = 0
+      setQrDataUrl(null)
+      setCoverUrl(null)
+      sessionRef.current = ''
       return
     }
+
     if (mode === 'file' && initialFile) {
       loadFile(initialFile)
     } else if (mode === 'camera') {
-      startCamera()
+      void startQrFlow()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
@@ -439,116 +439,81 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
     reader.readAsDataURL(file)
   }
 
-  // ── Camera mode ───────────────────────────────────────────────────────────
-  async function startCamera() {
+  // ── Camera mode: start companion, generate QR, listen for photo ───────────
+  async function startQrFlow() {
     setStage('loading')
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setErrorMsg('此环境不支持摄像头访问'); setStage('error'); return
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      })
-      streamRef.current = stream
-      const track = stream.getVideoTracks()[0]
-      const settings = track.getSettings()
-      const facingMode = settings.facingMode ?? ''
-      const mirrored = facingMode === 'user'
-      setIsMirrored(mirrored)
-      isMirroredRef.current = mirrored
 
-      // The <video> element is always rendered (hidden when not in use),
-      // so videoRef.current is guaranteed to exist here.
-      const video = videoRef.current!
-      video.srcObject = stream
-      await video.play()
-      setStage('detecting')
-      consecutiveHitsRef.current = 0
-      let frameCount = 0
-      const tick = () => {
-        if (stageRef.current !== 'detecting') return
-        frameCount++
-        if (frameCount % 5 === 0) runDetection()
-        rafRef.current = requestAnimationFrame(tick)
+    // Generate a stable random session ID for this modal open
+    const session = Math.random().toString(36).slice(2) + Date.now().toString(36)
+    sessionRef.current = session
+
+    try {
+      // Start companion server (idempotent if already running)
+      const result = await window.companion.start() as { ok: boolean; url: string; token: string; error?: string }
+      if (!result.ok) {
+        setErrorMsg('无法启动手机连接服务：' + (result.error ?? '未知错误'))
+        setStage('error')
+        return
       }
-      rafRef.current = requestAnimationFrame(tick)
+
+      // Build the cover-capture URL: /cover?token=T&session=S
+      // result.url is https://<ip>:<port>?token=T  — extract base + token
+      const serverUrl = new URL(result.url)
+      const token = serverUrl.searchParams.get('token') ?? result.token
+      const base = serverUrl.origin  // https://<ip>:<port>
+      const coverPageUrl = `${base}/cover?token=${token}&session=${session}`
+
+      // Generate QR code as data URL
+      const qr = await QRCode.toDataURL(coverPageUrl, {
+        width: 256,
+        margin: 2,
+        color: { dark: '#1e293b', light: '#f8fafc' },
+      })
+      setQrDataUrl(qr)
+      setCoverUrl(coverPageUrl)
+      setStage('qr')
+
+      // Register IPC listener for the photo coming back
+      disposeListenerRef.current?.()
+      const dispose = window.companion.onCoverReceived((payload: { dataUrl: string; session: string }) => {
+        // Ignore photos from a different session
+        if (payload.session !== sessionRef.current) return
+        dispose()
+        disposeListenerRef.current = null
+        loadFromDataUrl(payload.dataUrl)
+      })
+      disposeListenerRef.current = dispose
+
     } catch (e) {
-      const name = e instanceof DOMException ? e.name : ''
-      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        setErrorMsg('摄像头权限被拒绝，请在系统设置中允许后重试')
-      } else {
-        setErrorMsg('摄像头启动失败：' + ((e as Error).message || '未知错误'))
-      }
+      setErrorMsg('启动失败：' + ((e as Error).message || '未知错误'))
       setStage('error')
     }
   }
 
-  function runDetection() {
-    const video = videoRef.current
-    if (!video || video.readyState < video.HAVE_CURRENT_DATA) return
-    const canvas = document.createElement('canvas')
-    // Detect at half resolution for speed
-    canvas.width  = Math.round(video.videoWidth  * 0.5)
-    canvas.height = Math.round(video.videoHeight * 0.5)
-    if (!canvas.width || !canvas.height) return
-    const ctx = canvas.getContext('2d')!
-    if (isMirroredRef.current) {
-      ctx.translate(canvas.width, 0); ctx.scale(-1, 1)
+  // ── Load a received photo into the adjuster ───────────────────────────────
+  function loadFromDataUrl(dataUrl: string) {
+    setStage('loading')
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      canvas.getContext('2d')!.drawImage(img, 0, 0)
+      const imgData = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height)
+      const { corners: detected, confidence } = detectRect(imgData)
+      setSourceCanvas(canvas)
+      setSourceUrl(dataUrl)
+      setCorners(confidence >= 0.4 ? detected : insetCorners(canvas.width, canvas.height))
+      setStage('adjusting')
     }
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    const { corners: detected, confidence } = detectRect(imgData)
-
-    if (confidence >= 0.4) {
-      consecutiveHitsRef.current++
-      setDetectLabel(`已识别封面${consecutiveHitsRef.current < 3 ? '…' : '，请确认'}`)
-      if (consecutiveHitsRef.current >= 3) {
-        freezeFrame(canvas, detected)
-      }
-    } else {
-      consecutiveHitsRef.current = 0
-      setDetectLabel('检测中…')
-    }
-  }
-
-  function captureManual() {
-    const video = videoRef.current
-    if (!video) return
-    const canvas = document.createElement('canvas')
-    canvas.width  = video.videoWidth  || 640
-    canvas.height = video.videoHeight || 480
-    const ctx = canvas.getContext('2d')!
-    if (isMirroredRef.current) {
-      ctx.translate(canvas.width, 0); ctx.scale(-1, 1)
-    }
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const fallback = insetCorners(canvas.width, canvas.height)
-    // Try to detect on the full-res capture
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    const { corners: detected, confidence } = detectRect(imgData)
-    freezeFrame(canvas, confidence >= 0.4 ? detected : fallback)
-  }
-
-  function freezeFrame(canvas: HTMLCanvasElement, detectedCorners: [Point, Point, Point, Point]) {
-    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
-    stopCamera()
-    setSourceCanvas(canvas)
-    setSourceUrl(canvas.toDataURL('image/jpeg', 0.92))
-    setCorners(detectedCorners)
-    setStage('adjusting')
-  }
-
-  function stopCamera() {
-    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
+    img.onerror = () => { setErrorMsg('无法解析手机发来的图片'); setStage('error') }
+    img.src = dataUrl
   }
 
   // ── Confirm: perspective warp + compress ──────────────────────────────────
   function handleConfirm() {
     if (!sourceCanvas) return
     setStage('processing')
-    // Compute output size from corners aspect ratio
     const [tl, tr, br, bl] = corners
     const wTop    = Math.hypot(tr.x - tl.x, tr.y - tl.y)
     const wBottom = Math.hypot(br.x - bl.x, br.y - bl.y)
@@ -558,25 +523,29 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
     const outH = Math.round(Math.max(hLeft, hRight))
     if (outW < 10 || outH < 10) { setErrorMsg('裁剪区域太小'); setStage('error'); return }
     const warped = perspectiveWarp(sourceCanvas, corners, outW, outH)
-    const dataUrl = compressCanvas(warped)
-    onConfirm(dataUrl)
+    const result = compressCanvas(warped)
+    onConfirm(result)
     onClose()
+  }
+
+  // ── Open cover URL in system browser (fallback for non-scannable) ─────────
+  function openInBrowser() {
+    if (coverUrl) void window.app.openExternal(coverUrl)
   }
 
   if (!isOpen) return null
 
-  const mirrorClass = isMirrored ? 'scale-x-[-1]' : ''
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden max-h-[90dvh]">
+
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
           <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-            {mode === 'file' ? '裁剪封面' : '拍摄封面'}
+            {mode === 'file' ? '裁剪封面' : '手机拍摄封面'}
           </h2>
           <button
-            onClick={() => { stopCamera(); onClose() }}
+            onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -595,36 +564,35 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
               </svg>
-              <span className="text-sm">{mode === 'camera' ? '正在启动摄像头…' : '正在加载图片…'}</span>
+              <span className="text-sm">{mode === 'camera' ? '正在准备连接…' : '正在加载图片…'}</span>
             </div>
           )}
 
-          {/* Camera: video element always mounted so videoRef is available before play() */}
-          {mode === 'camera' && (
-            <div className={stage === 'detecting' ? 'space-y-2' : 'hidden'}>
-              <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
-                <video
-                  ref={videoRef}
-                  muted playsInline
-                  className={`w-full h-full object-cover ${mirrorClass}`}
-                />
-                {/* Viewfinder corners */}
-                <div className="absolute inset-0 pointer-events-none">
-                  {[['top-3 left-3 border-t-2 border-l-2 rounded-tl'], ['top-3 right-3 border-t-2 border-r-2 rounded-tr'], ['bottom-3 left-3 border-b-2 border-l-2 rounded-bl'], ['bottom-3 right-3 border-b-2 border-r-2 rounded-br']].map(([cls], i) => (
-                    <div key={i} className={`absolute w-5 h-5 border-white/60 ${cls}`} />
-                  ))}
-                </div>
-                {/* Status badge */}
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full backdrop-blur-sm">
-                  {detectLabel}
-                </div>
+          {/* QR code — waiting for phone */}
+          {stage === 'qr' && qrDataUrl && (
+            <div className="flex flex-col items-center gap-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
+                用手机扫描下方二维码，拍摄封面后图片将自动传回
+              </p>
+              {/* QR code */}
+              <div className="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm">
+                <img src={qrDataUrl} alt="扫码链接" className="w-52 h-52 block" />
               </div>
+              {/* Waiting indicator */}
+              <div className="flex items-center gap-2 text-sm text-gray-400 dark:text-gray-500">
+                <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                </svg>
+                等待手机拍摄…
+              </div>
+              {/* Fallback: open in browser */}
               <button
                 type="button"
-                onClick={captureManual}
-                className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+                onClick={openInBrowser}
+                className="text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline underline-offset-2"
               >
-                手动拍摄
+                无法扫码？在浏览器中打开
               </button>
             </div>
           )}
@@ -654,8 +622,19 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
 
           {/* Error */}
           {stage === 'error' && (
-            <div className="rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 p-4 text-sm text-red-600 dark:text-red-400">
-              {errorMsg || '发生未知错误'}
+            <div className="space-y-3">
+              <div className="rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 p-4 text-sm text-red-600 dark:text-red-400">
+                {errorMsg || '发生未知错误'}
+              </div>
+              {mode === 'camera' && (
+                <button
+                  type="button"
+                  onClick={() => void startQrFlow()}
+                  className="w-full py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  重试
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -665,7 +644,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
           <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700 shrink-0">
             <button
               type="button"
-              onClick={() => { stopCamera(); onClose() }}
+              onClick={onClose}
               className="flex-1 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
               取消
@@ -676,6 +655,19 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
               className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
             >
               确认裁剪
+            </button>
+          </div>
+        )}
+
+        {/* Footer — retake button when in qr stage */}
+        {stage === 'qr' && (
+          <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700 shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              取消
             </button>
           </div>
         )}
