@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLang } from '../lib/i18n'
 
 type BarcodeFormat = 'ean_13' | 'upc_a'
 
@@ -124,6 +125,7 @@ export function IsbnScanModal(props: {
   mode?: 'single' | 'batch'
 }) {
   const { isOpen, onClose, onDetected, mode = 'single' } = props
+  const { t } = useLang()
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -158,11 +160,11 @@ export function IsbnScanModal(props: {
       setStatus({ state: 'starting' })
 
       if (!navigator.mediaDevices?.getUserMedia) {
-        setStatus({ state: 'unsupported', message: '当前环境不支持摄像头访问。' })
+        setStatus({ state: 'unsupported', message: t('scan_unsupported_camera') })
         return
       }
       if (!BarcodeDetectorCtor) {
-        setStatus({ state: 'unsupported', message: '当前环境不支持条码识别（BarcodeDetector）。' })
+        setStatus({ state: 'unsupported', message: t('scan_unsupported_barcode') })
         return
       }
 
@@ -267,7 +269,7 @@ export function IsbnScanModal(props: {
         const message = e instanceof Error ? e.message : '未知错误'
         const name = e instanceof DOMException ? e.name : ''
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          setStatus({ state: 'permission_denied', message: '摄像头权限被拒绝，请在系统设置中开启后重试。' })
+          setStatus({ state: 'permission_denied', message: t('scan_permission_denied') })
           return
         }
         setStatus({ state: 'error', message })
@@ -299,14 +301,14 @@ export function IsbnScanModal(props: {
       <div className="relative w-[min(720px,95vw)] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-            {mode === 'batch' ? '连续扫描 ISBN' : '扫描 ISBN'}
+            {mode === 'batch' ? t('scan_title_batch') : t('scan_title_single')}
           </h3>
           <button
             type="button"
             onClick={onClose}
             className="px-3 py-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
           >
-            {mode === 'batch' ? '完成' : '关闭'}
+            {mode === 'batch' ? t('scan_done') : t('scan_close')}
           </button>
         </div>
 
@@ -329,7 +331,7 @@ export function IsbnScanModal(props: {
 
           {status.state !== 'running' && (
             <div className="text-sm text-gray-700 dark:text-gray-300">
-              {status.state === 'starting' && '正在启动摄像头…'}
+              {status.state === 'starting' && t('scan_starting')}
               {status.state === 'unsupported' && status.message}
               {status.state === 'permission_denied' && status.message}
               {status.state === 'error' && status.message}
@@ -338,8 +340,8 @@ export function IsbnScanModal(props: {
           {status.state === 'running' && (
             <div className="text-sm text-gray-400 dark:text-gray-500 text-center">
               {mode === 'batch'
-                ? '将条形码对准摄像头，识别后自动继续，扫完后点击"完成"'
-                : '将条形码对准摄像头，自动识别后关闭'}
+                ? t('scan_hint_batch')
+                : t('scan_hint_single')}
             </div>
           )}
 
@@ -347,7 +349,7 @@ export function IsbnScanModal(props: {
           {mode === 'batch' && scanned.length > 0 && (
             <div className="border border-gray-100 dark:border-gray-700 rounded-lg overflow-hidden">
               <div className="px-3 py-1.5 bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400">
-                已扫描 {scanned.length} 本
+                {t('scan_count', { n: scanned.length })}
               </div>
               <ul className="divide-y divide-gray-100 dark:divide-gray-700 max-h-32 overflow-y-auto">
                 {scanned.map((isbn, i) => (
@@ -369,7 +371,7 @@ export function IsbnScanModal(props: {
               onClick={onClose}
               className="px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
             >
-              {mode === 'batch' ? '完成' : '取消'}
+              {mode === 'batch' ? t('scan_done') : t('scan_cancel')}
             </button>
           </div>
         </div>

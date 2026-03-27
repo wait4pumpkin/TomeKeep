@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
+import { useLang } from '../lib/i18n'
 
 type ServerState =
   | { phase: 'starting' }
@@ -13,6 +14,8 @@ type ScannedEntry = {
   title: string | undefined
   /** undefined = pending ack; true = saved with metadata; false = saved ISBN-only */
   hasMetadata: boolean | undefined
+  /** true while onRetryStub is running for this entry */
+  retrying?: boolean
 }
 
 /**
@@ -27,11 +30,18 @@ export function MobileScanPanel(props: {
   onDetected: (isbn: string) => void
   /** Called with (isbn, hasMetadata) after the desktop finishes processing a scan. */
   onScanProcessed?: (isbn: string, hasMetadata: boolean) => void
+  /**
+   * Called when the user taps a stub (no-metadata) entry to retry metadata lookup.
+   * The handler should run the full waterfall (isbnsearch + captcha popup) and
+   * update the book, then call the ack function to refresh the phone UI.
+   */
+  onRetryStub?: (isbn: string) => void
   /** Called when the user wants to remove a failed (no-metadata) entry from the library. */
   onDeleteEntry?: (isbn: string) => void
   onClose: () => void
 }) {
-  const { onDetected, onScanProcessed, onDeleteEntry, onClose } = props
+  const { onDetected, onScanProcessed, onRetryStub, onDeleteEntry, onClose } = props
+  const { t } = useLang()
 
   const [serverState, setServerState] = useState<ServerState>({ phase: 'starting' })
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -100,7 +110,7 @@ export function MobileScanPanel(props: {
   // Allow parent to signal ack (hasMetadata result) back to the phone
   const acknowledgeIsbn = useCallback((isbn: string, hasMetadata: boolean, title?: string) => {
     setScanned(prev =>
-      prev.map(e => e.isbn === isbn ? { ...e, hasMetadata, title: title ?? e.title } : e)
+      prev.map(e => e.isbn === isbn ? { ...e, hasMetadata, title: title ?? e.title, retrying: false } : e)
     )
     window.companion.sendScanAck(isbn, hasMetadata, title)
     onScanProcessed?.(isbn, hasMetadata)
@@ -137,15 +147,15 @@ export function MobileScanPanel(props: {
               </svg>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">手机扫码入库</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">扫描下方二维码，用手机摄像头批量录入</p>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t('mobile_title')}</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('mobile_subtitle')}</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            aria-label="关闭"
+            aria-label={t('close')}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -161,13 +171,13 @@ export function MobileScanPanel(props: {
             {serverState.phase === 'starting' && (
               <div className="flex flex-col items-center gap-3 py-8">
                 <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                <p className="text-sm text-gray-500 dark:text-gray-400">正在启动服务…</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t('service_starting')}</p>
               </div>
             )}
 
             {serverState.phase === 'error' && (
               <div className="rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 text-center">
-                <p className="text-sm font-medium text-red-700 dark:text-red-400">启动失败</p>
+                <p className="text-sm font-medium text-red-700 dark:text-red-400">{t('service_failed')}</p>
                 <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-1">{serverState.message}</p>
                 <button
                   type="button"
@@ -186,7 +196,7 @@ export function MobileScanPanel(props: {
                   }}
                   className="mt-3 text-xs text-red-600 dark:text-red-400 underline"
                 >
-                  重试
+                  {t('retry')}
                 </button>
               </div>
             )}
@@ -197,7 +207,7 @@ export function MobileScanPanel(props: {
                 <div className="flex items-center gap-2">
                   <span className="flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-2.5 py-1 rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    服务运行中
+                    {t('service_running')}
                   </span>
                   <span className="text-xs text-gray-400 dark:text-gray-500 truncate select-all" title={serverState.url}>
                     {serverState.url.replace(/\?token=.*/, '')}
@@ -208,16 +218,17 @@ export function MobileScanPanel(props: {
                 <div className="flex flex-col items-center gap-3">
                   {qrDataUrl ? (
                     <div className="p-3 bg-slate-50 dark:bg-slate-100 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
-                      <img src={qrDataUrl} alt="扫码连接" className="w-[200px] h-[200px]" />
+                       <img src={qrDataUrl} alt={t('qr_alt')} className="w-[200px] h-[200px]" />
                     </div>
                   ) : (
                     <div className="w-[224px] h-[224px] rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-400 text-xs">
-                      生成二维码…
+                      {t('qr_loading')}
                     </div>
                   )}
                   <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-[260px]">
-                    用手机扫描二维码，打开扫码页面<br />
-                    iOS 需信任证书（首次）
+                    {t('qr_hint').split('\n').map((line, i, arr) => (
+                      <span key={i}>{line}{i < arr.length - 1 && <br />}</span>
+                    ))}
                   </p>
                 </div>
 
@@ -227,13 +238,13 @@ export function MobileScanPanel(props: {
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
                     </svg>
-                    iOS 首次使用：如何信任证书？
+                    {t('ios_guide_title')}
                   </summary>
                   <div className="px-4 pb-3 pt-1 text-xs text-gray-500 dark:text-gray-400 space-y-1 leading-relaxed border-t border-gray-100 dark:border-gray-700">
-                    <p>1. 扫码后 Safari 显示"此连接不是私密的"</p>
-                    <p>2. 点击「显示详细信息」→「访问此网站」</p>
-                    <p>3. 输入设备密码确认，允许摄像头权限</p>
-                    <p className="text-gray-400">后续连接无需重复操作。</p>
+                    <p>{t('ios_step_1')}</p>
+                    <p>{t('ios_step_2')}</p>
+                    <p>{t('ios_step_3')}</p>
+                    <p className="text-gray-400">{t('ios_step_4')}</p>
                   </div>
                 </details>
               </>
@@ -243,9 +254,9 @@ export function MobileScanPanel(props: {
             {scannedCount > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">已扫描</span>
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{t('scanned_section')}</span>
                   <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-600">
-                    {scannedCount} 本
+                    {t('scanned_count', { n: scannedCount })}
                   </span>
                 </div>
                 <ul className="divide-y divide-gray-100 dark:divide-gray-700 border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
@@ -263,27 +274,51 @@ export function MobileScanPanel(props: {
                         </span>
                       )}
                       {entry.hasMetadata === false && (
-                        <span className="w-5 h-5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center flex-shrink-0">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-yellow-600 dark:text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-                          </svg>
-                        </span>
+                        entry.retrying
+                          ? <span className="w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                          : <span className="w-5 h-5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center flex-shrink-0">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-yellow-600 dark:text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                              </svg>
+                            </span>
                       )}
-                      <div className="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
+                      {/* Title + ISBN — stub entries are clickable to retry metadata lookup */}
+                      <div
+                        className={`flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden ${
+                          entry.hasMetadata === false && onRetryStub && !entry.retrying
+                            ? 'cursor-pointer group/retry'
+                            : ''
+                        }`}
+                        onClick={() => {
+                          if (entry.hasMetadata !== false || !onRetryStub || entry.retrying) return
+                          setScanned(prev => prev.map(e => e.isbn === entry.isbn ? { ...e, retrying: true } : e))
+                          onRetryStub(entry.isbn)
+                        }}
+                         title={entry.hasMetadata === false && onRetryStub && !entry.retrying ? t('tap_to_complete_title') : undefined}
+                      >
                         {entry.title && (
-                          <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">
+                          <span className={`text-xs font-medium truncate min-w-0 ${
+                            entry.hasMetadata === false && onRetryStub && !entry.retrying
+                              ? 'text-yellow-700 dark:text-yellow-400 group-hover/retry:underline'
+                              : 'text-gray-700 dark:text-gray-300'
+                          }`}>
                             {entry.title}
                           </span>
                         )}
                         <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap flex-shrink-0">
                           {entry.isbn}
                         </span>
+                        {entry.hasMetadata === false && onRetryStub && !entry.retrying && (
+                          <span className="text-[10px] text-yellow-500 dark:text-yellow-400 whitespace-nowrap flex-shrink-0">
+                           {t('tap_to_complete')}
+                          </span>
+                        )}
                       </div>
-                      {/* Delete button — only for failed entries */}
-                      {entry.hasMetadata === false && onDeleteEntry && (
+                      {/* Delete button — only for failed entries not currently retrying */}
+                      {entry.hasMetadata === false && !entry.retrying && onDeleteEntry && (
                         <button
                           type="button"
-                          title="从书库移除"
+                           title={t('remove_from_library')}
                           onClick={() => {
                             onDeleteEntry(entry.isbn)
                             setScanned(prev => prev.filter(e => e.isbn !== entry.isbn))
@@ -310,7 +345,7 @@ export function MobileScanPanel(props: {
             onClick={onClose}
             className="w-full px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
-            完成
+            {t('done')}
           </button>
         </div>
       </div>

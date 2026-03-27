@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('db', {
   deleteUser: (id: string) => ipcRenderer.invoke('db:delete-user', id) as Promise<boolean>,
   getActiveUser: () => ipcRenderer.invoke('db:get-active-user') as Promise<UserProfile | null>,
   setActiveUser: (id: string) => ipcRenderer.invoke('db:set-active-user', id) as Promise<UserProfile | null>,
+  setUserLanguage: (id: string, language: 'zh' | 'en') => ipcRenderer.invoke('db:set-user-language', id, language) as Promise<UserProfile | null>,
   // Per-user reading state
   getReadingStates: (userId: string) => ipcRenderer.invoke('db:get-reading-states', userId) as Promise<ReadingState[]>,
   setReadingState: (state: ReadingState) => ipcRenderer.invoke('db:set-reading-state', state) as Promise<ReadingState>,
@@ -49,6 +50,14 @@ contextBridge.exposeInMainWorld('meta', {
   lookupIsbnSearch: (isbn13: string) => ipcRenderer.invoke('meta:lookup-isbnsearch', isbn13),
   lookupDouban: (input: string) => ipcRenderer.invoke('meta:lookup-douban', input),
   searchDouban: (query: string) => ipcRenderer.invoke('meta:search-douban', query),
+  /** Unified waterfall: Douban → OpenLibrary → isbnsearch (with cookie persistence). */
+  lookupWaterfall: (isbn13: string) => ipcRenderer.invoke('meta:lookup-isbn-waterfall', isbn13),
+  /** Open a small modal window so the user can solve an isbnsearch captcha. */
+  resolveCaptcha: (isbn13: string) => ipcRenderer.invoke('meta:resolve-captcha', isbn13),
+  /** Open a Douban login window so the user can authenticate once; cookies persist for future fetches. */
+  loginDouban: () => ipcRenderer.invoke('meta:login-douban') as Promise<{ ok: true } | { ok: false; error: string }>,
+  /** Check whether the user is currently logged in to Douban (based on persisted session cookies). */
+  doubanStatus: () => ipcRenderer.invoke('meta:douban-status') as Promise<{ loggedIn: boolean }>,
 })
 
 contextBridge.exposeInMainWorld('pricing', {

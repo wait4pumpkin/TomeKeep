@@ -52,7 +52,9 @@ export function parseDoubanSubjectHtml(html: string): DoubanParseResult {
     readFirstMetaContent(html, 'og:image') ??
     readFirstMatchText(html, /<div[^>]*\bid=["']mainpic["'][^>]*>[\s\S]*?<img[^>]*\bsrc=["']([^"']+)["']/i)
 
-  const info = readFirstMatchText(html, /<div[^>]*\bid=["']info["'][^>]*>([\s\S]*?)<\/div>/i)
+  // Extract the full #info div content, correctly handling nested <div> elements
+  // inside it (e.g. series links). A naive lazy match stops at the first </div>.
+  const info = extractDivById(html, 'info')
   const authorRaw = info ? extractInfoValue(info, '作者') : null
   const publisher = info ? extractInfoValue(info, '出版社') : null
   const isbnRaw = info ? extractInfoValue(info, 'ISBN') : null
@@ -78,9 +80,47 @@ function normalizeToIsbn13(raw: string): string | null {
   return toIsbn13(parsed.value)
 }
 
+/**
+ * Extract the full inner HTML of the first <div id="<id>"> element, correctly
+ * handling any nested <div> elements inside it (a simple lazy regex would stop
+ * at the first inner </div>).
+ */
+function extractDivById(html: string, id: string): string | null {
+  // Find the opening tag
+  const openRe = new RegExp(`<div[^>]*\\bid=["']${escapeRegExp(id)}["'][^>]*>`, 'i')
+  const openM = openRe.exec(html)
+  if (!openM) return null
+
+  let pos = openM.index + openM[0].length
+  let depth = 1
+
+  while (pos < html.length && depth > 0) {
+    const nextOpen = html.indexOf('<div', pos)
+    const nextClose = html.indexOf('</div', pos)
+
+    if (nextClose === -1) break
+
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      depth++
+      pos = nextOpen + 4 // skip past '<div'
+    } else {
+      depth--
+      if (depth === 0) {
+        return html.slice(openM.index + openM[0].length, nextClose)
+      }
+      pos = nextClose + 6 // skip past '</div'
+    }
+  }
+
+  return null
+}
+
 function readFirstMetaContent(html: string, property: string): string | null {
-  const re = new RegExp(`<meta[^>]+property=["']${escapeRegExp(property)}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i')
-  return readFirstMatchText(html, re)
+  // Match <meta> tags regardless of attribute order (property before or after content)
+  const escaped = escapeRegExp(property)
+  const rePropertyFirst = new RegExp(`<meta[^>]+property=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i')
+  const reContentFirst  = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${escaped}["'][^>]*>`, 'i')
+  return readFirstMatchText(html, rePropertyFirst) ?? readFirstMatchText(html, reContentFirst)
 }
 
 function extractInfoValue(infoHtml: string, label: string): string | null {

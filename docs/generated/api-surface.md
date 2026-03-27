@@ -24,8 +24,10 @@ interface Book {
 #### UserProfile
 ```ts
 interface UserProfile {
-  id: string    // UUID
+  id: string       // UUID
   name: string
+  createdAt: string  // ISO 8601
+  language?: 'zh' | 'en'  // UI language preference; defaults to 'zh' when absent
 }
 ```
 
@@ -72,15 +74,23 @@ interface WishlistItem {
     - deleteUser(id: string) -> boolean  (also deletes all ReadingState rows for this user)
     - getActiveUser() -> UserProfile | null
     - setActiveUser(id: string) -> UserProfile | null
+    - renameUser(id: string, name: string) -> UserProfile | null
+    - setUserLanguage(id: string, language: 'zh' | 'en') -> UserProfile | null  (persists language preference to DB)
     - getReadingStates(userId: string) -> ReadingState[]
     - setReadingState(state: ReadingState) -> ReadingState  (upsert; pass completedAt to record finish date)
 
 - window.meta
   - purpose: fetch book metadata by ISBN (best-effort)
+  - session partition for Douban fetches: `persist:douban` (Chromium session with persistent cookies, shared with the Douban login window)
   - methods:
     - lookupIsbn(isbn13) -> { ok: true, value: BookMetadata } | { ok: false, error }
     - lookupIsbnSearch(isbn13) -> { ok: true, value: BookMetadata } | { ok: false, error }
     - lookupDouban(input) -> { ok: true, value: BookMetadata } | { ok: false, error }
+    - searchDouban(query: string) -> SearchDoubanResult  (search Douban by title/author string; uses `persist:douban` session)
+    - lookupWaterfall(isbn13: string) -> WaterfallResult  (Douban → OpenLibrary → isbnsearch, returns first successful hit)
+    - resolveCaptcha(isbn13: string) -> { ok: true, value: BookMetadata } | { ok: false, error }  (opens small window for user to solve isbnsearch captcha, then retries)
+    - loginDouban() -> { ok: true } | { ok: false; error: string }  (opens Douban login BrowserWindow on `persist:douban` partition; resolves when user leaves accounts.douban.com)
+    - doubanStatus() -> { loggedIn: boolean }  (checks for `dbcl2` auth cookie in `persist:douban` session)
   - errors:
     - lookupIsbn / lookupIsbnSearch:
       - invalid_isbn
@@ -206,6 +216,18 @@ type IsbnSemantics = { region: string; language: string }
 | `inventoryViewMode` | `'detail' \| 'compact'` | `'detail'` | View mode for the Library page; persisted on toggle, restored on next visit |
 | `wishlistViewMode` | `'detail' \| 'compact'` | `'detail'` | View mode for the Wishlist page; persisted on toggle, restored on next visit |
 
+### Client-side DOM events
+
+Custom events dispatched on `window` by the renderer for cross-component communication (no IPC involved).
+
+| Event name | Payload (`CustomEvent.detail`) | Dispatched by | Consumed by |
+|---|---|---|---|
+| `active-user-changed` | `UserProfile \| null` | user-switcher in `Layout.tsx` after `setActiveUser` | `LangProvider` in `src/lib/i18n.ts` |
+
+### Renderer entry point (`src/main.tsx`)
+
+An `ErrorBoundary` (class component) wraps the root `<App />`. If a render-time exception propagates to the root, the boundary displays a red error message on screen instead of a blank white screen, aiding debugging.
+
 ### Client-side theme library (`src/lib/theme.ts`)
 
 Pure functions for dark/light/auto mode management. No IPC.
@@ -218,6 +240,31 @@ Pure functions for dark/light/auto mode management. No IPC.
 | `cycleTheme` | `(current: ThemeMode) -> ThemeMode` | Cycle Auto → Light → Dark → Auto |
 
 **`ThemeMode`**: `'auto' | 'light' | 'dark'`
+
+### Client-side i18n library (`src/lib/i18n.ts`)
+
+Bilingual (zh/en) translation system. No IPC. Language preference is stored per-user in the DB via `window.db.setUserLanguage`.
+
+| Export | Type/Signature | Description |
+|---|---|---|
+| `Lang` | `'zh' \| 'en'` | Supported language codes |
+| `DictKey` | string union | Keys of the translation dictionary (289+ entries) |
+| `LangContext` | `React.Context<LangContextValue>` | Context carrying `{ lang, t, setLang }` |
+| `LangProvider` | `({ children }) -> JSX` | Provides `LangContext`; reads language from the active user on mount; listens to `active-user-changed` DOM events for user switches |
+| `useLang` | `() -> LangContextValue` | Hook to consume `LangContext`; returns `{ lang, t, setLang }` |
+
+**`LangContextValue`**:
+```ts
+type LangContextValue = {
+  lang: Lang
+  t: (key: DictKey, vars?: Record<string, string | number>) => string
+  setLang: (lang: Lang) => Promise<void>  // updates state + persists to DB
+}
+```
+
+**Variable interpolation**: `t('some_key', { name: 'Alice' })` replaces `{name}` in the translated string.
+
+**`LangProvider` lifecycle**: On mount, calls `window.db.getActiveUser()` and sets language from the returned profile. Subscribes to the `active-user-changed` CustomEvent (dispatched by the user-switcher) to update language when the active user changes.
 
 ### Client-side weather library (`src/lib/weather.ts`)
 
@@ -247,14 +294,21 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | db:get-all-tags | renderer→main | returns string[] of all distinct tags across books+wishlist, sorted |
 | db:get-users | renderer→main | returns UserProfile[] |
 | db:add-user | renderer→main | creates UserProfile by name, returns UserProfile |
+| db:rename-user | renderer→main | renames UserProfile by id, returns UserProfile\|null |
 | db:delete-user | renderer→main | removes UserProfile and its ReadingState rows, returns boolean |
 | db:get-active-user | renderer→main | returns active UserProfile or null |
 | db:set-active-user | renderer→main | persists activeUserId, returns UserProfile or null |
+| db:set-user-language | renderer→main | updates UserProfile.language field, returns UserProfile\|null |
 | db:get-reading-states | renderer→main | returns ReadingState[] for a userId |
 | db:set-reading-state | renderer→main | upserts a ReadingState, returns ReadingState |
 | meta:lookup-isbn | renderer→main | fetches metadata from Open Library |
 | meta:lookup-isbnsearch | renderer→main | fetches metadata from isbnsearch.org HTML |
-| meta:lookup-douban | renderer→main | fetches metadata from Douban HTML |
+| meta:lookup-douban | renderer→main | fetches metadata from Douban HTML (uses `persist:douban` session) |
+| meta:search-douban | renderer→main | searches Douban by title/author string (uses `persist:douban` session) |
+| meta:lookup-isbn-waterfall | renderer→main | Douban → OpenLibrary → isbnsearch waterfall lookup |
+| meta:resolve-captcha | renderer→main | opens captcha window for isbnsearch, retries after user resolves |
+| meta:login-douban | renderer→main | opens Douban login BrowserWindow (`persist:douban`); resolves on navigation away from accounts.douban.com |
+| meta:douban-status | renderer→main | returns `{ loggedIn: boolean }` based on `dbcl2` cookie in `persist:douban` session |
 | pricing:get | renderer→main | reads priceCache for given keys |
 | pricing:open-capture | renderer→main | opens capture BrowserWindow, awaits user confirmation |
 | capture:result | capture-preload→main | payload from user confirming a product price |
@@ -272,6 +326,7 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | companion:isbn-received | main→renderer | pushed for each ISBN received from the phone scanner |
 | companion:scan-ack | renderer→main | renderer notifies main to broadcast SSE ack to phone; payload `{ isbn, hasMetadata, title? }` |
 | companion:delete-entry | main→renderer | pushed when phone requests deletion of a failed scan entry; payload `isbn: string` |
+| companion:cover-received | main→renderer | pushed when phone sends a cover photo; payload `{ dataUrl: string, session: string }` |
 
 ### Companion HTTP Routes (companion-server.ts)
 | Method + Path | Auth | Description |

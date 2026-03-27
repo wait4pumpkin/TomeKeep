@@ -2,11 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { Book, ReadingState, UserProfile } from '../../electron/db'
 import type { DoubanSearchHit } from '../../electron/metadata'
-
-type BookStatus = 'unread' | 'reading' | 'read'
-type SortKey = 'addedAt' | 'completedAt' | 'title' | 'author'
-type SortDir = 'asc' | 'desc'
-type ViewMode = 'detail' | 'compact'
+import { useLang } from '../lib/i18n'
+import type { Lang, DictKey } from '../lib/i18n'
 import { IsbnScanModal } from '../components/IsbnScanModal'
 import { MobileScanPanel } from '../components/MobileScanPanel'
 import { CoverCropModal } from '../components/CoverCropModal'
@@ -14,9 +11,17 @@ import { CoverLightbox } from '../components/CoverLightbox'
 import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from '../lib/isbn'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { normalizeAuthor } from '../lib/author'
+import type { OcrResult } from '../lib/coverOcr'
+import { extractCoverText } from '../lib/coverOcr'
+
+type BookStatus = 'unread' | 'reading' | 'read'
+type SortKey = 'addedAt' | 'completedAt' | 'title' | 'author'
+type SortDir = 'asc' | 'desc'
+type ViewMode = 'detail' | 'compact'
 
 export function Inventory() {
   const { watermarkName } = useOutletContext<{ watermarkName: string | null }>()
+  const { lang, t } = useLang()
   const [books, setBooks] = useState<Book[]>([])
   // Refs that always hold the latest values without being closure dependencies.
   // Used by the stable onMobileScanDetected callback so the companion server
@@ -47,7 +52,13 @@ export function Inventory() {
 
   // Inline edit state for expanded compact panel
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<{ title: string; author: string; publisher: string; doubanUrl: string; coverDataUrl: string }>({ title: '', author: '', publisher: '', doubanUrl: '', coverDataUrl: '' })
+  const [editDraft, setEditDraft] = useState<{ title: string; author: string; publisher: string; isbn: string; doubanUrl: string; coverDataUrl: string }>({ title: '', author: '', publisher: '', isbn: '', doubanUrl: '', coverDataUrl: '' })
+  // Edit-panel cover crop / OCR state (mirrors ManualAddForm pattern)
+  const [editCropMode, setEditCropMode] = useState<'file' | 'camera' | null>(null)
+  const [editPendingFile, setEditPendingFile] = useState<File | undefined>(undefined)
+  const [editIsbnScanOpen, setEditIsbnScanOpen] = useState(false)
+  const [editOcrState, setEditOcrState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const editFileInputRef = useRef<HTMLInputElement>(null)
   // Cache-bust map: bookId → timestamp. Appended to app:// cover URLs after a local file save
   // so the browser doesn't serve a stale cached image.
   const [coverBustMap, setCoverBustMap] = useState<Map<string, number>>(new Map())
@@ -63,6 +74,8 @@ export function Inventory() {
 
   const [newBook, setNewBook] = useState<Partial<Book>>({})
   const [newBookCoverDataUrl, setNewBookCoverDataUrl] = useState<string | null>(null)
+  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null)
+  const [ocrState, setOcrState] = useState<'idle' | 'loading' | 'done'>('idle')
   // Stable ID for the current add-form session — generated once when form opens,
   // reused for both the cover preview download and the final commitBook call.
   const newBookIdRef = useRef<string>(crypto.randomUUID())
@@ -84,8 +97,8 @@ export function Inventory() {
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   useEffect(() => {
     if (!toastMsg) return
-    const t = setTimeout(() => setToastMsg(null), 2500)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setToastMsg(null), 2500)
+    return () => clearTimeout(timer)
   }, [toastMsg])
 
   // Douban search-as-you-type state (manual form)
@@ -168,11 +181,11 @@ export function Inventory() {
     try {
       text = (await navigator.clipboard.readText()).trim()
     } catch {
-      setClipStatus({ state: 'error', message: '无法读取剪贴板，请检查权限。' })
+      setClipStatus({ state: 'error', message: t('clip_perm_error') })
       return
     }
     if (!text) {
-      setClipStatus({ state: 'error', message: '剪贴板为空。' })
+      setClipStatus({ state: 'error', message: t('clip_empty') })
       return
     }
 
@@ -182,11 +195,11 @@ export function Inventory() {
       const res = await window.meta.lookupDouban(text)
       if (res.ok) {
         setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
-        setClipStatus({ state: 'success', message: '已从豆瓣填充元信息。' })
+        setClipStatus({ state: 'success', message: t('filled_douban_dot') })
         setAddMode('manual')
         return
       }
-      setClipStatus({ state: 'error', message: '解析豆瓣链接失败，已打开手动录入。' })
+      setClipStatus({ state: 'error', message: t('douban_parse_fail') })
       setAddMode('manual')
       return
     }
@@ -201,7 +214,7 @@ export function Inventory() {
           const res = await window.meta.lookupIsbn(isbn13)
           if (res.ok) {
             setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), isbn: isbn13 } as Partial<Book>))
-            setClipStatus({ state: 'success', message: '已从 ISBN 填充元信息。' })
+            setClipStatus({ state: 'success', message: t('filled_isbn_dot') })
             setAddMode('manual')
             return
           }
@@ -269,7 +282,6 @@ export function Inventory() {
   type BookSection = { year: string; month: string; books: Book[] }
   const groupedSections = useMemo((): BookSection[] | null => {
     if (sortKey !== 'addedAt' && sortKey !== 'completedAt') return null
-    const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
     const sections: BookSection[] = []
     let unknownBooks: Book[] = []
 
@@ -281,7 +293,7 @@ export function Inventory() {
       }
       const d = new Date(dateStr)
       const year = String(d.getFullYear())
-      const month = MONTH_NAMES[d.getMonth()]
+      const month = t(`month_${d.getMonth() + 1}` as any)
       const last = sections[sections.length - 1]
       if (last && last.year === year && last.month === month) {
         last.books.push(book)
@@ -377,7 +389,13 @@ export function Inventory() {
         const existing = booksRef.current.find(b => b.isbn === isbn13)
         if (existing) { ack?.(isbn13, true, existing.title); return }
 
-        // Try Douban first for richer metadata
+        // Mobile scan waterfall: Douban → OpenLibrary only.
+        // isbnsearch is intentionally skipped — it may trigger a captcha popup
+        // which would block the desktop while the user is scanning with their phone.
+        // Stubs saved here can be retried via the scan list (onRetryStub) or the
+        // repair useEffect on next app launch.
+
+        // 1. Douban
         const searchRes = await window.meta.searchDouban(isbn13)
         if (searchRes.ok && searchRes.value.length > 0) {
           const hit = searchRes.value[0]
@@ -385,22 +403,13 @@ export function Inventory() {
             `https://book.douban.com/subject/${hit.subjectId}/`
           )
           if (doubanRes.ok) {
-            await commitBookFromRef({ ...doubanRes.value, isbn: isbn13 })
+            await commitBookFromRef({ ...doubanRes.value, isbn: isbn13, doubanUrl: `https://book.douban.com/subject/${hit.subjectId}/` })
             ack?.(isbn13, true, doubanRes.value.title)
             return
           }
         }
 
-        // Fallback: isbnsearch.org
-        const isbnSearchRes = await window.meta.lookupIsbnSearch(isbn13)
-        if (isbnSearchRes.ok) {
-          const draft = mergeBookDraftWithMetadata({}, isbnSearchRes.value)
-          await commitBookFromRef({ ...draft, isbn: isbn13 } as Partial<Book>)
-          ack?.(isbn13, true, draft.title)
-          return
-        }
-
-        // Fallback: OpenLibrary
+        // 2. OpenLibrary
         const isbnRes = await window.meta.lookupIsbn(isbn13)
         if (isbnRes.ok) {
           const draft = mergeBookDraftWithMetadata({}, isbnRes.value)
@@ -409,12 +418,62 @@ export function Inventory() {
           return
         }
 
-        // Last resort: save ISBN only (no metadata)
+        // Last resort: save ISBN stub — user can retry via the scan list
         await commitBookFromRef({ title: isbn13, author: '—', isbn: isbn13 })
         ack?.(isbn13, false)
       } catch {
         ack?.(raw, false)
       }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
+   * Called when the user taps a stub (no-metadata) entry in the MobileScanPanel list.
+   * Runs the full waterfall including isbnsearch with captcha popup support.
+   * On success: updates the book in DB + state + acks back to phone (green tick).
+   * On complete failure: acks with hasMetadata=false (yellow dot stays) so retrying
+   * state is cleared — user can then fix via the inline edit panel.
+   */
+  const handleRetryStub = useCallback((isbn13: string) => {
+    void (async () => {
+      const ack = (window as unknown as Record<string, unknown>).__mobileScanAck as
+        ((isbn: string, hasMetadata: boolean, title?: string) => void) | undefined
+
+      let result = await window.meta.lookupWaterfall(isbn13)
+
+      if (!result.ok && result.error === 'captcha') {
+        const captchaRes = await window.meta.resolveCaptcha(isbn13)
+        if (captchaRes.ok) {
+          result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
+        }
+      }
+
+      if (result.ok) {
+        // Update the existing stub book in the DB
+        const existing = booksRef.current.find(b => b.isbn === isbn13)
+        if (existing) {
+          const merged = mergeBookDraftWithMetadata({ ...existing }, result.value) as Book
+          let coverUrl = existing.coverUrl
+          if (result.value.coverUrl && !result.value.coverUrl.startsWith('app://')) {
+            coverUrl = await window.covers.saveCover(existing.id, result.value.coverUrl) ?? existing.coverUrl
+          }
+          const updated: Book = {
+            ...merged,
+            isbn: isbn13,
+            coverUrl,
+            ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+          }
+          await window.db.updateBook(updated)
+          setBooks(prev => prev.map(b => b.id === existing.id ? updated : b))
+          booksRef.current = booksRef.current.map(b => b.id === existing.id ? updated : b)
+          ack?.(isbn13, true, updated.title)
+          return
+        }
+      }
+
+      // All sources failed — reset retrying state; yellow dot stays so user can edit manually
+      ack?.(isbn13, false)
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -476,6 +535,38 @@ export function Inventory() {
     return () => { cancelled = true }
   }, [])
 
+  // One-time repair: find ISBN-only stubs (title === isbn or author === '—') and re-run
+  // the full waterfall (Douban → OpenLibrary → isbnsearch) for each.
+  // Captcha errors are silently skipped — the user can fix those manually via the edit panel.
+  // Runs once on mount using the Electron session (isbnsearch cookies intact from prior solves).
+  useEffect(() => {
+    void (async () => {
+      const all = await window.db.getBooks()
+      const isbnOnly = all.filter(b => (b.title === b.isbn || b.author === '—') && b.isbn)
+      if (isbnOnly.length === 0) return
+      for (const book of isbnOnly) {
+        const isbn13 = book.isbn!
+        const result = await window.meta.lookupWaterfall(isbn13)
+        if (!result.ok) continue  // captcha or not_found — skip silently
+        const merged = mergeBookDraftWithMetadata({ ...book }, result.value) as Book
+        let coverUrl = book.coverUrl
+        if (result.value.coverUrl && !result.value.coverUrl.startsWith('app://')) {
+          coverUrl = await window.covers.saveCover(book.id, result.value.coverUrl) ?? book.coverUrl
+        }
+        const updated: Book = {
+          ...merged,
+          isbn: isbn13,
+          coverUrl,
+          ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+        }
+        await window.db.updateBook(updated)
+        setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
+        booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Re-load reading states when the active user changes from the sidebar switcher.
   useEffect(() => {
     function handleUserChange(e: Event) {
@@ -499,6 +590,8 @@ export function Inventory() {
   function resetManualForm() {
     setNewBook({})
     setNewBookCoverDataUrl(null)
+    setOcrResult(null)
+    setOcrState('idle')
     setSearchHits([])
     setSearchState('idle')
     setFillState('idle')
@@ -548,7 +641,7 @@ export function Inventory() {
   }
 
   async function handleDelete(id: string) {
-    if (confirm('确定要删除这本书吗？')) {
+    if (confirm(t('confirm_delete_book'))) {
       await window.db.deleteBook(id)
       loadBooks()
     }
@@ -604,6 +697,7 @@ export function Inventory() {
       title: editDraft.title.trim() || book.title,
       author: normalizeAuthor(editDraft.author.trim() || book.author),
       publisher: editDraft.publisher.trim() || book.publisher,
+      isbn: editDraft.isbn.trim() || book.isbn,
       doubanUrl: editDraft.doubanUrl.trim() || undefined,
       coverUrl,
     }
@@ -653,22 +747,14 @@ export function Inventory() {
     setFillState('idle')
   }
 
-  // Helper: build a fallback URL for the Douban URL edit-field placeholder (non-navigating)
-  function buildDoubanEditPlaceholderUrl(book: Book): string {
-    if (book.doubanUrl) return book.doubanUrl
-    return book.isbn
-      ? `https://book.douban.com/isbn/${book.isbn}`
-      : `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(book.title)}`
-  }
-
-  // Title click: prefer doubanUrl, then Open Library by ISBN, else show toast
+  // Title click: prefer doubanUrl, then isbnsearch by ISBN, else show toast
   function handleBookTitleClick(book: Book) {
     if (book.doubanUrl) {
       void window.app.openExternal(book.doubanUrl)
     } else if (book.isbn) {
-      void window.app.openExternal(`https://openlibrary.org/isbn/${book.isbn}`)
+      void window.app.openExternal(`https://isbnsearch.org/isbn/${book.isbn}`)
     } else {
-      setToastMsg('无法跳转：未填写 ISBN')
+      setToastMsg(t('toast_no_isbn'))
     }
   }
 
@@ -715,40 +801,63 @@ export function Inventory() {
                     </svg>
                   </div>
                 )}
-                {/* Clickable overlay */}
-                <label
-                  className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
-                  title="更换封面图片"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
-                  </svg>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    onChange={e => {
-                      const file = e.target.files?.[0]
-                      if (!file) return
-                      const reader = new FileReader()
-                      reader.onload = ev => {
-                        const result = ev.target?.result
-                        if (typeof result === 'string') {
-                          setEditDraft(d => ({ ...d, coverDataUrl: result }))
+                {/* Bottom overlay: file + camera + OCR buttons */}
+                <div className="absolute bottom-0 inset-x-0 flex justify-center gap-1 py-0.5 bg-black/40">
+                  <button
+                    type="button"
+                    title={t('choose_cover')}
+                    onClick={() => editFileInputRef.current?.click()}
+                    className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    title={t('capture_cover')}
+                    onClick={() => setEditCropMode('camera')}
+                    className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                    </svg>
+                  </button>
+                  {(editDraft.coverDataUrl || displayCoverUrl) && (
+                    <button
+                      type="button"
+                      title={t('recognize_text')}
+                      onClick={async () => {
+                        const src = editDraft.coverDataUrl || displayCoverUrl
+                        if (!src) return
+                        setEditOcrState('loading')
+                        const ocr = await extractCoverText(src)
+                        setEditOcrState('done')
+                        if (ocr) {
+                          setEditDraft(d => ({
+                            ...d,
+                            title: d.title || ocr.title || d.title,
+                            author: d.author || ocr.author || d.author,
+                            publisher: d.publisher || ocr.publisher || d.publisher,
+                          }))
                         }
-                      }
-                      reader.readAsDataURL(file)
-                    }}
-                  />
-                </label>
+                      }}
+                      className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h4M5 8h14M5 4h14M3 20l4-4m0 0a7 7 0 1 1 9.9-9.9A7 7 0 0 1 7 16Z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </>
             ) : displayCoverUrl ? (
               <>
                 <img src={displayCoverUrl} alt={book.title} className="w-full h-full object-contain" />
                 <button
                   type="button"
-                  title="查看大图"
+                  title={t('view_fullsize')}
                   className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 z-10"
                   onClick={e => { e.stopPropagation(); setLightboxUrl(displayCoverUrl) }}
                 >
@@ -779,18 +888,23 @@ export function Inventory() {
                   className="font-semibold text-sm text-gray-800 dark:text-gray-100 leading-snug flex-1 min-w-0 rounded border border-blue-400 px-1 py-px -m-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                 />
               ) : (
-                <button
-                  type="button"
-                  onClick={() => handleBookTitleClick(book)}
-                  className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
-                >
-                  {book.title}
-                </button>
+                <div className="relative min-w-0 flex-1 group/title">
+                  <button
+                    type="button"
+                    onClick={() => handleBookTitleClick(book)}
+                    className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors w-full block"
+                  >
+                    {book.title}
+                  </button>
+                  <span className="pointer-events-none absolute top-full left-0 mt-1 px-2 py-1 rounded-md text-xs whitespace-nowrap z-50 bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 shadow-sm opacity-0 group-hover/title:opacity-100 transition-opacity duration-75">
+                    {book.title}
+                  </span>
+                </div>
               )}
               {!isEditing && <CardTip label={
-                bookStatus === 'read'    ? '已读 · 点击改为未读' :
-                bookStatus === 'reading' ? '阅读中 · 点击改为已读' :
-                                           '未读 · 点击改为阅读中'
+                bookStatus === 'read'    ? t('status_read_tip') :
+                bookStatus === 'reading' ? t('status_reading_tip') :
+                                           t('status_unread_tip')
               }>
                 <button
                   type="button"
@@ -826,21 +940,21 @@ export function Inventory() {
                   type="text"
                   value={editDraft.author}
                   onChange={e => setEditDraft(d => ({ ...d, author: e.target.value }))}
-                  placeholder="作者"
+                  placeholder={t('field_author')}
                   className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                 />
                 <input
                   type="text"
                   value={editDraft.publisher}
                   onChange={e => setEditDraft(d => ({ ...d, publisher: e.target.value }))}
-                  placeholder="出版社"
+                  placeholder={t('field_publisher')}
                   className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                 />
                 <input
                   type="url"
                   value={editDraft.doubanUrl}
                   onChange={e => setEditDraft(d => ({ ...d, doubanUrl: e.target.value }))}
-                  placeholder={`详情链接（${buildDoubanEditPlaceholderUrl(book)}）`}
+                  placeholder={t('field_detail_url')}
                   className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                 />
               </div>
@@ -866,20 +980,41 @@ export function Inventory() {
         {/* C — bottom bar */}
         <div className="flex items-center justify-between px-3 h-8 border-t border-gray-100 dark:border-gray-700">
           <div className="flex items-center gap-3 min-w-0">
-            {sem && book.isbn ? (
+            {isEditing ? (
+              <div className="flex items-center gap-0.5 min-w-0 flex-1">
+                <input
+                  type="text"
+                  value={editDraft.isbn}
+                  onChange={e => setEditDraft(d => ({ ...d, isbn: e.target.value }))}
+                  placeholder="ISBN"
+                  className="flex-1 min-w-0 text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
+                <button
+                  type="button"
+                  title={t('scan_isbn')}
+                  onClick={() => setEditIsbnScanOpen(true)}
+                  className="shrink-0 p-0.5 rounded border border-blue-400 text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 hover:border-blue-500 transition-colors bg-white dark:bg-gray-700"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
+                  </svg>
+                </button>
+              </div>
+            ) : sem && book.isbn ? (
               <IsbnSemanticBadge isbn={book.isbn} sem={sem} />
             ) : (
               <span />
             )}
             {!isEditing && completedAtMap.get(book.id) && (
               <span className="flex items-center gap-1 text-[10px] text-green-600 dark:text-green-400 font-medium whitespace-nowrap group/ca">
-                <span title={formatExact(completedAtMap.get(book.id)!)}>
-                  ✓ {relativeTime(completedAtMap.get(book.id)!)}
+                <span title={formatExact(completedAtMap.get(book.id)!, lang)}>
+                  ✓ {relativeTime(completedAtMap.get(book.id)!, t)}
                 </span>
                 <button
                   type="button"
                   onClick={() => handleClearCompletedAt(book)}
-                  title="清除完成时间（下次标记已读时重新记录）"
+                  title={t('clear_finish_date')}
                   className="opacity-0 group-hover/ca:opacity-100 transition-opacity text-green-400 hover:text-red-400 dark:hover:text-red-400 leading-none"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -891,19 +1026,31 @@ export function Inventory() {
           </div>
           {isEditing ? (
             <div className="flex items-center gap-1">
+              {editOcrState === 'loading' && (
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 mr-1 flex items-center gap-0.5">
+                   <svg className="w-2.5 h-2.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                   </svg>
+                   {t('ocr_loading')}
+                 </span>
+              )}
+              {editOcrState === 'done' && (
+                <span className="text-[10px] text-green-600 dark:text-green-400 mr-1">{t('ocr_done')}</span>
+              )}
               <button
                 type="button"
                 onClick={() => setEditingId(null)}
                 className="px-2 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                取消
+                {t('cancel')}
               </button>
               <button
                 type="button"
                 onClick={() => void handleSaveEdit(book)}
                 className="px-2 py-0.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
               >
-                保存
+                {t('save')}
               </button>
             </div>
           ) : (
@@ -912,7 +1059,7 @@ export function Inventory() {
                 <button
                   type="button"
                   onClick={onEdit}
-                  title="编辑"
+                  title={t('edit')}
                   className="p-1 text-gray-300 hover:text-blue-500 rounded transition-colors"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -922,7 +1069,7 @@ export function Inventory() {
               )}
               <button
                 onClick={() => handleDelete(book.id)}
-                title="删除"
+                title={t('delete')}
                 className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -946,7 +1093,7 @@ export function Inventory() {
       )}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
-          我的书库
+          {t('page_library')}
           {books.length > 0 && (
             <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{books.length}</span>
           )}
@@ -960,7 +1107,7 @@ export function Inventory() {
           <div ref={menuRef} className="relative">
           <button
             onClick={() => setMenuOpen(o => !o)}
-            title="添加书籍"
+            title={t('add_book')}
             className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -972,53 +1119,53 @@ export function Inventory() {
               <button
                 type="button"
                 onClick={handleClipboardImport}
-                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+                 className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" />
                 </svg>
-                剪贴板
+                {t('clipboard')}
               </button>
               <button
                 type="button"
                 onClick={() => { setMenuOpen(false); setAddMode('scan-single') }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+                 className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
                 </svg>
-                ISBN 扫描 - 单次
+                {t('scan_single')}
               </button>
               <button
                 type="button"
                 onClick={() => { setMenuOpen(false); setAddMode('scan-batch') }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+                 className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
                 </svg>
-                ISBN 扫描 - 批量
+                {t('scan_batch')}
               </button>
               <button
                 type="button"
                 onClick={() => { setMenuOpen(false); setMobileScanOpen(true) }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+                 className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 20.25h3" />
                 </svg>
-                手机扫码
+                {t('phone_scan')}
               </button>
               <button
                 type="button"
                 onClick={() => { setMenuOpen(false); setAddMode('manual') }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+                 className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                 </svg>
-                 手动
+                 {t('manual')}
               </button>
             </div>
           )}
@@ -1035,7 +1182,7 @@ export function Inventory() {
           </svg>
           <input
             type="text"
-            placeholder="搜索书名、作者、ISBN…"
+            placeholder={t('search_placeholder')}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1055,7 +1202,7 @@ export function Inventory() {
 
         {/* Status icon tabs */}
         <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0">          {/* All */}
-          <CardTip label="全部">
+          <CardTip label={t('filter_all')}>
             <button
               type="button"
               onClick={() => setStatusFilter('all')}
@@ -1071,7 +1218,7 @@ export function Inventory() {
             </button>
           </CardTip>
           {/* Unread */}
-          <CardTip label="未读">
+          <CardTip label={t('filter_unread')}>
             <button
               type="button"
               onClick={() => setStatusFilter('unread')}
@@ -1087,7 +1234,7 @@ export function Inventory() {
             </button>
           </CardTip>
           {/* Reading */}
-          <CardTip label="阅读中">
+          <CardTip label={t('filter_reading')}>
             <button
               type="button"
               onClick={() => setStatusFilter('reading')}
@@ -1103,7 +1250,7 @@ export function Inventory() {
             </button>
           </CardTip>
           {/* Read */}
-          <CardTip label="已读">
+          <CardTip label={t('filter_read')}>
             <button
               type="button"
               onClick={() => setStatusFilter('read')}
@@ -1123,22 +1270,22 @@ export function Inventory() {
         {/* Sort button group */}
         <div className="ml-auto flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 overflow-visible">
           {([
-            { key: 'title',       label: '书名',    icon: (
+            { key: 'title',       label: t('sort_title'),    icon: (
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
               </svg>
             ), defaultDir: 'asc' as SortDir },
-            { key: 'author',      label: '作者',    icon: (
+            { key: 'author',      label: t('sort_author'),    icon: (
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
               </svg>
             ), defaultDir: 'asc' as SortDir },
-            { key: 'addedAt',     label: '入库时间', icon: (
+            { key: 'addedAt',     label: t('sort_added'), icon: (
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z" />
               </svg>
             ), defaultDir: 'desc' as SortDir },
-            { key: 'completedAt', label: '完成时间', icon: (
+            { key: 'completedAt', label: t('sort_finished'), icon: (
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
               </svg>
@@ -1179,7 +1326,7 @@ export function Inventory() {
 
         {/* View mode toggle */}
         <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 ml-2">
-          <CardTip label="详细视图">
+          <CardTip label={t('detail_view')}>
             <button
               type="button"
               onClick={() => setViewMode('detail')}
@@ -1195,7 +1342,7 @@ export function Inventory() {
               </svg>
             </button>
           </CardTip>
-          <CardTip label="简要视图">
+          <CardTip label={t('compact_view')}>
             <button
               type="button"
               onClick={() => setViewMode('compact')}
@@ -1232,7 +1379,7 @@ export function Inventory() {
               <button
                 key="__untagged__"
                 type="button"
-                title="无标签"
+                title={t('no_tags')}
                 onClick={() =>
                   setTagFilter(prev =>
                     active ? prev.filter(t => t !== '__untagged__') : ['__untagged__', ...prev]
@@ -1244,13 +1391,13 @@ export function Inventory() {
                     : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400'
                 }`}
               >
-                {/* tag-slash icon */}
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                 {/* tag-slash icon */}
+                 <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L9.568 3Z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
                   <line x1="3" y1="3" x2="21" y2="21" strokeLinecap="round" />
                 </svg>
-                无标签
+                {t('no_tags')}
               </button>
             )
           })()}
@@ -1281,7 +1428,7 @@ export function Inventory() {
               onClick={() => setTagFilter([])}
               className="px-2 py-0.5 rounded-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
             >
-              清除筛选
+              {t('clear_filter')}
             </button>
           )}
         </div>
@@ -1294,6 +1441,8 @@ export function Inventory() {
           searchState={searchState}
           fillState={fillState}
           clipStatus={clipStatus}
+          ocrResult={ocrResult}
+          ocrState={ocrState}
           onBookChange={(patch) => {
             setNewBook(prev => {
               const next = { ...prev, ...patch }
@@ -1305,11 +1454,37 @@ export function Inventory() {
           onSubmit={handleAddBook}
           onCancel={() => { setAddMode(null); resetManualForm() }}
           coverDataUrl={newBookCoverDataUrl}
-          onCoverDataUrl={setNewBookCoverDataUrl}
+          onCoverConfirmed={(dataUrl, ocr) => {
+            setNewBookCoverDataUrl(dataUrl)
+            if (ocr) {
+              setOcrResult(ocr)
+              setOcrState('done')
+              setNewBook(prev => ({
+                ...prev,
+                title:     !prev.title     && ocr.title     ? ocr.title     : prev.title,
+                author:    !prev.author    && ocr.author    ? ocr.author    : prev.author,
+                publisher: !prev.publisher && ocr.publisher ? ocr.publisher : prev.publisher,
+              }))
+            }
+          }}
+          onOcrFill={() => {
+            if (!newBookCoverDataUrl) return
+            setOcrState('loading')
+            void extractCoverText(newBookCoverDataUrl).then(ocr => {
+              setOcrResult(ocr)
+              setOcrState('done')
+              setNewBook(prev => ({
+                ...prev,
+                title:     !prev.title     && ocr.title     ? ocr.title     : prev.title,
+                author:    !prev.author    && ocr.author    ? ocr.author    : prev.author,
+                publisher: !prev.publisher && ocr.publisher ? ocr.publisher : prev.publisher,
+              }))
+            })
+          }}
         />
       )}
 
-      {/* Single scan modal — direct save on Douban hit, form only as fallback */}
+      {/* Single scan modal — runs full waterfall; captcha popup handled inline */}
       <IsbnScanModal
         isOpen={addMode === 'scan-single'}
         onClose={() => setAddMode(null)}
@@ -1321,26 +1496,30 @@ export function Inventory() {
             const isbn13 = toIsbn13(normalized.value)
             if (!isbn13) return
 
-            // Try Douban first — on success save directly, no form needed
-            const searchRes = await window.meta.searchDouban(isbn13)
-            if (searchRes.ok && searchRes.value.length > 0) {
-              const hit = searchRes.value[0]
-              const doubanRes = await window.meta.lookupDouban(`https://book.douban.com/subject/${hit.subjectId}/`)
-                if (doubanRes.ok) {
-                setAddMode(null)
-                await commitBook({ ...doubanRes.value, isbn: isbn13 })
-                return
+            // Full waterfall: Douban → OpenLibrary → isbnsearch (with captcha popup if needed)
+            let result = await window.meta.lookupWaterfall(isbn13)
+
+            if (!result.ok && result.error === 'captcha') {
+              // isbnsearch triggered captcha — open resolver popup, then the result is ready
+              const captchaRes = await window.meta.resolveCaptcha(isbn13)
+              if (captchaRes.ok) {
+                result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
               }
             }
 
-            // Fallback: open manual form pre-filled with what we have
-            resetManualForm()
-            const isbnRes = await window.meta.lookupIsbn(isbn13)
-            if (isbnRes.ok) {
-              setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, isbnRes.value), isbn: isbn13 } as Partial<Book>))
-            } else {
-              setNewBook({ isbn: isbn13 })
+            if (result.ok) {
+              setAddMode(null)
+              await commitBook({
+                ...mergeBookDraftWithMetadata({}, result.value),
+                isbn: isbn13,
+                ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+              } as Partial<Book>)
+              return
             }
+
+            // All sources failed — open manual form pre-filled with ISBN
+            resetManualForm()
+            setNewBook({ isbn: isbn13 })
             setAddMode('manual')
           })()
         }}
@@ -1358,13 +1537,17 @@ export function Inventory() {
             const isbn13 = toIsbn13(normalized.value)
             if (!isbn13) return
             if (books.some(b => b.isbn === isbn13)) return
-            const res = await window.meta.lookupIsbn(isbn13)
-            await commitBook({
-              title: res.ok ? (res.value.title ?? isbn13) : isbn13,
-              author: res.ok ? (res.value.author ?? '—') : '—',
-              isbn: isbn13,
-              coverUrl: res.ok ? res.value.coverUrl : undefined,
-            })
+            // Full waterfall; captcha silently skipped in batch mode (no popup)
+            const result = await window.meta.lookupWaterfall(isbn13)
+            await commitBook(
+              result.ok
+                ? {
+                    ...mergeBookDraftWithMetadata({}, result.value),
+                    isbn: isbn13,
+                    ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+                  } as Partial<Book>
+                : { title: isbn13, author: '—', isbn: isbn13 }
+            )
           })()
         }}
       />
@@ -1374,6 +1557,7 @@ export function Inventory() {
         <MobileScanPanel
           onClose={() => { setMobileScanOpen(false); loadBooks() }}
           onDetected={onMobileScanDetected}
+          onRetryStub={handleRetryStub}
           onDeleteEntry={isbn => {
             const book = booksRef.current.find(b => b.isbn === isbn)
             if (book) void handleDelete(book.id)
@@ -1403,7 +1587,7 @@ export function Inventory() {
                   )}
                   {section.year === '未读完' && (
                     <h2 className="text-base font-semibold text-gray-400 dark:text-gray-500 pt-2 pb-0.5 border-b border-gray-200 dark:border-gray-700">
-                      未读完
+                      {t('section_in_progress')}
                     </h2>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -1452,6 +1636,7 @@ export function Inventory() {
                         title: book.title,
                         author: book.author,
                         publisher: book.publisher ?? '',
+                        isbn: book.isbn ?? '',
                         doubanUrl: book.doubanUrl ?? '',
                         coverDataUrl: '',
                       })
@@ -1476,7 +1661,7 @@ export function Inventory() {
                       <img src={bustCoverUrl(book.id, book.coverUrl)} alt={book.title} className="w-full h-full object-cover" />
                       <button
                         type="button"
-                        title="查看大图"
+                        title={t('view_fullsize')}
                         className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 z-10"
                         onClick={e => { e.stopPropagation(); setLightboxUrl(bustCoverUrl(book.id, book.coverUrl)!) }}
                       >
@@ -1528,7 +1713,7 @@ export function Inventory() {
                     )}
                     {section.year === '未读完' && (
                       <h2 className="text-base font-semibold text-gray-400 dark:text-gray-500 pt-1 pb-0.5 border-b border-gray-200 dark:border-gray-700">
-                        未读完
+                        {t('section_in_progress')}
                       </h2>
                     )}
                     <div ref={si === 0 ? gridRef : undefined} className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
@@ -1551,11 +1736,56 @@ export function Inventory() {
 
       {sortedBooks.length === 0 && !addMode && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-          {books.length === 0
-            ? '书库还是空的，点击 "+" 开始添加吧！'
-            : '没有符合条件的书籍。'}
+        {books.length === 0
+            ? t('empty_library')
+            : t('empty_filter')}
         </div>
       )}
+
+      {/* Edit-panel cover crop modal */}
+      <CoverCropModal
+        isOpen={editCropMode !== null}
+        onClose={() => { setEditCropMode(null); setEditPendingFile(undefined) }}
+        onConfirm={(dataUrl, ocr) => {
+          setEditDraft(d => ({ ...d, coverDataUrl: dataUrl }))
+          setEditCropMode(null)
+          setEditPendingFile(undefined)
+          if (ocr) {
+            setEditOcrState('done')
+            setEditDraft(d => ({
+              ...d,
+              title: d.title || ocr.title || d.title,
+              author: d.author || ocr.author || d.author,
+              publisher: d.publisher || ocr.publisher || d.publisher,
+            }))
+          }
+        }}
+        mode={editCropMode ?? 'file'}
+        initialFile={editPendingFile}
+      />
+
+      {/* Edit-panel ISBN scan modal — only fills isbn, no Douban lookup */}
+      <IsbnScanModal
+        isOpen={editIsbnScanOpen}
+        onClose={() => setEditIsbnScanOpen(false)}
+        mode="single"
+        onDetected={raw => { setEditDraft(d => ({ ...d, isbn: raw })); setEditIsbnScanOpen(false) }}
+      />
+
+      {/* Hidden file input for edit-panel cover selection */}
+      <input
+        ref={editFileInputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={e => {
+          const file = e.target.files?.[0]
+          if (!file) return
+          setEditPendingFile(file)
+          setEditCropMode('file')
+          e.target.value = ''
+        }}
+      />
 
       {/* Cover lightbox */}
       {lightboxUrl && (
@@ -1577,35 +1807,42 @@ type ManualAddFormProps = {
   searchState: 'idle' | 'loading' | 'error'
   fillState: 'idle' | 'loading'
   clipStatus: { state: 'idle' | 'loading' | 'success' | 'error'; message?: string }
+  ocrResult: OcrResult | null
+  ocrState: 'idle' | 'loading' | 'done'
   onBookChange: (patch: Partial<Book>) => void
-  onCoverDataUrl: (dataUrl: string) => void
+  onCoverConfirmed: (dataUrl: string, ocr?: OcrResult) => void
+  onOcrFill: () => void
   onSelectHit: (hit: DoubanSearchHit) => void
   onSubmit: (e: React.FormEvent) => void
   onCancel: () => void
 }
 
-function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, onBookChange, onCoverDataUrl, onSelectHit, onSubmit, onCancel }: ManualAddFormProps) {
+function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, ocrResult: _ocrResult, ocrState, onBookChange, onCoverConfirmed, onOcrFill, onSelectHit, onSubmit, onCancel }: ManualAddFormProps) {
   const inputCls = 'w-full px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
   const titleInputCls = 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isbnScanOpen, setIsbnScanOpen] = useState(false)
+  const { t } = useLang()
 
   const statusOptions: { value: BookStatus; label: string }[] = [
-    { value: 'unread', label: '未读' },
-    { value: 'reading', label: '在读' },
-    { value: 'read', label: '已读' },
+    { value: 'unread', label: t('status_unread') },
+    { value: 'reading', label: t('status_reading') },
+    { value: 'read', label: t('status_read') },
   ]
 
   // Single status line: clipboard takes priority, then fill state.
   // Meta-filled confirmation only shows after a clipboard import (clipStatus.state === 'success'),
   // not when fields are filled via manual Douban search-as-you-type.
   const statusLine: { text: string; type: 'info' | 'error' | 'success' | 'loading' } | null =
-    clipStatus.state === 'loading' ? { text: '正在从剪贴板导入…', type: 'loading' } :
-    clipStatus.state === 'error'   ? { text: clipStatus.message ?? '导入失败', type: 'error' } :
-    fillState === 'loading'        ? { text: '正在从豆瓣获取详情…', type: 'loading' } :
-    clipStatus.state === 'success' ? { text: clipStatus.message ?? '已从豆瓣填充元信息', type: 'success' } :
+    clipStatus.state === 'loading' ? { text: t('clip_loading'), type: 'loading' } :
+    clipStatus.state === 'error'   ? { text: clipStatus.message ?? t('clip_failed'), type: 'error' } :
+    fillState === 'loading'        ? { text: t('douban_loading'), type: 'loading' } :
+    ocrState === 'loading'         ? { text: t('ocr_cover_loading'), type: 'loading' } :
+    clipStatus.state === 'success' ? { text: clipStatus.message ?? t('filled_douban'), type: 'success' } :
+    ocrState === 'done'            ? { text: t('filled_ocr'), type: 'success' } :
     null
 
   return (
@@ -1623,11 +1860,11 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
                 </svg>
               )}
-              {/* Bottom overlay: file + camera buttons */}
+              {/* Bottom overlay: file + camera + OCR buttons */}
               <div className="absolute bottom-0 inset-x-0 flex justify-center gap-1 py-1 bg-black/40">
                 <button
                   type="button"
-                  title="从文件选择封面"
+                  title={t('choose_cover')}
                   onClick={() => fileInputRef.current?.click()}
                   className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
                 >
@@ -1637,7 +1874,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
                 </button>
                 <button
                   type="button"
-                  title="拍摄封面"
+                  title={t('capture_cover')}
                   onClick={() => setCropMode('camera')}
                   className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
                 >
@@ -1646,6 +1883,19 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
                   </svg>
                 </button>
+                {(coverDataUrl || book.coverUrl) && (
+                  <button
+                    type="button"
+                    title={t('recognize_text')}
+                    onClick={onOcrFill}
+                    className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
+                  >
+                    {/* Text recognition icon (magnifying glass + lines) */}
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h4M5 8h14M5 4h14M3 20l4-4m0 0a7 7 0 1 1 9.9-9.9A7 7 0 0 1 7 16Z" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
             {/* Hidden file input */}
@@ -1671,7 +1921,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
               <input
                 type="text"
                 required
-                placeholder="书名 *"
+                placeholder={t('form_title_placeholder')}
                 value={book.title ?? ''}
                 onChange={e => onBookChange({ title: e.target.value })}
                 className={titleInputCls}
@@ -1716,7 +1966,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
             <input
               type="text"
               required
-              placeholder="作者 *"
+              placeholder={t('form_author_placeholder')}
               value={book.author ?? ''}
               onChange={e => onBookChange({ author: e.target.value })}
               className={inputCls}
@@ -1725,20 +1975,33 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
             {/* Publisher */}
             <input
               type="text"
-              placeholder="出版社"
+              placeholder={t('form_publisher_placeholder')}
               value={book.publisher ?? ''}
               onChange={e => onBookChange({ publisher: e.target.value })}
               className={inputCls}
             />
 
-            {/* ISBN */}
-            <input
-              type="text"
-              placeholder="ISBN"
-              value={book.isbn ?? ''}
-              onChange={e => onBookChange({ isbn: e.target.value })}
-              className={inputCls}
-            />
+            {/* ISBN with scan button */}
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                placeholder="ISBN"
+                value={book.isbn ?? ''}
+                onChange={e => onBookChange({ isbn: e.target.value })}
+                className={inputCls}
+              />
+              <button
+                type="button"
+                title={t('scan_isbn')}
+                onClick={() => setIsbnScanOpen(true)}
+                className="shrink-0 p-1 rounded border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 hover:border-blue-400 transition-colors bg-white dark:bg-gray-800"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1746,9 +2009,17 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
         <CoverCropModal
           isOpen={cropMode !== null}
           onClose={() => { setCropMode(null); setPendingFile(undefined) }}
-          onConfirm={dataUrl => { onCoverDataUrl(dataUrl); setCropMode(null); setPendingFile(undefined) }}
+          onConfirm={(dataUrl, ocr) => { onCoverConfirmed(dataUrl, ocr); setCropMode(null); setPendingFile(undefined) }}
           mode={cropMode ?? 'file'}
           initialFile={pendingFile}
+        />
+
+        {/* ISBN scan modal — only fills isbn, no Douban lookup */}
+        <IsbnScanModal
+          isOpen={isbnScanOpen}
+          onClose={() => setIsbnScanOpen(false)}
+          mode="single"
+          onDetected={raw => { onBookChange({ isbn: raw }); setIsbnScanOpen(false) }}
         />
 
         {/* Status line — above actions */}
@@ -1796,7 +2067,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
             onClick={onCancel}
             className="px-2 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            取消
+            {t('cancel')}
           </button>
 
           {/* Save */}
@@ -1805,7 +2076,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
             disabled={!book.title || !book.author}
             className="px-2 py-0.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            添加
+            {t('add')}
           </button>
         </div>
       </form>
@@ -1817,23 +2088,23 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
 // relativeTime — human-readable relative timestamp, e.g. "3 天前"
 // ---------------------------------------------------------------------------
 
-function relativeTime(iso: string): string {
+function relativeTime(iso: string, t: (key: DictKey, vars?: Record<string, string | number>) => string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const minutes = Math.floor(diff / 60_000)
-  if (minutes < 1)  return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 1)  return t('rt_just_now')
+  if (minutes < 60) return t('rt_minutes', { n: minutes })
   const hours = Math.floor(minutes / 60)
-  if (hours < 24)   return `${hours} 小时前`
+  if (hours < 24)   return t('rt_hours', { n: hours })
   const days = Math.floor(hours / 24)
-  if (days < 30)    return `${days} 天前`
+  if (days < 30)    return t('rt_days', { n: days })
   const months = Math.floor(days / 30)
-  if (months < 12)  return `${months} 个月前`
+  if (months < 12)  return t('rt_months', { n: months })
   const years = Math.floor(days / 365)
-  return `${years} 年前`
+  return t('rt_years', { n: years })
 }
 
-function formatExact(iso: string): string {
-  return new Date(iso).toLocaleString('zh-CN', {
+function formatExact(iso: string, lang: Lang): string {
+  return new Date(iso).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   })
@@ -1846,6 +2117,7 @@ function formatExact(iso: string): string {
 function IsbnSemanticBadge(props: { isbn: string; sem: { language: string; region: string } }) {
   const { isbn, sem } = props
   const [copied, setCopied] = useState<boolean>(false)
+  const { t } = useLang()
 
   function handleCopy() {
     void navigator.clipboard.writeText(isbn).then(() => {
@@ -1855,14 +2127,14 @@ function IsbnSemanticBadge(props: { isbn: string; sem: { language: string; regio
   }
 
   return (
-    <CardTip label={copied ? '已复制！' : `点击复制 ISBN：${isbn}`}>
+    <CardTip label={copied ? t('isbn_copied_tip') : t('isbn_copy_tip', { isbn })}>
       <button
         type="button"
         onClick={handleCopy}
         className="text-xs text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-colors text-left leading-snug"
       >
         {copied ? (
-          <span className="text-blue-500">已复制 ✓</span>
+          <span className="text-blue-500">{t('isbn_copied_badge')}</span>
         ) : (
           <span>{sem.language} · {sem.region}</span>
         )}
@@ -1911,6 +2183,7 @@ function BookTagEditor({
 }) {
   const [adding, setAdding] = useState(false)
   const [inputValue, setInputValue] = useState('')
+  const { t } = useLang()
   const inputRef = useRef<HTMLInputElement>(null)
   const listId = useRef(`tag-list-${Math.random().toString(36).slice(2)}`)
 
@@ -1945,13 +2218,13 @@ function BookTagEditor({
         type="button"
         onClick={() => { setAdding(true); setTimeout(() => inputRef.current?.focus(), 0) }}
         className="mt-1.5 text-xs text-gray-300 dark:text-gray-600 hover:text-violet-400 dark:hover:text-violet-500 transition-colors flex items-center gap-0.5"
-        title="添加标签"
+        title={t('add_tag')}
       >
         <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
         </svg>
-        标签
+        {t('tag_label')}
       </button>
     )
   }
@@ -1968,7 +2241,7 @@ function BookTagEditor({
             type="button"
             onClick={() => removeTag(tag)}
             className="ml-0.5 text-violet-400 hover:text-violet-700 dark:hover:text-violet-100 transition-colors leading-none"
-            title={`移除标签 ${tag}`}
+            title={t('remove_tag', { tag })}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -1989,7 +2262,7 @@ function BookTagEditor({
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={commitInput}
-            placeholder="输入标签…"
+            placeholder={t('tag_input_placeholder')}
             className="w-20 px-1.5 py-0.5 text-xs rounded-full border border-violet-300 dark:border-violet-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-violet-400"
           />
         </>
@@ -1997,7 +2270,7 @@ function BookTagEditor({
         <button
           type="button"
           onClick={() => { setAdding(true); setTimeout(() => inputRef.current?.focus(), 0) }}
-          title="添加标签"
+          title={t('add_tag')}
           className="w-5 h-5 flex items-center justify-center rounded-full border border-dashed border-gray-300 dark:border-gray-600 text-gray-300 dark:text-gray-600 hover:border-violet-400 hover:text-violet-400 transition-colors"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

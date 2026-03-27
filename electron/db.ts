@@ -34,6 +34,8 @@ export interface UserProfile {
   id: string
   name: string
   createdAt: string
+  /** UI language preference. Defaults to 'zh' when absent. */
+  language?: 'zh' | 'en'
 }
 
 export interface ReadingState {
@@ -299,6 +301,14 @@ export async function setupDatabase() {
     const user = db.data.users.find(u => u.id === id)
     if (!user) return null
     db.data.activeUserId = id
+    await db.write()
+    return user
+  })
+
+  ipcMain.handle('db:set-user-language', async (_, id: string, language: 'zh' | 'en') => {
+    const user = db.data.users.find(u => u.id === id)
+    if (!user) return null
+    user.language = language
     await db.write()
     return user
   })

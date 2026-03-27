@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import QRCode from 'qrcode'
+import { extractCoverText } from '../lib/coverOcr'
+import type { OcrResult } from '../lib/coverOcr'
 
 // ---------------------------------------------------------------------------
 // CoverCropModal
@@ -17,7 +19,7 @@ import QRCode from 'qrcode'
 export type CoverCropModalProps = {
   isOpen: boolean
   onClose: () => void
-  onConfirm: (dataUrl: string) => void
+  onConfirm: (dataUrl: string, ocr?: OcrResult) => void
   mode: 'file' | 'camera'
   initialFile?: File
 }
@@ -28,96 +30,311 @@ export type CoverCropModalProps = {
 
 type Point = { x: number; y: number }
 
-/** Bilinear-interpolated pixel fetch from ImageData */
-function sampleGray(data: Uint8ClampedArray, w: number, h: number, x: number, y: number): number {
-  const xi = Math.max(0, Math.min(w - 1, Math.round(x)))
-  const yi = Math.max(0, Math.min(h - 1, Math.round(y)))
-  const i = (yi * w + xi) * 4
-  return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+// ---------------------------------------------------------------------------
+// Canny edge detection helpers
+// ---------------------------------------------------------------------------
+
+/** 1-D separable Gaussian blur (kernel radius 2, σ≈1.0) applied in-place */
+function gaussianBlur(gray: Float32Array, w: number, h: number): Float32Array {
+  // kernel: [0.0625, 0.25, 0.375, 0.25, 0.0625]
+  const k = [0.0625, 0.25, 0.375, 0.25, 0.0625]
+  const tmp = new Float32Array(w * h)
+  // horizontal pass
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0
+      for (let d = -2; d <= 2; d++) {
+        const xi = Math.max(0, Math.min(w - 1, x + d))
+        v += gray[y * w + xi] * k[d + 2]
+      }
+      tmp[y * w + x] = v
+    }
+  }
+  const out = new Float32Array(w * h)
+  // vertical pass
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0
+      for (let d = -2; d <= 2; d++) {
+        const yi = Math.max(0, Math.min(h - 1, y + d))
+        v += tmp[yi * w + x] * k[d + 2]
+      }
+      out[y * w + x] = v
+    }
+  }
+  return out
 }
 
 /**
- * Sobel-based edge detection on ImageData.
- * Returns a Float32Array of edge magnitudes normalised to [0,1].
+ * Canny edge detection.
+ * Returns a Uint8Array (1 = edge pixel, 0 = non-edge) of size w×h.
+ * Thresholds are relative to the maximum gradient magnitude in the image.
  */
-function sobelEdges(imgData: ImageData): Float32Array {
+function cannyEdges(imgData: ImageData): Uint8Array {
   const { data, width: w, height: h } = imgData
-  const edges = new Float32Array(w * h)
+
+  // Build grayscale float image
+  const gray = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]
+  }
+
+  const blurred = gaussianBlur(gray, w, h)
+
+  // Sobel gradients
+  const gx = new Float32Array(w * h)
+  const gy = new Float32Array(w * h)
   let maxMag = 0
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
-      const gx =
-        -sampleGray(data, w, h, x - 1, y - 1) - 2 * sampleGray(data, w, h, x - 1, y) - sampleGray(data, w, h, x - 1, y + 1) +
-         sampleGray(data, w, h, x + 1, y - 1) + 2 * sampleGray(data, w, h, x + 1, y) + sampleGray(data, w, h, x + 1, y + 1)
-      const gy =
-        -sampleGray(data, w, h, x - 1, y - 1) - 2 * sampleGray(data, w, h, x, y - 1) - sampleGray(data, w, h, x + 1, y - 1) +
-         sampleGray(data, w, h, x - 1, y + 1) + 2 * sampleGray(data, w, h, x, y + 1) + sampleGray(data, w, h, x + 1, y + 1)
-      const mag = Math.sqrt(gx * gx + gy * gy)
-      edges[y * w + x] = mag
+      const idx = y * w + x
+      const gxv =
+        -blurred[(y-1)*w+(x-1)] - 2*blurred[y*w+(x-1)] - blurred[(y+1)*w+(x-1)]
+        +blurred[(y-1)*w+(x+1)] + 2*blurred[y*w+(x+1)] + blurred[(y+1)*w+(x+1)]
+      const gyv =
+        -blurred[(y-1)*w+(x-1)] - 2*blurred[(y-1)*w+x] - blurred[(y-1)*w+(x+1)]
+        +blurred[(y+1)*w+(x-1)] + 2*blurred[(y+1)*w+x] + blurred[(y+1)*w+(x+1)]
+      gx[idx] = gxv
+      gy[idx] = gyv
+      const mag = Math.sqrt(gxv*gxv + gyv*gyv)
       if (mag > maxMag) maxMag = mag
     }
   }
-  if (maxMag > 0) for (let i = 0; i < edges.length; i++) edges[i] /= maxMag
-  return edges
+
+  if (maxMag === 0) return new Uint8Array(w * h)
+
+  // Normalise magnitudes
+  const mag = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) mag[i] = Math.sqrt(gx[i]*gx[i] + gy[i]*gy[i]) / maxMag
+
+  // Non-maximum suppression
+  const nms = new Float32Array(w * h)
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x
+      const angle = Math.atan2(gy[idx], gx[idx]) * 180 / Math.PI
+      const a = ((angle % 180) + 180) % 180
+      let n1: number, n2: number
+      if (a < 22.5 || a >= 157.5) {
+        n1 = mag[y*w+(x-1)]; n2 = mag[y*w+(x+1)]
+      } else if (a < 67.5) {
+        n1 = mag[(y-1)*w+(x+1)]; n2 = mag[(y+1)*w+(x-1)]
+      } else if (a < 112.5) {
+        n1 = mag[(y-1)*w+x]; n2 = mag[(y+1)*w+x]
+      } else {
+        n1 = mag[(y-1)*w+(x-1)]; n2 = mag[(y+1)*w+(x+1)]
+      }
+      nms[idx] = (mag[idx] >= n1 && mag[idx] >= n2) ? mag[idx] : 0
+    }
+  }
+
+  // Double threshold hysteresis
+  const HIGH = 0.20, LOW = 0.08
+  const edges = new Uint8Array(w * h) // 0=none, 1=weak, 2=strong
+  for (let i = 0; i < w * h; i++) {
+    if (nms[i] >= HIGH) edges[i] = 2
+    else if (nms[i] >= LOW) edges[i] = 1
+  }
+  // Promote weak edges connected to strong
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      if (edges[y*w+x] !== 1) continue
+      let hasStrong = false
+      for (let dy = -1; dy <= 1 && !hasStrong; dy++)
+        for (let dx = -1; dx <= 1 && !hasStrong; dx++)
+          if (edges[(y+dy)*w+(x+dx)] === 2) hasStrong = true
+      edges[y*w+x] = hasStrong ? 2 : 0
+    }
+  }
+  // Final: strong edges only
+  const result = new Uint8Array(w * h)
+  for (let i = 0; i < w * h; i++) result[i] = edges[i] === 2 ? 1 : 0
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Contour extraction via BFS connected components on edge map
+// ---------------------------------------------------------------------------
+
+function extractContours(edgeMap: Uint8Array, w: number, h: number): Point[][] {
+  const visited = new Uint8Array(w * h)
+  const contours: Point[][] = []
+  const minLen = Math.min(w, h) / 4
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x
+      if (!edgeMap[idx] || visited[idx]) continue
+      // BFS
+      const contour: Point[] = []
+      const queue: number[] = [idx]
+      visited[idx] = 1
+      while (queue.length) {
+        const cur = queue.pop()!
+        const cx = cur % w, cy = (cur - cx) / w
+        contour.push({ x: cx, y: cy })
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue
+            const nx = cx + dx, ny = cy + dy
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue
+            const ni = ny * w + nx
+            if (edgeMap[ni] && !visited[ni]) { visited[ni] = 1; queue.push(ni) }
+          }
+        }
+      }
+      if (contour.length >= minLen) contours.push(contour)
+    }
+  }
+  return contours
+}
+
+// ---------------------------------------------------------------------------
+// Douglas-Peucker polyline simplification → quadrilateral fitting
+// ---------------------------------------------------------------------------
+
+function ptLineDistSq(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x, dy = b.y - a.y
+  if (dx === 0 && dy === 0) return (p.x-a.x)**2 + (p.y-a.y)**2
+  const t = ((p.x-a.x)*dx + (p.y-a.y)*dy) / (dx*dx + dy*dy)
+  const tc = Math.max(0, Math.min(1, t))
+  return (p.x - a.x - tc*dx)**2 + (p.y - a.y - tc*dy)**2
+}
+
+function douglasPeucker(pts: Point[], eps: number): Point[] {
+  if (pts.length <= 2) return pts
+  let maxD = 0, idx = 0
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.sqrt(ptLineDistSq(pts[i], pts[0], pts[pts.length-1]))
+    if (d > maxD) { maxD = d; idx = i }
+  }
+  if (maxD > eps) {
+    const l = douglasPeucker(pts.slice(0, idx+1), eps)
+    const r = douglasPeucker(pts.slice(idx), eps)
+    return [...l.slice(0, -1), ...r]
+  }
+  return [pts[0], pts[pts.length-1]]
+}
+
+/** Convex hull of a point set (Graham scan) */
+function convexHull(pts: Point[]): Point[] {
+  if (pts.length < 3) return pts
+  const sorted = [...pts].sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y)
+  function cross(o: Point, a: Point, b: Point) {
+    return (a.x-o.x)*(b.y-o.y) - (a.y-o.y)*(b.x-o.x)
+  }
+  const lower: Point[] = []
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0)
+      lower.pop()
+    lower.push(p)
+  }
+  const upper: Point[] = []
+  for (let i = sorted.length-1; i >= 0; i--) {
+    const p = sorted[i]
+    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0)
+      upper.pop()
+    upper.push(p)
+  }
+  upper.pop(); lower.pop()
+  return [...lower, ...upper]
+}
+
+function polygonArea(pts: Point[]): number {
+  let area = 0
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+  }
+  return Math.abs(area) / 2
 }
 
 /**
- * Find the largest axis-aligned rectangle with high edge density.
- * Returns corners [tl, tr, br, bl] in image-pixel coordinates.
- * Also returns a confidence score in [0, 1].
+ * Attempt to fit a quadrilateral to a contour.
+ * Returns null if no valid quad is found.
+ */
+function fitQuad(contour: Point[], w: number, h: number): [Point, Point, Point, Point] | null {
+  const hull = convexHull(contour)
+  if (hull.length < 4) return null
+
+  // Adaptive epsilon: fraction of perimeter
+  let perim = 0
+  for (let i = 0; i < hull.length; i++) {
+    const j = (i+1) % hull.length
+    perim += Math.hypot(hull[j].x-hull[i].x, hull[j].y-hull[i].y)
+  }
+
+  // Try increasingly aggressive simplification until we get 4 points
+  let simplified: Point[] = hull
+  for (const frac of [0.02, 0.04, 0.06, 0.08, 0.12]) {
+    simplified = douglasPeucker(hull, perim * frac)
+    if (simplified.length === 4) break
+    if (simplified.length < 4) break
+  }
+
+  if (simplified.length !== 4) {
+    // Fall back to AABB of hull
+    const xs = hull.map(p => p.x), ys = hull.map(p => p.y)
+    const minX = Math.min(...xs), maxX = Math.max(...xs)
+    const minY = Math.min(...ys), maxY = Math.max(...ys)
+    simplified = [
+      { x: minX, y: minY }, { x: maxX, y: minY },
+      { x: maxX, y: maxY }, { x: minX, y: maxY },
+    ]
+  }
+
+  // Reorder as [tl, tr, br, bl]
+  const cx = simplified.reduce((s,p) => s+p.x, 0) / 4
+  const cy = simplified.reduce((s,p) => s+p.y, 0) / 4
+  const ordered = simplified.slice().sort((a, b) => {
+    const qa = (a.x < cx ? 0 : 1) + (a.y < cy ? 0 : 2)
+    const qb = (b.x < cx ? 0 : 1) + (b.y < cy ? 0 : 2)
+    return qa - qb
+  }) as [Point, Point, Point, Point]
+  // quadrant sort: 0=TL,1=TR,2=BL,3=BR → reorder to TL,TR,BR,BL
+  const [tl, tr, bl, br] = ordered
+  const quad: [Point, Point, Point, Point] = [tl, tr, br, bl]
+
+  // Validate: coverage ≥ 30% and aspect ratio in [0.3, 1.2]
+  const area = polygonArea(quad)
+  const coverage = area / (w * h)
+  const bboxW = Math.max(quad[0].x, quad[1].x, quad[2].x, quad[3].x) - Math.min(quad[0].x, quad[1].x, quad[2].x, quad[3].x)
+  const bboxH = Math.max(quad[0].y, quad[1].y, quad[2].y, quad[3].y) - Math.min(quad[0].y, quad[1].y, quad[2].y, quad[3].y)
+  const aspect = bboxH > 0 ? bboxW / bboxH : 0
+
+  if (coverage < 0.30 || aspect < 0.3 || aspect > 1.2) return null
+  return quad
+}
+
+/**
+ * Detect the book cover quadrilateral in an image using Canny edge detection,
+ * contour extraction, and quadrilateral fitting.
+ *
+ * Returns corners [tl, tr, br, bl] in image-pixel coordinates plus a
+ * confidence score in [0, 1].  Falls back to insetCorners on failure.
  */
 function detectRect(imgData: ImageData): { corners: [Point, Point, Point, Point]; confidence: number } {
   const { width: w, height: h } = imgData
-  const edges = sobelEdges(imgData)
-  const threshold = 0.2
+  const edgeMap = cannyEdges(imgData)
+  const contours = extractContours(edgeMap, w, h)
 
-  // Compute row/column edge density profiles
-  const rowDensity = new Float32Array(h)
-  const colDensity = new Float32Array(w)
-  for (let y = 0; y < h; y++) {
-    let sum = 0
-    for (let x = 0; x < w; x++) sum += edges[y * w + x] > threshold ? 1 : 0
-    rowDensity[y] = sum / w
-  }
-  for (let x = 0; x < w; x++) {
-    let sum = 0
-    for (let y = 0; y < h; y++) sum += edges[y * w + x] > threshold ? 1 : 0
-    colDensity[x] = sum / h
+  // Pick the contour whose fitted quad has the largest area
+  let bestQuad: [Point, Point, Point, Point] | null = null
+  let bestArea = 0
+  for (const contour of contours) {
+    const quad = fitQuad(contour, w, h)
+    if (!quad) continue
+    const area = polygonArea(quad)
+    if (area > bestArea) { bestArea = area; bestQuad = quad }
   }
 
-  // Find outermost rows/cols with density above a threshold (edge of the cover)
-  const rowThr = 0.08, colThr = 0.06
-  let top = Math.round(h * 0.05), bottom = Math.round(h * 0.95)
-  let left = Math.round(w * 0.05), right = Math.round(w * 0.95)
-
-  for (let y = 0; y < h; y++) { if (rowDensity[y] > rowThr) { top = y; break } }
-  for (let y = h - 1; y >= 0; y--) { if (rowDensity[y] > rowThr) { bottom = y; break } }
-  for (let x = 0; x < w; x++) { if (colDensity[x] > colThr) { left = x; break } }
-  for (let x = w - 1; x >= 0; x--) { if (colDensity[x] > colThr) { right = x; break } }
-
-  // Clamp with margin
-  const margin = 4
-  top    = Math.max(margin, top - margin)
-  bottom = Math.min(h - margin, bottom + margin)
-  left   = Math.max(margin, left - margin)
-  right  = Math.min(w - margin, right + margin)
-
-  const rectW = right - left
-  const rectH = bottom - top
-  const area = (rectW * rectH) / (w * h)
-  const aspect = rectW / rectH
-  // Good cover: covers ≥40% of image, aspect ratio book-like (0.45–0.9)
-  const confidence = area >= 0.4 && aspect >= 0.45 && aspect <= 0.9 ? Math.min(1, area * 1.5) : 0
-
-  return {
-    corners: [
-      { x: left,  y: top },
-      { x: right, y: top },
-      { x: right, y: bottom },
-      { x: left,  y: bottom },
-    ],
-    confidence,
+  if (bestQuad) {
+    const coverage = bestArea / (w * h)
+    return { corners: bestQuad, confidence: Math.min(1, coverage * 2) }
   }
+
+  // Fallback: inset corners, zero confidence → caller will use insetCorners
+  return { corners: insetCorners(w, h), confidence: 0 }
 }
 
 /** Inset corners as a fraction of image dimensions — safe fallback */
@@ -387,6 +604,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
   const [corners, setCorners] = useState<[Point, Point, Point, Point]>([[0,0],[1,0],[1,1],[0,1]].map(([x,y])=>({x,y})) as [Point,Point,Point,Point])
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [coverUrl, setCoverUrl] = useState<string | null>(null)
+  const [processingLabel, setProcessingLabel] = useState('正在处理图片…')
 
   // Stable session ID — identifies this particular modal open so stale IPC
   // callbacks from a previous session don't clobber a new one.
@@ -522,9 +740,10 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
     img.src = dataUrl
   }
 
-  // ── Confirm: perspective warp + compress ──────────────────────────────────
-  function handleConfirm() {
+  // ── Confirm: perspective warp + compress + OCR ───────────────────────────
+  async function handleConfirm() {
     if (!sourceCanvas) return
+    setProcessingLabel('正在裁剪…')
     setStage('processing')
     const [tl, tr, br, bl] = corners
     const wTop    = Math.hypot(tr.x - tl.x, tr.y - tl.y)
@@ -536,7 +755,9 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
     if (outW < 10 || outH < 10) { setErrorMsg('裁剪区域太小'); setStage('error'); return }
     const warped = perspectiveWarp(sourceCanvas, corners, outW, outH)
     const result = compressCanvas(warped)
-    onConfirm(result)
+    setProcessingLabel('正在识别文字…')
+    const ocrResult = await extractCoverText(result)
+    onConfirm(result, ocrResult)
     onClose()
   }
 
@@ -628,7 +849,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
               </svg>
-              <span className="text-sm">正在处理图片…</span>
+              <span className="text-sm">{processingLabel}</span>
             </div>
           )}
 
@@ -663,7 +884,7 @@ export function CoverCropModal({ isOpen, onClose, onConfirm, mode, initialFile }
             </button>
             <button
               type="button"
-              onClick={handleConfirm}
+              onClick={() => void handleConfirm()}
               className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
             >
               确认裁剪

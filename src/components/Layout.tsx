@@ -6,6 +6,7 @@ import type { ThemeMode } from '../lib/theme'
 import { fetchWeather } from '../lib/weather'
 import type { WeatherState } from '../lib/weather'
 import type { UserProfile } from '../../electron/db'
+import { useLang } from '../lib/i18n'
 
 // ---------------------------------------------------------------------------
 // SVG icons
@@ -82,8 +83,9 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 // ---------------------------------------------------------------------------
 
 function LogoBadge({ weather }: { weather: WeatherState | null }) {
+  const { t } = useLang()
   const tipLabel = weather
-    ? `TomeKeep · ${weather.condition.replace(/-/g, ' ')}${weather.isDay ? '' : ' · 夜间'}`
+    ? `TomeKeep · ${weather.condition.replace(/-/g, ' ')}${weather.isDay ? '' : ` · ${t('logo_night')}`}`
     : 'TomeKeep'
 
   return (
@@ -114,6 +116,7 @@ function LogoBadge({ weather }: { weather: WeatherState | null }) {
 // ---------------------------------------------------------------------------
 
 function UserSwitcher() {
+  const { t } = useLang()
   const [users, setUsers] = useState<UserProfile[]>([])
   const [activeUser, setActiveUser] = useState<UserProfile | null>(null)
   const [open, setOpen] = useState(false)
@@ -183,7 +186,7 @@ function UserSwitcher() {
 
   async function handleDelete(user: UserProfile, e: React.MouseEvent) {
     e.stopPropagation()
-    if (!confirm(`删除用户「${user.name}」及其所有阅读记录？此操作不可撤销。`)) return
+    if (!confirm(t('delete_user_confirm', { name: user.name }))) return
     const ok = await window.db.deleteUser(user.id)
     if (!ok) return   // server rejected (last user)
     const [us, active] = await Promise.all([window.db.getUsers(), window.db.getActiveUser()])
@@ -198,7 +201,7 @@ function UserSwitcher() {
       <button
         type="button"
         onClick={() => { setOpen(o => !o); setRenamingId(null) }}
-        title={activeUser ? `用户：${activeUser.name}` : '用户'}
+        title={activeUser ? t('user_tooltip', { name: activeUser.name }) : t('user_label')}
         className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
           open
             ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'
@@ -244,7 +247,7 @@ function UserSwitcher() {
                     <button
                       type="button"
                       onClick={e => startRename(u, e)}
-                      title="重命名"
+                      title={t('rename')}
                       className="p-0.5 rounded text-gray-300 hover:text-blue-500 dark:hover:text-blue-400 transition-colors flex-shrink-0"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -256,7 +259,7 @@ function UserSwitcher() {
                       <button
                         type="button"
                         onClick={e => void handleDelete(u, e)}
-                        title={`删除用户 ${u.name}`}
+                        title={t('delete_user_title', { name: u.name })}
                         className="p-0.5 rounded text-gray-300 hover:text-red-500 dark:hover:text-red-400 transition-colors flex-shrink-0"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -280,7 +283,7 @@ function UserSwitcher() {
                 if (e.key === 'Enter') void handleAdd()
                 if (e.key === 'Escape') setOpen(false)
               }}
-              placeholder="新用户…"
+              placeholder={t('new_user_placeholder')}
               className="flex-1 min-w-0 px-2 py-1 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
@@ -288,7 +291,7 @@ function UserSwitcher() {
               onClick={() => void handleAdd()}
               disabled={!newName.trim()}
               className="p-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-              title="添加用户"
+              title={t('add_user')}
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -306,9 +309,17 @@ function UserSwitcher() {
 // ---------------------------------------------------------------------------
 
 export function Layout() {
+  const { lang, t, setLang } = useLang()
   const [theme, setTheme] = useState<ThemeMode>(getStoredTheme)
   const [weather, setWeather] = useState<WeatherState | null>(null)
   const [watermarkName, setWatermarkName] = useState<string | null>(null)
+  const [doubanLoggedIn, setDoubanLoggedIn] = useState(false)
+  const [doubanLoggingIn, setDoubanLoggingIn] = useState(false)
+
+  useEffect(() => {
+    // Check Douban session status on mount
+    void window.meta.doubanStatus().then(s => setDoubanLoggedIn(s.loggedIn))
+  }, [])
 
   useEffect(() => {
     // Read initial active user for watermark
@@ -348,9 +359,9 @@ export function Layout() {
                         <ThemeAutoIcon />
 
   const themeLabel =
-    theme === 'light' ? '浅色 — 点击切换深色' :
-    theme === 'dark'  ? '深色 — 点击切换自动' :
-                        '自动 — 点击切换浅色'
+    theme === 'light' ? t('theme_light') :
+    theme === 'dark'  ? t('theme_dark') :
+                        t('theme_auto')
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center justify-center w-10 h-10 rounded-xl transition-colors ${
@@ -371,12 +382,12 @@ export function Layout() {
 
         {/* Nav links */}
         <nav className="flex flex-col items-center gap-2 flex-1">
-          <Tip label="书库">
+          <Tip label={t('nav_library')}>
             <NavLink to="/" end className={navLinkClass}>
               <BookshelfIcon />
             </NavLink>
           </Tip>
-          <Tip label="心愿单">
+          <Tip label={t('nav_wishlist')}>
             <NavLink to="/wishlist" className={navLinkClass}>
               <StarIcon />
             </NavLink>
@@ -385,6 +396,40 @@ export function Layout() {
 
         {/* User switcher */}
         <UserSwitcher />
+
+        {/* Language toggle */}
+        <Tip label={t('lang_toggle')}>
+          <button
+            type="button"
+            onClick={() => void setLang(lang === 'zh' ? 'en' : 'zh')}
+            className="flex items-center justify-center w-10 h-10 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700/50 transition-colors text-xs font-semibold"
+          >
+            {lang === 'zh' ? 'EN' : '中'}
+          </button>
+        </Tip>
+
+        {/* Douban login toggle */}
+        <Tip label={doubanLoggedIn ? t('douban_logged_in') : doubanLoggingIn ? t('douban_logging_in') : t('douban_login')}>
+          <button
+            type="button"
+            disabled={doubanLoggingIn}
+            onClick={async () => {
+              if (doubanLoggedIn) return
+              setDoubanLoggingIn(true)
+              await window.meta.loginDouban()
+              const status = await window.meta.doubanStatus()
+              setDoubanLoggedIn(status.loggedIn)
+              setDoubanLoggingIn(false)
+            }}
+            className={`relative flex items-center justify-center w-10 h-10 rounded-xl transition-colors text-xs font-bold
+              ${doubanLoggingIn ? 'opacity-50 cursor-wait' : 'hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'}
+              ${doubanLoggedIn ? 'text-green-500 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}
+            `}
+          >
+            豆
+            <span className={`absolute bottom-1.5 right-1.5 w-1.5 h-1.5 rounded-full ${doubanLoggedIn ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+          </button>
+        </Tip>
 
         {/* Theme toggle at bottom */}
         <Tip label={themeLabel}>

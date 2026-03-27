@@ -49,6 +49,61 @@ describe('douban', () => {
       }
     })
 
+    it('parses isbn from #info div containing nested divs (real Douban structure)', () => {
+      // Real Douban pages wrap certain fields (e.g. series) in nested <div> elements
+      // inside #info. A naive lazy </div> match stops at the first inner </div>,
+      // cutting off the ISBN line that appears after it.
+      const html = `
+        <html>
+          <head>
+            <meta property="og:image" content="https://img.example/cover.jpg" />
+            <meta property="og:title" content="悉达多 (豆瓣)" />
+          </head>
+          <body>
+            <div id="info">
+              <span class="pl"> 作者</span>:
+                <a href="/author/233784">赫尔曼·黑塞</a>
+              <br/>
+              <span class="pl">出版社:</span> 上海译文出版社<br/>
+              <span class="pl">原作名:</span> Siddhartha<br/>
+              <span class="pl">译者:</span> <a href="/author/205166">姜乙</a><br/>
+              <span class="pl">丛书:</span>
+                <div class="indent"><a href="/series/22851">译文经典</a></div>
+              <span class="pl">ISBN:</span> 9787532761319<br/>
+            </div>
+          </body>
+        </html>
+      `
+      const res = parseDoubanSubjectHtml(html)
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        expect(res.value.isbn13).toBe('9787532761319')
+        expect(res.value.title).toBe('悉达多')
+        expect(res.value.author).toBe('赫尔曼·黑塞')
+        expect(res.value.publisher).toBe('上海译文出版社')
+      }
+    })
+
+    it('parses og:image when content attribute comes before property', () => {
+      const html = `
+        <html>
+          <head>
+            <meta content="https://img.example/cover2.jpg" property="og:image" />
+          </head>
+          <body>
+            <div id="info">
+              <span class="pl">ISBN:</span> 9787532761319<br/>
+            </div>
+          </body>
+        </html>
+      `
+      const res = parseDoubanSubjectHtml(html)
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        expect(res.value.coverUrl).toBe('https://img.example/cover2.jpg')
+      }
+    })
+
     it('returns bad_response when isbn missing', () => {
       const html = `<html><body><span property="v:itemreviewed">X</span></body></html>`
       expect(parseDoubanSubjectHtml(html)).toEqual({ ok: false, error: 'bad_response' })
