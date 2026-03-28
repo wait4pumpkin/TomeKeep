@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { Book, ReadingState, UserProfile } from '../../electron/db'
-import type { DoubanSearchHit } from '../../electron/metadata'
+
 import { useLang } from '../lib/i18n'
 import type { Lang, DictKey } from '../lib/i18n'
 import { IsbnScanModal } from '../components/IsbnScanModal'
@@ -116,11 +116,8 @@ export function Inventory() {
     return () => clearTimeout(timer)
   }, [toastMsg])
 
-  // Douban search-as-you-type state (manual form)
-  const [searchHits, setSearchHits] = useState<DoubanSearchHit[]>([])
-  const [searchState, setSearchState] = useState<'idle' | 'loading' | 'error'>('idle')
+  // Douban fill state (manual form — triggered by explicit user action, not auto-search)
   const [fillState, setFillState] = useState<'idle' | 'loading'>('idle')
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Clipboard import status
   const [clipStatus, setClipStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ state: 'idle' })
@@ -626,11 +623,8 @@ export function Inventory() {
     setNewBookCoverDataUrl(null)
     setOcrResult(null)
     setOcrState('idle')
-    setSearchHits([])
-    setSearchState('idle')
     setFillState('idle')
     setClipStatus({ state: 'idle' })
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
     newBookIdRef.current = crypto.randomUUID()
   }
 
@@ -823,45 +817,6 @@ export function Inventory() {
   }
 
   /** Trigger debounced Douban search based on current title + author fields. */
-  function triggerSearch(title: string, author: string) {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
-    const query = [title, author].filter(Boolean).join(' ').trim()
-    if (query.length < 2) {
-      setSearchHits([])
-      setSearchState('idle')
-      return
-    }
-    setSearchState('loading')
-    searchDebounceRef.current = setTimeout(async () => {
-      const res = await window.meta.searchDouban(query)
-      if (!res.ok) {
-        setSearchState('error')
-        return
-      }
-      setSearchHits(res.value)
-      setSearchState('idle')
-    }, 600)
-  }
-
-  /** Select a search hit: fetch full metadata then fill form. */
-  async function handleSelectHit(hit: DoubanSearchHit) {
-    setSearchHits([])
-    setFillState('loading')
-    const doubanUrl = `https://book.douban.com/subject/${hit.subjectId}/`
-    const res = await window.meta.lookupDouban(doubanUrl)
-    if (res.ok) {
-      setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), doubanUrl } as Partial<Book>))
-    } else {
-      // Fallback: at least fill title/author from the search hit
-      setNewBook(prev => ({
-        ...prev,
-        title: prev.title || hit.title,
-        author: prev.author || hit.author,
-      }))
-    }
-    setFillState('idle')
-  }
-
   // Title click: prefer doubanUrl, then isbnsearch by ISBN, else show toast
   function handleBookTitleClick(book: Book) {
     if (book.doubanUrl) {
@@ -1635,20 +1590,13 @@ export function Inventory() {
       {showManualForm && (
         <ManualAddForm
           book={newBook}
-          searchHits={searchHits}
-          searchState={searchState}
           fillState={fillState}
           clipStatus={clipStatus}
           ocrResult={ocrResult}
           ocrState={ocrState}
           onBookChange={(patch) => {
-            setNewBook(prev => {
-              const next = { ...prev, ...patch }
-              triggerSearch(next.title ?? '', next.author ?? '')
-              return next
-            })
+            setNewBook(prev => ({ ...prev, ...patch }))
           }}
-          onSelectHit={handleSelectHit}
           onSubmit={handleAddBook}
           onCancel={() => { setAddMode(null); resetManualForm() }}
           isSubmitting={isAddSubmitting}
@@ -2003,8 +1951,6 @@ export function Inventory() {
 type ManualAddFormProps = {
   book: Partial<Book>
   coverDataUrl: string | null
-  searchHits: DoubanSearchHit[]
-  searchState: 'idle' | 'loading' | 'error'
   fillState: 'idle' | 'loading'
   clipStatus: { state: 'idle' | 'loading' | 'success' | 'error'; message?: string }
   ocrResult: OcrResult | null
@@ -2012,13 +1958,12 @@ type ManualAddFormProps = {
   onBookChange: (patch: Partial<Book>) => void
   onCoverConfirmed: (dataUrl: string, ocr?: OcrResult) => void
   onOcrFill: () => void
-  onSelectHit: (hit: DoubanSearchHit) => void
   onSubmit: (e: React.FormEvent) => void
   onCancel: () => void
   isSubmitting?: boolean
 }
 
-function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, ocrResult: _ocrResult, ocrState, onBookChange, onCoverConfirmed, onOcrFill, onSelectHit, onSubmit, onCancel, isSubmitting = false }: ManualAddFormProps) {
+function ManualAddForm({ book, coverDataUrl, fillState, clipStatus, ocrResult: _ocrResult, ocrState, onBookChange, onCoverConfirmed, onOcrFill, onSubmit, onCancel, isSubmitting = false }: ManualAddFormProps) {
   const inputCls = 'w-full px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
   const titleInputCls = 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
@@ -2118,50 +2063,15 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
           {/* Input fields */}
           <div className="flex-1 min-w-0 flex flex-col justify-between h-[7.5rem]">
             {/* Title */}
-            <div className="relative">
-              <input
-                type="text"
-                required
-                placeholder={t('form_title_placeholder')}
-                value={book.title ?? ''}
-                onChange={e => onBookChange({ title: e.target.value })}
-                className={titleInputCls}
-                autoFocus
-              />
-              {/* Search indicator */}
-              {searchState === 'loading' && (
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
-                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
-                </span>
-              )}
-
-              {/* Search results dropdown */}
-              {searchHits.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-0.5 z-40 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden">
-                  {searchHits.map(hit => (
-                    <button
-                      key={hit.subjectId}
-                      type="button"
-                      onClick={() => onSelectHit(hit)}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0"
-                    >
-                      {hit.coverUrl ? (
-                        <img src={hit.coverUrl} alt="" className="w-6 h-8 object-cover rounded flex-shrink-0" />
-                      ) : (
-                        <div className="w-6 h-8 rounded bg-gray-100 dark:bg-gray-700 flex-shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm text-gray-900 dark:text-gray-100 truncate leading-snug">{hit.title}</p>
-                        {hit.author && <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{hit.author}</p>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <input
+              type="text"
+              required
+              placeholder={t('form_title_placeholder')}
+              value={book.title ?? ''}
+              onChange={e => onBookChange({ title: e.target.value })}
+              className={titleInputCls}
+              autoFocus
+            />
 
             {/* Author */}
              <input
