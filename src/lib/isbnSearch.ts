@@ -20,6 +20,28 @@ export function isIsbndbPlaceholderUrl(url: string): boolean {
 }
 
 /**
+ * Known placeholder cover URL substrings from any metadata source.
+ * These URLs serve a generic "no cover" image with HTTP 200 and must be
+ * rejected before attempting to download.
+ */
+const PLACEHOLDER_URL_PATTERNS: RegExp[] = [
+  // isbndb ISBN-derived path: /covers/XX/YY/<isbn>.jpg
+  /images\.isbndb\.com\/covers\/[^/]{1,4}\/[^/]{1,4}\//,
+  // Douban default cover GIF (book-default-lpic / book-default-spic)
+  /doubanio\.com\/.*book-default-[ls]pic/,
+  // Douban default cover served from any CDN subdomain
+  /img\d*\.doubanio\.com\/[^?]*book-default/,
+]
+
+/**
+ * Returns true if the URL is a known placeholder that should never be
+ * saved as a book cover, regardless of which source returned it.
+ */
+export function isPlaceholderCoverUrl(url: string): boolean {
+  return PLACEHOLDER_URL_PATTERNS.some(re => re.test(url))
+}
+
+/**
  * Parse isbnsearch.org HTML for a given ISBN.
  *
  * Expected structure (plain HTML, no JS rendering):
@@ -67,7 +89,7 @@ export function parseIsbnSearchHtml(isbn13: string, html: string): IsbnSearchRes
 
   // Reject placeholder URLs — they look like real covers but serve a generic
   // "not available" image. Treat them as absent so callers don't persist garbage.
-  if (coverUrl && isIsbndbPlaceholderUrl(coverUrl)) coverUrl = undefined
+  if (coverUrl && isPlaceholderCoverUrl(coverUrl)) coverUrl = undefined
 
   return {
     ok: true,

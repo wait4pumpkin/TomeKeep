@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isIsbndbPlaceholderUrl, parseIsbnSearchHtml } from './isbnSearch'
+import { isIsbndbPlaceholderUrl, isPlaceholderCoverUrl, parseIsbnSearchHtml } from './isbnSearch'
 
 describe('isIsbndbPlaceholderUrl', () => {
   it('identifies ISBN-derived placeholder URLs', () => {
@@ -15,6 +15,28 @@ describe('isIsbndbPlaceholderUrl', () => {
   it('passes non-isbndb URLs', () => {
     expect(isIsbndbPlaceholderUrl('https://img1.doubanio.com/view/subject/l/public/s1234567.jpg')).toBe(false)
     expect(isIsbndbPlaceholderUrl('https://covers.openlibrary.org/b/isbn/9780099558781-L.jpg')).toBe(false)
+  })
+})
+
+describe('isPlaceholderCoverUrl', () => {
+  it('detects isbndb ISBN-derived placeholder', () => {
+    expect(isPlaceholderCoverUrl('https://images.isbndb.com/covers/78/81/9780099558781.jpg')).toBe(true)
+  })
+
+  it('detects Douban default cover GIF (book-default-lpic)', () => {
+    expect(isPlaceholderCoverUrl('https://img1.doubanio.com/cuphead/book-static/pics/book-default-lpic.gif')).toBe(true)
+  })
+
+  it('detects Douban default cover (book-default-spic)', () => {
+    expect(isPlaceholderCoverUrl('https://img3.doubanio.com/cuphead/book-static/pics/book-default-spic.gif')).toBe(true)
+  })
+
+  it('passes a real Douban cover URL', () => {
+    expect(isPlaceholderCoverUrl('https://img1.doubanio.com/view/subject/l/public/s1234567.jpg')).toBe(false)
+  })
+
+  it('passes a real isbndb numeric-ID cover URL', () => {
+    expect(isPlaceholderCoverUrl('https://images.isbndb.com/covers/11676643482223.jpg')).toBe(false)
   })
 })
 
@@ -45,7 +67,7 @@ describe('parseIsbnSearchHtml', () => {
     expect(res.value.coverUrl).toBe('https://images.isbndb.com/covers/11676643482223.jpg')
   })
 
-  it('strips placeholder cover URL from bookinfo result', () => {
+  it('strips isbndb placeholder cover URL from result', () => {
     const html = `
       <div id="book">
         <div class="image"><img src="https://images.isbndb.com/covers/78/81/9780099558781.jpg" /></div>

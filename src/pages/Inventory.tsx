@@ -9,7 +9,7 @@ import { MobileScanPanel } from '../components/MobileScanPanel'
 import { CoverCropModal } from '../components/CoverCropModal'
 import { CoverLightbox } from '../components/CoverLightbox'
 import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from '../lib/isbn'
-import { isIsbndbPlaceholderUrl } from '../lib/isbnSearch'
+import { isPlaceholderCoverUrl } from '../lib/isbnSearch'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { normalizeAuthor } from '../lib/author'
 import type { OcrResult } from '../lib/coverOcr'
@@ -759,7 +759,7 @@ export function Inventory() {
         console.log('[refetch-cover] captcha (from waterfall) result=%o', captchaRes)
         if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
       }
-      if (result.ok && result.value.coverUrl && !isIsbndbPlaceholderUrl(result.value.coverUrl)) {
+      if (result.ok && result.value.coverUrl && !isPlaceholderCoverUrl(result.value.coverUrl)) {
         coverUrl = result.value.coverUrl
         console.log('[refetch-cover] waterfall gave real coverUrl=%s', coverUrl)
       } else if (result.ok) {
