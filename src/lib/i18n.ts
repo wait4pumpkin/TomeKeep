@@ -61,7 +61,6 @@ const dict = {
   compact_columns:  { zh: '每行列数', en: 'Columns per row' },
 
   progress_read:    { zh: '{read}/{total} 已读', en: '{read}/{total} read' },
-  progress_percent: { zh: '{pct}% 已读',        en: '{pct}% read' },
 
   no_tags:      { zh: '无标签', en: 'No tags' },
   clear_filter: { zh: '清除筛选', en: 'Clear filter' },

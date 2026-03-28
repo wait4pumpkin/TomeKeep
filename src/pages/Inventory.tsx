@@ -1616,19 +1616,19 @@ export function Inventory() {
 
       {/* Reading progress bar — full width, below the tag row */}
       {books.length > 0 && (
-        <div
-          className="flex items-center gap-3"
-          title={t('progress_read', { read: String(readCount), total: String(totalCount) })}
-        >
-          <div className="flex-1 h-0.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+        <div className="relative group">
+          <div className="h-0.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
             <div
               className="h-full rounded-full bg-green-500 dark:bg-green-400 animate-pulse transition-[width] duration-500 ease-in-out"
               style={{ width: `${readPct * 100}%` }}
             />
           </div>
-          <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500 tabular-nums">
-            {t('progress_percent', { pct: String(Math.round(readPct * 100)) })}
-          </span>
+          {/* Tooltip — appears on hover, centred above the bar */}
+          <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap rounded px-2 py-0.5 text-xs bg-gray-800 dark:bg-gray-700 text-white tabular-nums shadow-sm">
+            {t('progress_read', { read: String(readCount), total: String(totalCount) })}
+            {' · '}
+            {Math.round(readPct * 100)}%
+          </div>
         </div>
       )}
 
