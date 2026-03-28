@@ -1668,7 +1668,7 @@ export function Inventory() {
         />
       )}
 
-      {/* Single scan modal — runs full waterfall; captcha popup handled inline */}
+      {/* Single scan modal — opens manual form immediately, runs waterfall in background */}
       <IsbnScanModal
         isOpen={addMode === 'scan-single'}
         onClose={() => setAddMode(null)}
@@ -1680,11 +1680,17 @@ export function Inventory() {
             const isbn13 = toIsbn13(normalized.value)
             if (!isbn13) return
 
+            // Open the manual form immediately so the user isn't staring at a blank
+            // page while the waterfall runs.  Show a loading status inside the form.
+            resetManualForm()
+            setNewBook({ isbn: isbn13 })
+            setClipStatus({ state: 'loading', message: t('scan_lookup_loading') })
+            setAddMode('manual')
+
             // Full waterfall: Douban → OpenLibrary → isbnsearch (with captcha popup if needed)
             let result = await window.meta.lookupWaterfall(isbn13)
 
             if (!result.ok && result.error === 'captcha') {
-              // isbnsearch triggered captcha — open resolver popup, then the result is ready
               const captchaRes = await window.meta.resolveCaptcha(isbn13)
               if (captchaRes.ok) {
                 result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
@@ -1692,19 +1698,18 @@ export function Inventory() {
             }
 
             if (result.ok) {
-              setAddMode(null)
-              await commitBook({
-                ...mergeBookDraftWithMetadata({}, result.value),
-                isbn: isbn13,
+              // Fill the open form with the metadata result
+              const merged: Partial<Book> = {
+                ...mergeBookDraftWithMetadata({ isbn: isbn13 }, result.value) as Partial<Book>,
                 ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
-              } as Partial<Book>)
+              }
+              setNewBook(merged)
+              setClipStatus({ state: 'idle' })
               return
             }
 
-            // All sources failed — open manual form pre-filled with ISBN
-            resetManualForm()
-            setNewBook({ isbn: isbn13 })
-            setAddMode('manual')
+            // All sources failed — leave the form open with an error status
+            setClipStatus({ state: 'error', message: t('scan_not_found') })
           })()
         }}
       />
@@ -2020,7 +2025,7 @@ function ManualAddForm({ book, coverDataUrl, fillState, clipStatus, ocrResult: _
   // Meta-filled confirmation only shows after a clipboard import (clipStatus.state === 'success'),
   // not when fields are filled via manual Douban search-as-you-type.
   const statusLine: { text: string; type: 'info' | 'error' | 'success' | 'loading' } | null =
-    clipStatus.state === 'loading' ? { text: t('clip_loading'), type: 'loading' } :
+    clipStatus.state === 'loading' ? { text: clipStatus.message ?? t('clip_loading'), type: 'loading' } :
     clipStatus.state === 'error'   ? { text: clipStatus.message ?? t('clip_failed'), type: 'error' } :
     fillState === 'loading'        ? { text: t('douban_loading'), type: 'loading' } :
     ocrState === 'loading'         ? { text: t('ocr_cover_loading'), type: 'loading' } :

@@ -113,6 +113,8 @@ const dict = {
 
   clip_loading:      { zh: '正在从剪贴板导入…', en: 'Importing from clipboard…' },
   clip_failed:       { zh: '导入失败',          en: 'Import failed' },
+  scan_lookup_loading: { zh: '正在查询书籍信息…', en: 'Looking up book info…' },
+  scan_not_found:      { zh: '未找到书籍信息，请手动填写。', en: 'No book info found — please fill in manually.' },
   douban_loading:    { zh: '正在从豆瓣获取详情…', en: 'Fetching from Douban…' },
   ocr_cover_loading: { zh: '正在识别封面文字…',  en: 'Recognizing cover text…' },
   filled_douban:     { zh: '已从豆瓣填充元信息', en: 'Filled from Douban' },
