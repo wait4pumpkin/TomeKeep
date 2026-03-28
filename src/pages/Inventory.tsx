@@ -1782,14 +1782,34 @@ export function Inventory() {
                     </h2>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {section.books.map(book => renderDetailCard(book, '', () => openEditPanel(book.id)))}
+                    {section.books.map(book => renderDetailCard(book, '', () => {
+                      setEditDraft({
+                        title: book.title,
+                        author: book.author,
+                        publisher: book.publisher ?? '',
+                        isbn: book.isbn ?? '',
+                        doubanUrl: book.doubanUrl ?? '',
+                        coverDataUrl: '',
+                      })
+                      openEditPanel(book.id)
+                    }))}
                   </div>
                 </div>
               )
             })
           : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {sortedBooks.map(book => renderDetailCard(book, '', () => openEditPanel(book.id)))}
+              {sortedBooks.map(book => renderDetailCard(book, '', () => {
+                setEditDraft({
+                  title: book.title,
+                  author: book.author,
+                  publisher: book.publisher ?? '',
+                  isbn: book.isbn ?? '',
+                  doubanUrl: book.doubanUrl ?? '',
+                  coverDataUrl: '',
+                })
+                openEditPanel(book.id)
+              }))}
             </div>
           )
       )}
