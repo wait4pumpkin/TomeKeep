@@ -281,6 +281,10 @@ export function Inventory() {
     })
   }, [books, searchQuery, statusFilter, tagFilter, statusMap])
 
+  const readCount = filteredBooks.filter(b => statusMap.get(b.id) === 'read').length
+  const totalCount = filteredBooks.length
+  const readPct = totalCount > 0 ? readCount / totalCount : 0
+
   const sortedBooks = useMemo(() => {
     return [...filteredBooks].sort((a, b) => {
       let cmp: number
@@ -1607,6 +1611,21 @@ export function Inventory() {
               title={t('compact_columns')}
             />
           )}
+        </div>
+      )}
+
+      {/* Reading progress bar — full width, below the tag row */}
+      {books.length > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-0.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-green-500 dark:bg-green-400 animate-pulse transition-[width] duration-500 ease-in-out"
+              style={{ width: `${readPct * 100}%` }}
+            />
+          </div>
+          <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500 tabular-nums">
+            {t('progress_read', { read: String(readCount), total: String(totalCount) })}
+          </span>
         </div>
       )}
 

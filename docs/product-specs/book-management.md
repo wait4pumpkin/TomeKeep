@@ -49,7 +49,7 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 - **FR-INV-13**: When a book's reading status transitions to `read`, the system SHALL record the current timestamp as `completedAt` in the `ReadingState` record and display it on the book card as `✓ YYYY-MM-DD`. Transitioning away from `read` SHALL clear `completedAt`.
 - **FR-INV-14**: The Library page SHALL provide a sort control with keys: Entry Date, Completion Date, Title, Author. The active sort key and direction SHALL be reflected visually on the control.
 - **FR-INV-15**: The Library compact view SHALL provide a column-count slider (range 8–20, default 8) in the toolbar row. The selected column count SHALL be persisted to `localStorage` and restored on next visit.
-- **FR-INV-16**: The manual add form SHALL be protected against duplicate submission; re-entrant form submission while a save is in progress SHALL be silently ignored.
+- **FR-INV-17**: The Library page SHALL display a reading progress bar below the tag filter row. The bar SHALL span the full content width, be visually subtle (thin track), show a pulsing animation at all times, and display a `{read}/{total} 已读` label. Progress is computed from the currently filtered book set (respects active search, status, and tag filters). The bar SHALL only be visible when the library is non-empty.
 
 ### 3.2 Wishlist Module
 - **FR-WISH-01**: System SHALL maintain a list of books to purchase.
