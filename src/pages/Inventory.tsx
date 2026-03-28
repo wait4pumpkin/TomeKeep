@@ -1616,7 +1616,7 @@ export function Inventory() {
 
       {/* Reading progress bar — full width, below the tag row */}
       {books.length > 0 && (
-        <div className="relative group">
+        <div className="relative group -my-1.5 py-1.5">
           <div className="h-0.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
             <div
               className="h-full rounded-full bg-green-500 dark:bg-green-400 animate-pulse transition-[width] duration-500 ease-in-out"
