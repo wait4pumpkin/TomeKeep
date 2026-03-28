@@ -56,8 +56,9 @@ const dict = {
   sort_finished:    { zh: '完成时间', en: 'Finished' },
   sort_priority:    { zh: '优先级',  en: 'Priority' },
 
-  detail_view:  { zh: '详细视图', en: 'Detail view' },
-  compact_view: { zh: '简要视图', en: 'Compact view' },
+  detail_view:      { zh: '详细视图', en: 'Detail view' },
+  compact_view:     { zh: '简要视图', en: 'Compact view' },
+  compact_columns:  { zh: '每行列数', en: 'Columns per row' },
 
   no_tags:      { zh: '无标签', en: 'No tags' },
   clear_filter: { zh: '清除筛选', en: 'Clear filter' },

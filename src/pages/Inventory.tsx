@@ -45,6 +45,10 @@ export function Inventory() {
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     (localStorage.getItem('inventoryViewMode') as ViewMode | null) ?? 'detail'
   )
+  // Compact view column count — persisted in localStorage (range 4–16, default 8)
+  const [compactCols, setCompactCols] = useState<number>(() =>
+    Number(localStorage.getItem('inventoryCompactCols')) || 8
+  )
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [closingId, setClosingId] = useState<string | null>(null)
   const closingIdRef = useRef<string | null>(null)
@@ -125,6 +129,11 @@ export function Inventory() {
     localStorage.setItem('inventoryViewMode', viewMode)
     setExpandedId(null)
   }, [viewMode])
+
+  // Persist compactCols when it changes
+  useEffect(() => {
+    localStorage.setItem('inventoryCompactCols', String(compactCols))
+  }, [compactCols])
 
   // Toggle compact card expand with close animation
   function handleToggleExpand(bookId: string) {
@@ -1522,7 +1531,25 @@ export function Inventory() {
         </div>
       </div>
 
-      {/* Tag filter bar — shown only when there are tags in use */}
+      {/* Compact view column-count slider */}
+      {viewMode === 'compact' && (
+        <div className="flex items-center gap-2 px-1">
+          <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{t('compact_columns')}</span>
+          <input
+            type="range"
+            min={4}
+            max={16}
+            step={1}
+            value={compactCols}
+            onChange={e => setCompactCols(Number(e.target.value))}
+            className="flex-1 max-w-36 accent-blue-500 cursor-pointer"
+            title={`${compactCols} ${t('compact_columns')}`}
+          />
+          <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums w-4 text-right shrink-0">
+            {compactCols}
+          </span>
+        </div>
+      )}
       {allTags.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           {/* "No tags" filter — matches books with an empty tags array */}
@@ -1870,7 +1897,7 @@ export function Inventory() {
                         {t('section_in_progress')}
                       </h2>
                     )}
-                    <div ref={si === 0 ? gridRef : undefined} className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+                    <div ref={si === 0 ? gridRef : undefined} className="grid gap-2" style={{ gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` }}>
                       {renderCompactItems(items)}
                     </div>
                   </div>
@@ -1882,7 +1909,7 @@ export function Inventory() {
 
         // Flat (title/author sort)
         return (
-          <div ref={gridRef} className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+          <div ref={gridRef} className="grid gap-2" style={{ gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` }}>
             {renderCompactItems(compactRenderItems)}
           </div>
         )
