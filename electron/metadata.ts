@@ -326,8 +326,10 @@ export function setupMetadata() {
         width: 520,
         height: 640,
         parent: parentWin ?? undefined,
-        modal: !!parentWin,
-        title: '验证 isbnsearch.org — 请完成人机验证',
+        modal: false,
+        alwaysOnTop: true,
+        closable: true,
+        title: '验证 isbnsearch.org — 请完成人机验证后关闭此窗口',
         webPreferences: {
           partition: ISBNSEARCH_PARTITION,
           nodeIntegration: false,
