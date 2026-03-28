@@ -31,6 +31,7 @@ export function Wishlist() {
   const { watermarkName } = useOutletContext<{ watermarkName: string | null }>()
   const { t } = useLang()
   const [items, setItems] = useState<WishlistItem[]>([])
+  const [inventoryTitles, setInventoryTitles] = useState<Set<string>>(new Set())
   const [addMode, setAddMode] = useState<null | 'manual'>(null)
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({})
   const [newItemCoverDataUrl, setNewItemCoverDataUrl] = useState<string | null>(null)
@@ -136,10 +137,11 @@ export function Wishlist() {
   useEffect(() => {
     let cancelled = false
     async function init() {
-      const [data, tags] = await Promise.all([window.db.getWishlist(), window.db.getAllTags()])
+      const [data, tags, books] = await Promise.all([window.db.getWishlist(), window.db.getAllTags(), window.db.getBooks()])
       if (cancelled) return
       setItems(data)
       setAllTags(tags)
+      setInventoryTitles(new Set(books.map(b => b.title.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase())))
 
       // Load whatever is already cached — no auto-fetch
       const inputs = buildPricingInputsForItems(data)
@@ -459,6 +461,7 @@ export function Wishlist() {
       {showForm && (
         <WishlistAddForm
           item={newItem}
+          inventoryTitles={inventoryTitles}
           searchHits={searchHits}
           searchState={searchState}
           fillState={fillState}
@@ -811,6 +814,7 @@ type WishlistAddFormProps = {
   clipStatus: { state: 'idle' | 'loading' | 'success' | 'error'; message?: string }
   ocrResult: OcrResult | null
   ocrState: 'idle' | 'loading' | 'done'
+  inventoryTitles: Set<string>
   onItemChange: (patch: Partial<WishlistItem>) => void
   onCoverConfirmed: (dataUrl: string, ocr?: OcrResult) => void
   onOcrFill: () => void
@@ -819,10 +823,13 @@ type WishlistAddFormProps = {
   onCancel: () => void
 }
 
-function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillState, clipStatus, ocrResult: _ocrResult, ocrState, onItemChange, onCoverConfirmed, onOcrFill, onSelectHit, onSubmit, onCancel }: WishlistAddFormProps) {
+function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillState, clipStatus, ocrResult: _ocrResult, ocrState, inventoryTitles, onItemChange, onCoverConfirmed, onOcrFill, onSelectHit, onSubmit, onCancel }: WishlistAddFormProps) {
   const { t } = useLang()
   const inputCls = 'w-full px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
-  const titleInputCls = 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
+  const isDuplicateTitle = !!(item.title?.trim()) && inventoryTitles.has(item.title.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase())
+  const titleInputCls = isDuplicateTitle
+    ? 'w-full px-2 py-1 text-sm font-medium rounded border border-amber-400 dark:border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 placeholder-amber-400 dark:placeholder-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-400'
+    : 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
