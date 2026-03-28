@@ -208,6 +208,10 @@ const dict = {
   reprice:   { zh: '重新采价', en: 'Re-fetch price' },
   get_price: { zh: '去采价',   en: 'Fetch price' },
   done:            { zh: '完成', en: 'Done' },
+  refetch_cover:         { zh: '重新获取封面', en: 'Re-fetch cover' },
+  refetch_cover_loading: { zh: '获取中…',      en: 'Fetching…' },
+  copy_title:            { zh: '复制书名',      en: 'Copy title' },
+  copy_title_done:       { zh: '已复制',        en: 'Copied' },
 } as const
 
 export type DictKey = keyof typeof dict

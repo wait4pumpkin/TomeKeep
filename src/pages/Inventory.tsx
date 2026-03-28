@@ -58,6 +58,8 @@ export function Inventory() {
   const [editPendingFile, setEditPendingFile] = useState<File | undefined>(undefined)
   const [editIsbnScanOpen, setEditIsbnScanOpen] = useState(false)
   const [editOcrState, setEditOcrState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const [editRefetchState, setEditRefetchState] = useState<'idle' | 'loading'>('idle')
+  const [copyTitleId, setCopyTitleId] = useState<string | null>(null)
   const editFileInputRef = useRef<HTMLInputElement>(null)
   // Cache-bust map: bookId → timestamp. Appended to app:// cover URLs after a local file save
   // so the browser doesn't serve a stale cached image.
@@ -177,6 +179,7 @@ export function Inventory() {
   async function handleClipboardImport() {
     setMenuOpen(false)
     setClipStatus({ state: 'loading' })
+    setAddMode('manual')
     let text = ''
     try {
       text = (await navigator.clipboard.readText()).trim()
@@ -211,14 +214,19 @@ export function Inventory() {
       if (normalized.ok) {
         const isbn13 = toIsbn13(normalized.value)
         if (isbn13) {
-          const res = await window.meta.lookupIsbn(isbn13)
-          if (res.ok) {
-            setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), isbn: isbn13 } as Partial<Book>))
+          // Full waterfall: Douban → OpenLibrary → isbnsearch
+          let result = await window.meta.lookupWaterfall(isbn13)
+          if (!result.ok && result.error === 'captcha') {
+            const captchaRes = await window.meta.resolveCaptcha(isbn13)
+            if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
+          }
+          if (result.ok) {
+            setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, result.value), isbn: isbn13 } as Partial<Book>))
             setClipStatus({ state: 'success', message: t('filled_isbn_dot') })
             setAddMode('manual')
             return
           }
-          // ISBN valid but lookup failed — pre-fill ISBN and open form
+          // All sources failed — pre-fill ISBN and open form
           setNewBook(prev => ({ ...prev, isbn: isbn13 }))
           setClipStatus({ state: 'idle' })
           setAddMode('manual')
@@ -708,6 +716,50 @@ export function Inventory() {
     void loadBooks()
   }
 
+  /**
+   * Re-runs the full waterfall (Douban → OpenLibrary → isbnsearch) for a book
+   * that is currently open in the edit panel, updating only the coverUrl.
+   * If isbnsearch triggers a captcha, opens the resolver popup before retrying.
+   */
+  async function handleRefetchCover(book: Book) {
+    const isbn13 = editDraft.isbn.trim() || book.isbn
+    if (!isbn13) return
+    setEditRefetchState('loading')
+    try {
+      let coverUrl: string | undefined
+
+      // Run the waterfall first — it may return a coverUrl from Douban or OpenLibrary
+      let result = await window.meta.lookupWaterfall(isbn13)
+      if (!result.ok && result.error === 'captcha') {
+        const captchaRes = await window.meta.resolveCaptcha(isbn13)
+        if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
+      }
+      if (result.ok && result.value.coverUrl) {
+        coverUrl = result.value.coverUrl
+      }
+
+      // If the waterfall succeeded but returned no cover (e.g. OpenLibrary hit without
+      // an image), go directly to isbnsearch via the captcha-popup path.
+      if (!coverUrl) {
+        const captchaRes = await window.meta.resolveCaptcha(isbn13)
+        if (captchaRes.ok && captchaRes.value.coverUrl) {
+          coverUrl = captchaRes.value.coverUrl
+        }
+      }
+
+      if (coverUrl) {
+        const appUrl = await window.covers.saveCover(book.id, coverUrl)
+        const updated: Book = { ...book, coverUrl: appUrl }
+        await window.db.updateBook(updated)
+        setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
+        booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
+        setCoverBustMap(prev => new Map(prev).set(book.id, Date.now()))
+      }
+    } finally {
+      setEditRefetchState('idle')
+    }
+  }
+
   /** Trigger debounced Douban search based on current title + author fields. */
   function triggerSearch(title: string, author: string) {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
@@ -848,6 +900,27 @@ export function Inventory() {
                       <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h4M5 8h14M5 4h14M3 20l4-4m0 0a7 7 0 1 1 9.9-9.9A7 7 0 0 1 7 16Z" />
                       </svg>
+                    </button>
+                  )}
+                  {/* Re-fetch cover from metadata sources (waterfall + captcha popup) */}
+                  {(editDraft.isbn.trim() || book.isbn) && (
+                    <button
+                      type="button"
+                      title={editRefetchState === 'loading' ? t('refetch_cover_loading') : t('refetch_cover')}
+                      disabled={editRefetchState === 'loading'}
+                      onClick={() => void handleRefetchCover(book)}
+                      className="p-0.5 rounded text-white/80 hover:text-white transition-colors disabled:opacity-40"
+                    >
+                      {editRefetchState === 'loading' ? (
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                        </svg>
+                      )}
                     </button>
                   )}
                 </div>
@@ -1055,6 +1128,27 @@ export function Inventory() {
             </div>
           ) : (
             <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                title={copyTitleId === book.id ? t('copy_title_done') : t('copy_title')}
+                onClick={() => {
+                  void navigator.clipboard.writeText(book.title).then(() => {
+                    setCopyTitleId(book.id)
+                    setTimeout(() => setCopyTitleId(id => id === book.id ? null : id), 1500)
+                  })
+                }}
+                className="p-1 text-gray-300 hover:text-blue-500 rounded transition-colors"
+              >
+                {copyTitleId === book.id ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" />
+                  </svg>
+                )}
+              </button>
               {onEdit && (
                 <button
                   type="button"
@@ -1591,14 +1685,14 @@ export function Inventory() {
                     </h2>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {section.books.map(book => renderDetailCard(book))}
+                    {section.books.map(book => renderDetailCard(book, '', () => setEditingId(book.id)))}
                   </div>
                 </div>
               )
             })
           : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {sortedBooks.map(book => renderDetailCard(book))}
+              {sortedBooks.map(book => renderDetailCard(book, '', () => setEditingId(book.id)))}
             </div>
           )
       )}
@@ -1963,14 +2057,15 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
             </div>
 
             {/* Author */}
-            <input
-              type="text"
-              required
-              placeholder={t('form_author_placeholder')}
-              value={book.author ?? ''}
-              onChange={e => onBookChange({ author: e.target.value })}
-              className={inputCls}
-            />
+             <input
+               type="text"
+               required
+               autoComplete="off"
+               placeholder={t('form_author_placeholder')}
+               value={book.author ?? ''}
+               onChange={e => onBookChange({ author: e.target.value })}
+               className={inputCls}
+             />
 
             {/* Publisher */}
             <input
