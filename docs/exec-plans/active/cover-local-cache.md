@@ -54,7 +54,7 @@ linked_specs:
 
 ## Proposed Approach
 1. 在 `electron/main.ts` 的 `app.whenReady()` 中用 `protocol.handle('app', ...)` 注册协议，将 `app://covers/<file>` 映射到 `userData/covers/<file>`，使用 `net.fetch('file://...')` 返回文件流。
-2. 新建 `electron/covers.ts`，注册 `covers:save-cover` handler：接受 `{ id, url }` → 使用 Node `https`/`http` 模块下载图片字节 → 写入 `userData/covers/<id>.jpg` → 返回 `app://covers/<id>.jpg`。入参 url 为空或下载失败时返回原始 url（静默 fallback）。
+2. 新建 `electron/covers.ts`，注册 `covers:save-cover` handler：接受 `{ id, url }` → 使用 Node `https`/`http` 模块下载图片字节 → 校验文件（拒绝 GIF 占位图及已知 MD5 占位 JPEG） → 写入 `userData/covers/<id>.jpg` → 返回 `app://covers/<id>.jpg`。入参 url 为空或下载/校验失败时返回 `undefined`（静默 fallback，调用方负责处理）。
 3. `electron/preload.ts` 暴露 `window.covers.saveCover`。
 4. `src/pages/Inventory.tsx` 和 `src/pages/Wishlist.tsx` 在 `addBook`/`addWishlistItem` 前，若 `newBook.coverUrl` 非空且非 `app://` 开头，则调 `window.covers.saveCover`，用返回值替换。
 5. 卡片封面比例：`paddingTop: '56.25%'` → `paddingTop: '150%'`，`object-contain` → `object-cover`。
@@ -72,7 +72,7 @@ linked_specs:
 
 ## Validation Plan
 - `pnpm run build` 零错误
-- `pnpm test` 30/30 通过
+- `pnpm test` 61/61 通过（含新增 `isbnSearch.test.ts` 共 12 个 isbnSearch 相关用例）
 - 手动验证：入库一本带封面的书，重启应用后封面仍然正常显示（不依赖网络）
 
 ## Rollout Plan
@@ -85,6 +85,8 @@ linked_specs:
 - 2026-03-22: 使用 Node 内置模块下载图片，避免引入新运行时依赖（符合 dependency-policy）
 - 2026-03-22: 使用 app:// 自定义协议而非 file:// 直接路径，满足 Electron CSP 要求
 - 2026-03-22: 下载失败时静默回退原始远程 URL，不中断入库流程
+- 2026-03-28 (修订): 下载失败时返回 `undefined` 而非原始 URL；调用方负责处理 undefined（如保留旧 coverUrl 或不更新）
+- 2026-03-28: 下载成功但图片为 GIF 或已知 MD5 占位图（如 isbndb "not available" JPEG，md5=`6516a47fc69b0f3956f12e7efc984eb1`，或 Douban `book-default-lpic/spic` GIF）时拒绝保存，返回 `undefined`，避免将无效封面持久化
 - 2026-03-22: protocol.registerSchemesAsPrivileged 须在 app.whenReady() 之前调用，否则渲染进程拒绝加载 app:// 图片
 - 2026-03-22: 豆瓣 CDN 防盗链要求 Referer: https://book.douban.com/，下载请求须显式携带此头
 - 2026-03-22: 扫码豆瓣匹配成功后直接入库，不再显示确认表单；仅匹配失败时退回手动表单

@@ -48,6 +48,8 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 - **FR-INV-12**: A user selector SHALL appear in the sidebar only when two or more user profiles exist.
 - **FR-INV-13**: When a book's reading status transitions to `read`, the system SHALL record the current timestamp as `completedAt` in the `ReadingState` record and display it on the book card as `✓ YYYY-MM-DD`. Transitioning away from `read` SHALL clear `completedAt`.
 - **FR-INV-14**: The Library page SHALL provide a sort control with keys: Entry Date, Completion Date, Title, Author. The active sort key and direction SHALL be reflected visually on the control.
+- **FR-INV-15**: The Library compact view SHALL provide a column-count slider (range 8–20, default 8) in the toolbar row. The selected column count SHALL be persisted to `localStorage` and restored on next visit.
+- **FR-INV-16**: The manual add form SHALL be protected against duplicate submission; re-entrant form submission while a save is in progress SHALL be silently ignored.
 
 ### 3.2 Wishlist Module
 - **FR-WISH-01**: System SHALL maintain a list of books to purchase.
@@ -82,5 +84,5 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 - **Navigation**: Sidebar navigation for main modules (Inventory, Wishlist, Settings).
 - **View Modes**: Both the Library and Wishlist pages support two view modes, toggled via icon buttons at the right end of the toolbar:
   - **详细视图 (Detail)** (default): Responsive card grid (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`). Each card shows cover, title, author, publisher, tags, ISBN badge, and action controls.
-  - **简要视图 (Compact)**: Dense cover grid (`grid-cols-4 sm:grid-cols-6 lg:grid-cols-8`). Each cell shows an `aspect-[2/3]` cover thumbnail and a 2-line title. Clicking a cover toggles an inline expanded panel (`col-span-full`) inserted immediately after the last card in the same row, containing the full detail card. Clicking the title opens the book's Douban page.
+  - **简要视图 (Compact)**: Dense cover grid with user-adjustable column count (range 8–20, default 8). Column count is controlled by a slider in the toolbar row (alongside the tag filter bar), persisted to `localStorage` (`inventoryCompactCols`), and restored on next visit. Each cell shows an `aspect-[2/3]` cover thumbnail and a 2-line title scaled proportionally to cell width (11px at 8 cols, 8px at 20 cols). Clicking a cover toggles an inline expanded panel (`col-span-full`) inserted immediately after the last card in the same row, containing the full detail card. Clicking the title navigates to `book.doubanUrl` if set; otherwise to `https://isbnsearch.org/isbn/<isbn>` if ISBN is set; otherwise shows a toast "无法跳转：未填写 ISBN".
   - The selected view mode for each page is persisted to `localStorage` (`inventoryViewMode` / `wishlistViewMode`) and restored on next visit. Switching view mode resets any open inline expansion.

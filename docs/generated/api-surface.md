@@ -21,6 +21,17 @@ interface Book {
 }
 ```
 
+#### BookMetadata
+```ts
+type BookMetadata = {
+  isbn13?: string    // undefined when source has no standard ISBN (e.g. old Chinese book numbers)
+  title?: string
+  author?: string
+  publisher?: string
+  coverUrl?: string
+}
+```
+
 #### UserProfile
 ```ts
 interface UserProfile {
@@ -88,7 +99,8 @@ interface WishlistItem {
     - lookupDouban(input) -> { ok: true, value: BookMetadata } | { ok: false, error }
     - searchDouban(query: string) -> SearchDoubanResult  (search Douban by title/author string; uses `persist:douban` session)
     - lookupWaterfall(isbn13: string) -> WaterfallResult  (Douban → OpenLibrary → isbnsearch, returns first successful hit)
-    - resolveCaptcha(isbn13: string) -> { ok: true, value: BookMetadata } | { ok: false, error }  (opens small window for user to solve isbnsearch captcha, then retries)
+    - resolveCaptcha(isbn13: string) -> { ok: true, value: BookMetadata } | { ok: false, error }
+      (opens a small BrowserWindow at isbnsearch.org/isbn/<isbn13> on the `persist:isbnsearch` session; parses the page on both `did-finish-load` and `did-stop-loading` events with a mutex to prevent concurrent scrapes; resolves with `{ ok: true, value: BookMetadata }` on success, `{ ok: false, error: 'not_found' }` if the user closes the window without solving)
     - loginDouban() -> { ok: true } | { ok: false; error: string }  (opens Douban login BrowserWindow on `persist:douban` partition; resolves when user leaves accounts.douban.com)
     - doubanStatus() -> { loggedIn: boolean }  (checks for `dbcl2` auth cookie in `persist:douban` session)
   - errors:
@@ -140,10 +152,10 @@ interface WishlistItem {
 - window.covers
   - purpose: download and persist cover images to local storage
   - methods:
-    - saveCover(id, url) -> string
+    - saveCover(id, url) -> Promise<string | undefined>
       - downloads the image at `url` to `userData/covers/<id>.jpg`
       - returns `app://covers/<id>.jpg` on success
-      - returns original `url` unchanged if `url` is empty, already starts with `app://`, download fails, or times out (10 s)
+      - returns `undefined` if `url` is empty, already starts with `app://`, download fails, times out (10 s), the downloaded file is a GIF placeholder, or its MD5 matches a known placeholder image (e.g. the isbndb "not available" JPEG, md5=`6516a47fc69b0f3956f12e7efc984eb1`)
       - never throws; always resolves
     - saveCoverData(id, dataUrl) -> string | null
       - writes a base64 data URL (e.g. from a local file picker) to `userData/covers/<id>.<ext>`
@@ -172,6 +184,15 @@ interface WishlistItem {
       - registers a callback invoked when the phone sends a `POST /delete-entry` request
       - the callback receives the isbn to remove; the renderer should remove it from the scan list and delete it from the library
       - returns a dispose function; call it to remove the listener
+
+### Client-side isbnSearch library (`src/lib/isbnSearch.ts`)
+
+Pure functions exported for renderer use. No IPC involved.
+
+| Function | Signature | Description |
+|---|---|---|
+| `isIsbndbPlaceholderUrl` | `(url: string) -> boolean` | Returns true if the URL matches the isbndb ISBN-derived placeholder pattern (`/covers/XX/YY/<isbn>.jpg`). Served with HTTP 200 but contains a generic "no cover" image. |
+| `isPlaceholderCoverUrl` | `(url: string) -> boolean` | Returns true if the URL is any known placeholder cover from any source: isbndb ISBN-derived path, Douban `book-default-lpic` GIF, or Douban `book-default-spic` GIF. Should be called before persisting any cover URL. |
 
 ### Client-side author library (`src/lib/author.ts`)
 
@@ -215,6 +236,7 @@ type IsbnSemantics = { region: string; language: string }
 | `theme` | `'auto' \| 'light' \| 'dark'` | `'auto'` | UI theme preference; managed by `src/lib/theme.ts` |
 | `inventoryViewMode` | `'detail' \| 'compact'` | `'detail'` | View mode for the Library page; persisted on toggle, restored on next visit |
 | `wishlistViewMode` | `'detail' \| 'compact'` | `'detail'` | View mode for the Wishlist page; persisted on toggle, restored on next visit |
+| `inventoryCompactCols` | integer 8–20 | `8` | Column count for the Library compact view; controlled by the column slider in the toolbar; persisted on change, restored on next visit |
 
 ### Client-side DOM events
 
@@ -248,7 +270,7 @@ Bilingual (zh/en) translation system. No IPC. Language preference is stored per-
 | Export | Type/Signature | Description |
 |---|---|---|
 | `Lang` | `'zh' \| 'en'` | Supported language codes |
-| `DictKey` | string union | Keys of the translation dictionary (289+ entries) |
+| `DictKey` | string union | Keys of the translation dictionary; includes all UI strings for both zh and en. Key count grows with features — see `src/lib/i18n.ts` for the current set. |
 | `LangContext` | `React.Context<LangContextValue>` | Context carrying `{ lang, t, setLang }` |
 | `LangProvider` | `({ children }) -> JSX` | Provides `LangContext`; reads language from the active user on mount; listens to `active-user-changed` DOM events for user switches |
 | `useLang` | `() -> LangContextValue` | Hook to consume `LangContext`; returns `{ lang, t, setLang }` |
@@ -284,7 +306,7 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | Channel | Direction | Handler |
 |---|---|---|
 | db:get-books | renderer→main | returns Book[] |
-| db:add-book | renderer→main | persists Book, returns Book |
+| db:add-book | renderer→main | persists Book, returns Book; idempotent — if a book with the same id already exists, skips insert and returns the existing record |
 | db:update-book | renderer→main | updates Book by id, returns Book\|null |
 | db:delete-book | renderer→main | removes Book by id, returns boolean |
 | db:get-wishlist | renderer→main | returns WishlistItem[] |
@@ -318,7 +340,7 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | stores:get-status | renderer→main | checks login cookie presence |
 | stores:clear-cookies | renderer→main | clears cookies for a retailer |
 | app:open-external | renderer→main | opens URL in system browser |
-| covers:save-cover | renderer→main | downloads remote cover image to userData/covers/, returns app:// URL |
+| covers:save-cover | renderer→main | downloads remote cover image to userData/covers/; returns `app://` URL on success, `undefined` on failure (network error, timeout, GIF placeholder, or known MD5 placeholder) |
 | covers:save-cover-data | renderer→main | writes base64 data URL cover to userData/covers/, returns app:// URL or null |
 | companion:start | renderer→main | starts HTTPS companion server; returns `{ ok, url, token }` |
 | companion:stop | renderer→main | stops companion server and invalidates session token |

@@ -20,7 +20,7 @@ owner: engineering
 | 摄像头拍照 | 连续自动检测矩形；置信度稳定3帧后自动冻结 + 手动拍摄兜底 | 最大自动化；无需用户操作 |
 | 图像压缩 | Canvas toDataURL JPEG q=0.85，输出限 600×800 | 无新依赖；文件体积小 |
 | 可选字段 | 始终显示出版社和ISBN字段 | 用户明确要求 |
-| 标题跳转 | 有豆瓣URL → 豆瓣；无豆瓣URL + 有ISBN → Open Library；无ISBN → toast提示 | 更准确的数据来源路由 |
+| 标题跳转 | 有豆瓣URL → 豆瓣；无豆瓣URL + 有ISBN → isbnsearch；无ISBN → toast提示 | 更准确的数据来源路由 |
 
 ## 约束遵循
 
@@ -61,7 +61,7 @@ camera mode:
 ```
 Book (Inventory):
   book.doubanUrl 已设置  → window.app.openExternal(book.doubanUrl)
-  book.isbn 已设置       → window.app.openExternal(`https://openlibrary.org/isbn/${book.isbn}`)
+  book.isbn 已设置       → window.app.openExternal(`https://isbnsearch.org/isbn/${book.isbn}`)
   否则                   → 显示 toast "无法跳转：未填写 ISBN"
 
 WishlistItem (Wishlist detail card + compact card):
@@ -72,6 +72,12 @@ WishlistItem (Wishlist detail card + compact card):
 ## 任务清单
 
 - [x] 新建 `docs/exec-plans/active/manual-add-form.md`
-- [ ] 新建 `src/components/CoverCropModal.tsx`
-- [ ] 修改 `src/pages/Inventory.tsx`
-- [ ] 修改 `src/pages/Wishlist.tsx`
+- [x] 新建 `src/components/CoverCropModal.tsx`
+- [x] 修改 `src/pages/Inventory.tsx`
+- [x] 修改 `src/pages/Wishlist.tsx`
+
+## 补充行为说明
+
+### `handleRefetchCover` 的 captchaAlreadyAttempted 标志
+
+`handleRefetchCover` 内部使用 `captchaAlreadyAttempted` 布尔标志：若瀑布流（Douban → OpenLibrary → isbnsearch）本身已触发 `resolveCaptcha` 弹窗（返回 `{ error: 'captcha' }` 并调用了 captcha resolver），则后续直接走 isbnsearch captcha popup 的路径会被跳过，避免对同一 ISBN 连续弹出两个验证码弹窗。
