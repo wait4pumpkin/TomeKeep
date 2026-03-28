@@ -598,7 +598,44 @@ export function Inventory() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Re-load reading states when the active user changes from the sidebar switcher.
+  // On startup: repair books whose coverUrl points to an app:// URL that no longer
+  // exists on disk (e.g. lost due to the async-unlink race during a redirect chain).
+  // For each such book, re-run the metadata waterfall and re-download the cover.
+  // Books without an ISBN are cleared to undefined so they can be re-fetched manually.
+  useEffect(() => {
+    void (async () => {
+      const all = await window.db.getBooks()
+      const broken = all.filter(b => b.coverUrl?.startsWith('app://'))
+      if (broken.length === 0) return
+      const checks = await Promise.all(broken.map(b => window.covers.coverExists(b.coverUrl!)))
+      const missing = broken.filter((_, i) => !checks[i])
+      if (missing.length === 0) return
+      console.log('[cover-repair] %d book(s) with missing cover file(s)', missing.length)
+      for (const book of missing) {
+        if (!book.isbn) {
+          // No ISBN — can't re-fetch; clear the dead URL so the placeholder shows
+          const updated: Book = { ...book, coverUrl: undefined }
+          await window.db.updateBook(updated)
+          setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
+          booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
+          continue
+        }
+        const result = await window.meta.lookupWaterfall(book.isbn)
+        if (!result.ok) continue  // captcha or not_found — skip silently
+        const rawCover = result.value.coverUrl
+        if (!rawCover || rawCover.startsWith('app://')) continue
+        const appUrl = await window.covers.saveCover(book.id, rawCover)
+        if (!appUrl) continue
+        const updated: Book = { ...book, coverUrl: appUrl }
+        await window.db.updateBook(updated)
+        setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
+        booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
+        setCoverBustMap(prev => new Map(prev).set(book.id, Date.now()))
+        console.log('[cover-repair] repaired cover for "%s"', book.title)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   useEffect(() => {
     function handleUserChange(e: Event) {
       const user = (e as CustomEvent<UserProfile | null>).detail

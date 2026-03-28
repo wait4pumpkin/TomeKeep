@@ -91,6 +91,11 @@ interface Window {
      * Returns an app:// URL for the saved file, or null on failure.
      */
     saveCoverData: (id: string, dataUrl: string) => Promise<string | null>
+    /**
+     * Check whether the local cover file for a given app:// URL exists on disk.
+     * Used at startup to detect covers referenced in the DB but never written.
+     */
+    coverExists: (appUrl: string) => Promise<boolean>
   }
   companion: {
     /** Start the HTTPS companion server. Returns the LAN URL (with token) to share with the phone. */

@@ -82,6 +82,8 @@ contextBridge.exposeInMainWorld('covers', {
     ipcRenderer.invoke('covers:save-cover', { id, url }) as Promise<string | undefined>,
   saveCoverData: (id: string, dataUrl: string) =>
     ipcRenderer.invoke('covers:save-cover-data', { id, dataUrl }) as Promise<string | null>,
+  coverExists: (appUrl: string) =>
+    ipcRenderer.invoke('covers:cover-exists', appUrl) as Promise<boolean>,
 })
 
 contextBridge.exposeInMainWorld('companion', {

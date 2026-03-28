@@ -152,6 +152,39 @@ export function Wishlist() {
     return () => { cancelled = true }
   }, [])
 
+  // On startup: repair wishlist items whose coverUrl points to an app:// URL that no
+  // longer exists on disk (lost due to async-unlink race during redirect chain).
+  useEffect(() => {
+    void (async () => {
+      const all = await window.db.getWishlist()
+      const broken = all.filter(i => i.coverUrl?.startsWith('app://'))
+      if (broken.length === 0) return
+      const checks = await Promise.all(broken.map(i => window.covers.coverExists(i.coverUrl!)))
+      const missing = broken.filter((_, idx) => !checks[idx])
+      if (missing.length === 0) return
+      console.log('[cover-repair] %d wishlist item(s) with missing cover file(s)', missing.length)
+      for (const item of missing) {
+        if (!item.isbn) {
+          const updated: WishlistItem = { ...item, coverUrl: undefined }
+          await window.db.updateWishlistItem(updated)
+          setItems(prev => prev.map(i => i.id === item.id ? updated : i))
+          continue
+        }
+        const result = await window.meta.lookupWaterfall(item.isbn)
+        if (!result.ok) continue
+        const rawCover = result.value.coverUrl
+        if (!rawCover || rawCover.startsWith('app://')) continue
+        const appUrl = await window.covers.saveCover(item.id, rawCover)
+        if (!appUrl) continue
+        const updated: WishlistItem = { ...item, coverUrl: appUrl }
+        await window.db.updateWishlistItem(updated)
+        setItems(prev => prev.map(i => i.id === item.id ? updated : i))
+        console.log('[cover-repair] repaired cover for wishlist item "%s"', item.title)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function resetForm() {
     setNewItem({})
     setNewItemCoverDataUrl(null)

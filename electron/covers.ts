@@ -76,7 +76,12 @@ function downloadCover(id: string, remoteUrl: string): Promise<string | undefine
         ) {
           console.log('[covers] redirect → %s', response.headers.location)
           file.close()
-          fs.unlink(destPath, () => undefined)
+          // Use unlinkSync so the empty placeholder file is removed before the
+          // recursive downloadCover call creates a new WriteStream to the same
+          // path.  If we used the async fs.unlink here, the deferred callback
+          // could fire *after* the recursive call has already finished writing
+          // the real image, silently deleting the freshly-saved cover.
+          try { fs.unlinkSync(destPath) } catch { /* already gone — fine */ }
           settled = true
           downloadCover(id, response.headers.location as string).then(resolve)
           return
@@ -140,6 +145,20 @@ function downloadCover(id: string, remoteUrl: string): Promise<string | undefine
 }
 
 export function setupCovers() {
+  /**
+   * Check whether the local cover file for a given app:// URL actually exists
+   * on disk.  Used at startup to detect covers that are referenced in the DB
+   * but whose files were never written (e.g. due to a race in a prior session).
+   * Returns true if the file exists, false otherwise.
+   * Accepts either an app:// URL or a plain filename stem.
+   */
+  ipcMain.handle('covers:cover-exists', (_, appUrl: string) => {
+    if (!appUrl || !appUrl.startsWith('app://')) return false
+    const filename = appUrl.replace('app://covers/', '')
+    const filePath = path.join(app.getPath('userData'), 'covers', filename)
+    return fs.existsSync(filePath)
+  })
+
   ipcMain.handle('covers:save-cover', async (_, { id, url }: { id: string; url: string }) => {
     console.log('[covers:save-cover] id=%s url=%s', id, url)
     if (!url || url.startsWith('app://')) {
