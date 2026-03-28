@@ -3,6 +3,15 @@
 /* Tailwind v4: activate dark: utilities when .dark is on <html> */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Prevent macOS rubber-band scroll from revealing a white/black gap
+   behind the app shell. Match the main content background. */
+body {
+  background-color: #f9fafb; /* gray-50 */
+}
+html.dark body {
+  background-color: #111827; /* gray-900 */
+}
+
 /* Compact view expanded panel animation via scaleY (GPU-composited, no layout thrash) */
 @keyframes panel-open {
   from { transform: scaleY(0); opacity: 0; }
