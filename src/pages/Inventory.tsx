@@ -1255,7 +1255,11 @@ export function Inventory() {
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
           {t('page_library')}
           {books.length > 0 && (
-            <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{books.length}</span>
+            <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">
+              {filteredBooks.length < books.length
+                ? <>{filteredBooks.length}<span className="opacity-50"> / {books.length}</span></>
+                : books.length}
+            </span>
           )}
         </h2>
         <div className="flex items-center gap-2">

@@ -412,7 +412,11 @@ export function Wishlist() {
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
           {t('page_wishlist')}
           {items.length > 0 && (
-            <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">{items.length}</span>
+            <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">
+              {filteredItems.length < items.length
+                ? <>{filteredItems.length}<span className="opacity-50"> / {items.length}</span></>
+                : items.length}
+            </span>
           )}
         </h2>
         <div className="flex items-center gap-2">
