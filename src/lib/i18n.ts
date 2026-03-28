@@ -210,8 +210,10 @@ const dict = {
   done:            { zh: '完成', en: 'Done' },
   refetch_cover:         { zh: '重新获取封面', en: 'Re-fetch cover' },
   refetch_cover_loading: { zh: '获取中…',      en: 'Fetching…' },
+  refetch_cover_none:    { zh: '未找到封面图', en: 'No cover found' },
   copy_title:            { zh: '复制书名',      en: 'Copy title' },
   copy_title_done:       { zh: '已复制',        en: 'Copied' },
+  saving:                { zh: '保存中…',        en: 'Saving…' },
 } as const
 
 export type DictKey = keyof typeof dict

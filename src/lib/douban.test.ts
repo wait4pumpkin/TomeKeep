@@ -104,9 +104,14 @@ describe('douban', () => {
       }
     })
 
-    it('returns bad_response when isbn missing', () => {
+    it('returns ok with isbn13 undefined when isbn is missing but title is present', () => {
       const html = `<html><body><span property="v:itemreviewed">X</span></body></html>`
-      expect(parseDoubanSubjectHtml(html)).toEqual({ ok: false, error: 'bad_response' })
+      const res = parseDoubanSubjectHtml(html)
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        expect(res.value.isbn13).toBeUndefined()
+        expect(res.value.title).toBe('X')
+      }
     })
   })
 

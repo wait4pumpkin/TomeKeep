@@ -808,7 +808,7 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-3 max-w-xs">
-      <form onSubmit={onSubmit}>
+      <form onSubmit={onSubmit} autoComplete="off">
         {/* Row 1: cover preview + fields */}
         <div className="flex gap-3">
           {/* Cover column: thumbnail with overlaid capture buttons */}
@@ -926,6 +926,7 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
             <input
               type="text"
               required
+              autoComplete="new-password"
               placeholder={t('form_author_placeholder')}
               value={item.author ?? ''}
               onChange={e => onItemChange({ author: e.target.value })}

@@ -58,8 +58,9 @@ export function Inventory() {
   const [editPendingFile, setEditPendingFile] = useState<File | undefined>(undefined)
   const [editIsbnScanOpen, setEditIsbnScanOpen] = useState(false)
   const [editOcrState, setEditOcrState] = useState<'idle' | 'loading' | 'done'>('idle')
-  const [editRefetchState, setEditRefetchState] = useState<'idle' | 'loading'>('idle')
+  const [editRefetchState, setEditRefetchState] = useState<'idle' | 'loading' | 'none'>('idle')
   const [copyTitleId, setCopyTitleId] = useState<string | null>(null)
+  const [isAddSubmitting, setIsAddSubmitting] = useState(false)
   const editFileInputRef = useRef<HTMLInputElement>(null)
   // Cache-bust map: bookId → timestamp. Appended to app:// cover URLs after a local file save
   // so the browser doesn't serve a stale cached image.
@@ -197,7 +198,7 @@ export function Inventory() {
     if (isDouban) {
       const res = await window.meta.lookupDouban(text)
       if (res.ok) {
-        setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
+        setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), doubanUrl: text } as Partial<Book>))
         setClipStatus({ state: 'success', message: t('filled_douban_dot') })
         setAddMode('manual')
         return
@@ -221,7 +222,11 @@ export function Inventory() {
             if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
           }
           if (result.ok) {
-            setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, result.value), isbn: isbn13 } as Partial<Book>))
+            setNewBook(prev => ({
+              ...mergeBookDraftWithMetadata(prev, result.value),
+              isbn: isbn13,
+              ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+            } as Partial<Book>))
             setClipStatus({ state: 'success', message: t('filled_isbn_dot') })
             setAddMode('manual')
             return
@@ -636,16 +641,22 @@ export function Inventory() {
   async function handleAddBook(e: React.FormEvent) {
     e.preventDefault()
     if (!newBook.title || !newBook.author) return
-    const id = newBookIdRef.current
-    let coverUrl = newBook.coverUrl
-    if (newBookCoverDataUrl) {
-      coverUrl = await window.covers.saveCoverData(id, newBookCoverDataUrl) ?? coverUrl
-    } else if (coverUrl && !coverUrl.startsWith('app://')) {
-      coverUrl = await window.covers.saveCover(id, coverUrl)
+    if (isAddSubmitting) return
+    setIsAddSubmitting(true)
+    try {
+      const id = newBookIdRef.current
+      let coverUrl = newBook.coverUrl
+      if (newBookCoverDataUrl) {
+        coverUrl = await window.covers.saveCoverData(id, newBookCoverDataUrl) ?? coverUrl
+      } else if (coverUrl && !coverUrl.startsWith('app://')) {
+        coverUrl = await window.covers.saveCover(id, coverUrl)
+      }
+      await commitBook({ ...newBook, id, coverUrl }, newBook.status as BookStatus | undefined)
+      resetManualForm()
+      setAddMode(null)
+    } finally {
+      setIsAddSubmitting(false)
     }
-    await commitBook({ ...newBook, id, coverUrl }, newBook.status as BookStatus | undefined)
-    resetManualForm()
-    setAddMode(null)
   }
 
   async function handleDelete(id: string) {
@@ -730,7 +741,9 @@ export function Inventory() {
 
       // Run the waterfall first — it may return a coverUrl from Douban or OpenLibrary
       let result = await window.meta.lookupWaterfall(isbn13)
+      let captchaAlreadyAttempted = false
       if (!result.ok && result.error === 'captcha') {
+        captchaAlreadyAttempted = true
         const captchaRes = await window.meta.resolveCaptcha(isbn13)
         if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
       }
@@ -738,9 +751,10 @@ export function Inventory() {
         coverUrl = result.value.coverUrl
       }
 
-      // If the waterfall succeeded but returned no cover (e.g. OpenLibrary hit without
-      // an image), go directly to isbnsearch via the captcha-popup path.
-      if (!coverUrl) {
+      // If the waterfall returned no cover (e.g. Douban/OpenLibrary hit without an image,
+      // or isbnsearch already resolved but had no cover), try isbnsearch via the captcha
+      // popup — unless we already went through the captcha path above.
+      if (!coverUrl && !captchaAlreadyAttempted) {
         const captchaRes = await window.meta.resolveCaptcha(isbn13)
         if (captchaRes.ok && captchaRes.value.coverUrl) {
           coverUrl = captchaRes.value.coverUrl
@@ -749,14 +763,21 @@ export function Inventory() {
 
       if (coverUrl) {
         const appUrl = await window.covers.saveCover(book.id, coverUrl)
-        const updated: Book = { ...book, coverUrl: appUrl }
-        await window.db.updateBook(updated)
-        setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
-        booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
-        setCoverBustMap(prev => new Map(prev).set(book.id, Date.now()))
+        if (appUrl) {
+          const updated: Book = { ...book, coverUrl: appUrl }
+          await window.db.updateBook(updated)
+          setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
+          booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
+          setCoverBustMap(prev => new Map(prev).set(book.id, Date.now()))
+          return // success — finally block resets to 'idle'
+        }
       }
+      // No cover found or placeholder rejected — show feedback for 2 s
+      setEditRefetchState('none')
+      setTimeout(() => setEditRefetchState('idle'), 2000)
     } finally {
-      setEditRefetchState('idle')
+      // Only reset to idle if we didn't set 'none' (which has its own timer)
+      setEditRefetchState(s => s === 'loading' ? 'idle' : s)
     }
   }
 
@@ -785,9 +806,10 @@ export function Inventory() {
   async function handleSelectHit(hit: DoubanSearchHit) {
     setSearchHits([])
     setFillState('loading')
-    const res = await window.meta.lookupDouban(`https://book.douban.com/subject/${hit.subjectId}/`)
+    const doubanUrl = `https://book.douban.com/subject/${hit.subjectId}/`
+    const res = await window.meta.lookupDouban(doubanUrl)
     if (res.ok) {
-      setNewBook(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<Book>)
+      setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), doubanUrl } as Partial<Book>))
     } else {
       // Fallback: at least fill title/author from the search hit
       setNewBook(prev => ({
@@ -906,8 +928,12 @@ export function Inventory() {
                   {(editDraft.isbn.trim() || book.isbn) && (
                     <button
                       type="button"
-                      title={editRefetchState === 'loading' ? t('refetch_cover_loading') : t('refetch_cover')}
-                      disabled={editRefetchState === 'loading'}
+                      title={
+                        editRefetchState === 'loading' ? t('refetch_cover_loading') :
+                        editRefetchState === 'none'    ? t('refetch_cover_none') :
+                        t('refetch_cover')
+                      }
+                      disabled={editRefetchState === 'loading' || editRefetchState === 'none'}
                       onClick={() => void handleRefetchCover(book)}
                       className="p-0.5 rounded text-white/80 hover:text-white transition-colors disabled:opacity-40"
                     >
@@ -915,6 +941,11 @@ export function Inventory() {
                         <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                        </svg>
+                      ) : editRefetchState === 'none' ? (
+                        /* X icon — no cover available */
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
                         </svg>
                       ) : (
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1011,6 +1042,7 @@ export function Inventory() {
               <div className="flex flex-col gap-0.5 -mx-px">
                 <input
                   type="text"
+                  autoComplete="new-password"
                   value={editDraft.author}
                   onChange={e => setEditDraft(d => ({ ...d, author: e.target.value }))}
                   placeholder={t('field_author')}
@@ -1547,6 +1579,7 @@ export function Inventory() {
           onSelectHit={handleSelectHit}
           onSubmit={handleAddBook}
           onCancel={() => { setAddMode(null); resetManualForm() }}
+          isSubmitting={isAddSubmitting}
           coverDataUrl={newBookCoverDataUrl}
           onCoverConfirmed={(dataUrl, ocr) => {
             setNewBookCoverDataUrl(dataUrl)
@@ -1909,9 +1942,10 @@ type ManualAddFormProps = {
   onSelectHit: (hit: DoubanSearchHit) => void
   onSubmit: (e: React.FormEvent) => void
   onCancel: () => void
+  isSubmitting?: boolean
 }
 
-function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, ocrResult: _ocrResult, ocrState, onBookChange, onCoverConfirmed, onOcrFill, onSelectHit, onSubmit, onCancel }: ManualAddFormProps) {
+function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState, clipStatus, ocrResult: _ocrResult, ocrState, onBookChange, onCoverConfirmed, onOcrFill, onSelectHit, onSubmit, onCancel, isSubmitting = false }: ManualAddFormProps) {
   const inputCls = 'w-full px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
   const titleInputCls = 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
@@ -1941,7 +1975,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-3 max-w-xs">
-      <form onSubmit={onSubmit}>
+        <form onSubmit={onSubmit} autoComplete="off">
         {/* Row 1: cover preview + fields */}
         <div className="flex gap-3">
           {/* Cover column: thumbnail with overlaid capture buttons */}
@@ -2060,7 +2094,7 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
              <input
                type="text"
                required
-               autoComplete="off"
+               autoComplete="new-password"
                placeholder={t('form_author_placeholder')}
                value={book.author ?? ''}
                onChange={e => onBookChange({ author: e.target.value })}
@@ -2168,10 +2202,10 @@ function ManualAddForm({ book, coverDataUrl, searchHits, searchState, fillState,
           {/* Save */}
           <button
             type="submit"
-            disabled={!book.title || !book.author}
+            disabled={!book.title || !book.author || isSubmitting}
             className="px-2 py-0.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {t('add')}
+            {isSubmitting ? t('saving') : t('add')}
           </button>
         </div>
       </form>

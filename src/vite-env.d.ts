@@ -85,7 +85,7 @@ interface Window {
      * Download a remote cover image and persist it to userData/covers/<id>.jpg.
      * Returns an app:// URL for the saved file, or the original URL on failure.
      */
-    saveCover: (id: string, url: string) => Promise<string>
+    saveCover: (id: string, url: string) => Promise<string | undefined>
     /**
      * Save a cover from a base64 data URL (from a local file picker).
      * Returns an app:// URL for the saved file, or null on failure.

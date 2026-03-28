@@ -186,6 +186,8 @@ export async function setupDatabase() {
   ipcMain.handle('db:get-books', () => db.data.books)
 
   ipcMain.handle('db:add-book', async (_, book: Book) => {
+    // Idempotency guard: if a book with this id already exists, skip the insert
+    if (db.data.books.some(b => b.id === book.id)) return book
     db.data.books.push(book)
     await db.write()
     return book

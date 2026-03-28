@@ -337,27 +337,45 @@ export function setupMetadata() {
 
       let resolved = false
 
-      const tryParse = async () => {
+      let parsing = false
+      const tryParse = async (trigger: string) => {
         if (resolved) return
+        if (parsing) return   // avoid concurrent scrapes
+        parsing = true
         try {
+          const url = captchaWin.webContents.getURL()
           const html: string = await captchaWin.webContents.executeJavaScript(
             'document.documentElement.outerHTML'
+          )
+          console.log(
+            '[resolve-captcha] %s isbn=%s url=%s html_len=%d',
+            trigger, isbn13, url, html.length
           )
           const parsed = parseIsbnSearchHtml(isbn13, html)
           if (parsed.ok) {
             resolved = true
             captchaWin.close()
-            console.log('[resolve-captcha] success for isbn=%s', isbn13)
+            console.log('[resolve-captcha] success isbn=%s coverUrl=%s', isbn13, parsed.value.coverUrl)
             resolve({ ok: true, value: parsed.value })
+          } else {
+            console.log('[resolve-captcha] not yet resolved isbn=%s (captcha still showing?)', isbn13)
           }
-          // Still showing captcha — leave window open for user
-        } catch {
+        } catch (e) {
           // executeJavaScript can fail if window is mid-navigation; ignore
+          console.log('[resolve-captcha] executeJavaScript error isbn=%s: %o', isbn13, e)
+        } finally {
+          parsing = false
         }
       }
 
       captchaWin.webContents.on('did-finish-load', () => {
-        void tryParse()
+        void tryParse('did-finish-load')
+      })
+
+      // Also try on did-stop-loading which fires even when did-finish-load is
+      // suppressed by the page (e.g. after a captcha redirect with client-side nav)
+      captchaWin.webContents.on('did-stop-loading', () => {
+        void tryParse('did-stop-loading')
       })
 
       captchaWin.on('closed', () => {

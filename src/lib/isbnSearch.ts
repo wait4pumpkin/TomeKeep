@@ -37,9 +37,18 @@ export function parseIsbnSearchHtml(isbn13: string, html: string): IsbnSearchRes
   const publisherRaw = publisherMatch ? stripTags(publisherMatch[1]).trim() : undefined
   const publisher = publisherRaw ? publisherRaw.replace(/,\s*\d{4}.*$/, '').trim() : undefined
 
-  // Cover: img src inside #book .image
-  const coverMatch = html.match(/<div[^>]+class="image"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i)
-  const coverUrl = coverMatch ? coverMatch[1].trim() : undefined
+  // Cover: img src inside #book .image (handles double or single-quoted src)
+  const coverMatch =
+    html.match(/<div[^>]+class=["']image["'][^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i) ??
+    html.match(/<div[^>]+class=["']image["'][^>]*>[\s\S]*?<img[^>]+src='([^']+)'/i)
+  let coverUrl = coverMatch ? coverMatch[1].trim() : undefined
+
+  // Fallback: scan the entire HTML for a numeric-ID isbndb cover URL
+  // (real covers use /covers/<numericId>.jpg, NOT /covers/XX/YY/<isbn>.jpg)
+  if (!coverUrl) {
+    const fallbackMatch = html.match(/https:\/\/images\.isbndb\.com\/covers\/(\d+)\.jpg/i)
+    if (fallbackMatch) coverUrl = fallbackMatch[0].trim()
+  }
 
   return {
     ok: true,

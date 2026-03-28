@@ -1,5 +1,5 @@
 export type BookMetadata = {
-  isbn13: string
+  isbn13?: string
   title?: string
   author?: string
   publisher?: string

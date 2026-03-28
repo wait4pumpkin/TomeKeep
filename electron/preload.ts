@@ -79,7 +79,7 @@ contextBridge.exposeInMainWorld('app', {
 
 contextBridge.exposeInMainWorld('covers', {
   saveCover: (id: string, url: string) =>
-    ipcRenderer.invoke('covers:save-cover', { id, url }) as Promise<string>,
+    ipcRenderer.invoke('covers:save-cover', { id, url }) as Promise<string | undefined>,
   saveCoverData: (id: string, dataUrl: string) =>
     ipcRenderer.invoke('covers:save-cover-data', { id, dataUrl }) as Promise<string | null>,
 })

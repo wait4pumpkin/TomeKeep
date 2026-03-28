@@ -60,12 +60,15 @@ export function parseDoubanSubjectHtml(html: string): DoubanParseResult {
   const isbnRaw = info ? extractInfoValue(info, 'ISBN') : null
 
   const isbn13 = isbnRaw ? normalizeToIsbn13(isbnRaw) : null
-  if (!isbn13) return { ok: false, error: 'bad_response' }
+  // A missing or non-standard ISBN (e.g. old Chinese book numbers like "10188-216")
+  // must NOT prevent parsing — the page still has title, author, cover etc.
+  // Callers that require an ISBN (e.g. waterfall by ISBN) will handle isbn13 === null.
+  if (!isbn13 && !title) return { ok: false, error: 'bad_response' }
 
   return {
     ok: true,
     value: {
-      isbn13,
+      isbn13: isbn13 ?? undefined,
       title: title ? normalizeTitle(title) : undefined,
       author: authorRaw ? normalizePeopleList(authorRaw) : undefined,
       publisher: publisher ? normalizeWhitespace(publisher) : undefined,

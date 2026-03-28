@@ -3,13 +3,23 @@ import path from 'node:path'
 import fs from 'node:fs'
 import https from 'node:https'
 import http from 'node:http'
+import crypto from 'node:crypto'
+
+/**
+ * MD5 hashes of known placeholder images that must be rejected.
+ * isbndb CDN returns a "book cover not available" JPEG (200×248, 3736 bytes)
+ * with HTTP 200 for any ISBN that has no cover in their database.
+ */
+const PLACEHOLDER_MD5S = new Set([
+  '6516a47fc69b0f3956f12e7efc984eb1', // isbndb "not available" JPEG
+])
 
 /**
  * Download a remote cover image and save it to userData/covers/<id>.jpg.
  * Sends Referer: https://book.douban.com/ to pass Douban CDN hotlink protection.
- * Returns the app:// URL for the saved file, or the original URL on failure.
+ * Returns the app:// URL for the saved file, or undefined on any failure.
  */
-function downloadCover(id: string, remoteUrl: string): Promise<string> {
+function downloadCover(id: string, remoteUrl: string): Promise<string | undefined> {
   return new Promise(resolve => {
     const coversDir = path.join(app.getPath('userData'), 'covers')
     console.log('[covers] coversDir=%s', coversDir)
@@ -17,7 +27,7 @@ function downloadCover(id: string, remoteUrl: string): Promise<string> {
       fs.mkdirSync(coversDir, { recursive: true })
     } catch (e) {
       console.error('[covers] mkdirSync failed', e)
-      resolve(remoteUrl)
+      resolve(undefined)
       return
     }
 
@@ -27,7 +37,7 @@ function downloadCover(id: string, remoteUrl: string): Promise<string> {
     // Guard: ensure resolve() is called exactly once even if timeout fires
     // after request error or vice-versa.
     let settled = false
-    const settle = (result: string) => {
+    const settle = (result: string | undefined) => {
       if (settled) return
       settled = true
       file.close()
@@ -35,7 +45,7 @@ function downloadCover(id: string, remoteUrl: string): Promise<string> {
     }
     const settleError = () => {
       fs.unlink(destPath, () => undefined)
-      settle(remoteUrl)
+      settle(undefined)
     }
 
     const proto = remoteUrl.startsWith('https://') ? https : http
@@ -83,6 +93,27 @@ function downloadCover(id: string, remoteUrl: string): Promise<string> {
           if (settled) return
           settled = true
           file.close()
+          // Reject placeholder images:
+          // 1. GIF files — isbndb CDN used to return a GIF placeholder with HTTP 200
+          // 2. Known placeholder JPEGs identified by MD5 (isbndb "not available" image)
+          try {
+            const buf = fs.readFileSync(destPath)
+            if (buf.slice(0, 3).toString('ascii') === 'GIF') {
+              console.error('[covers] GIF placeholder detected, rejecting cover for %s', id)
+              fs.unlink(destPath, () => undefined)
+              resolve(undefined)
+              return
+            }
+            const md5 = crypto.createHash('md5').update(buf).digest('hex')
+            if (PLACEHOLDER_MD5S.has(md5)) {
+              console.error('[covers] known placeholder image (md5=%s), rejecting cover for %s', md5, id)
+              fs.unlink(destPath, () => undefined)
+              resolve(undefined)
+              return
+            }
+          } catch {
+            // If we can't read the file, still try to use it
+          }
           const stat = fs.statSync(destPath)
           console.log('[covers] saved %s (%d bytes) → app://covers/%s.jpg', destPath, stat.size, id)
           resolve(`app://covers/${id}.jpg`)
@@ -117,7 +148,7 @@ export function setupCovers() {
     }
     const result = await downloadCover(id, url)
     console.log('[covers:save-cover] result=%s', result)
-    return result
+    return result ?? undefined
   })
 
   /**
