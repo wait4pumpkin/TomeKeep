@@ -1541,7 +1541,7 @@ export function Inventory() {
                 title={t('no_tags')}
                 onClick={() =>
                   setTagFilter(prev =>
-                    active ? prev.filter(t => t !== '__untagged__') : ['__untagged__', ...prev]
+                    active ? prev.filter(t => t !== '__untagged__') : ['__untagged__']
                   )
                 }
                 className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
@@ -1568,7 +1568,7 @@ export function Inventory() {
                 type="button"
                 onClick={() =>
                   setTagFilter(prev =>
-                    active ? prev.filter(t => t !== tag) : [...prev, tag]
+                    active ? prev.filter(t => t !== tag) : [...prev.filter(t => t !== '__untagged__'), tag]
                   )
                 }
                 className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
