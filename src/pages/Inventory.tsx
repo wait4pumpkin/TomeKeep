@@ -294,6 +294,9 @@ export function Inventory() {
         else if (!va) cmp = 1
         else if (!vb) cmp = -1
         else cmp = va.localeCompare(vb)
+        // Tiebreaker: same completedAt (or both missing) → sort by addedAt desc, then title
+        if (cmp === 0) cmp = b.addedAt.localeCompare(a.addedAt)
+        if (cmp === 0) cmp = a.title.toLowerCase().localeCompare(b.title.toLowerCase(), 'zh-CN')
       } else if (sortKey === 'addedAt') {
         cmp = a.addedAt.localeCompare(b.addedAt)
       } else {
