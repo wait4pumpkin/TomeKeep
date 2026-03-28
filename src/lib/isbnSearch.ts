@@ -5,6 +5,21 @@ export type IsbnSearchResult =
   | { ok: false; error: 'not_found' | 'bad_response' }
 
 /**
+ * Returns true if the given URL is a known isbndb placeholder cover.
+ *
+ * isbndb CDN has two URL formats:
+ *   - Real cover:   https://images.isbndb.com/covers/<numericId>.jpg
+ *   - Placeholder:  https://images.isbndb.com/covers/XX/YY/<isbn>.jpg
+ *
+ * The placeholder is served with HTTP 200 for any ISBN that has no cover
+ * in isbndb's database — it must never be saved as a real cover image.
+ */
+export function isIsbndbPlaceholderUrl(url: string): boolean {
+  // Placeholder pattern: /covers/<twoChars>/<twoChars>/<isbn>.jpg
+  return /images\.isbndb\.com\/covers\/[^/]{1,4}\/[^/]{1,4}\//.test(url)
+}
+
+/**
  * Parse isbnsearch.org HTML for a given ISBN.
  *
  * Expected structure (plain HTML, no JS rendering):
@@ -49,6 +64,10 @@ export function parseIsbnSearchHtml(isbn13: string, html: string): IsbnSearchRes
     const fallbackMatch = html.match(/https:\/\/images\.isbndb\.com\/covers\/(\d+)\.jpg/i)
     if (fallbackMatch) coverUrl = fallbackMatch[0].trim()
   }
+
+  // Reject placeholder URLs — they look like real covers but serve a generic
+  // "not available" image. Treat them as absent so callers don't persist garbage.
+  if (coverUrl && isIsbndbPlaceholderUrl(coverUrl)) coverUrl = undefined
 
   return {
     ok: true,

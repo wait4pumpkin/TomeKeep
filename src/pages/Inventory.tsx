@@ -9,6 +9,7 @@ import { MobileScanPanel } from '../components/MobileScanPanel'
 import { CoverCropModal } from '../components/CoverCropModal'
 import { CoverLightbox } from '../components/CoverLightbox'
 import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from '../lib/isbn'
+import { isIsbndbPlaceholderUrl } from '../lib/isbnSearch'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { normalizeAuthor } from '../lib/author'
 import type { OcrResult } from '../lib/coverOcr'
@@ -747,13 +748,13 @@ export function Inventory() {
         const captchaRes = await window.meta.resolveCaptcha(isbn13)
         if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
       }
-      if (result.ok && result.value.coverUrl) {
+      if (result.ok && result.value.coverUrl && !isIsbndbPlaceholderUrl(result.value.coverUrl)) {
         coverUrl = result.value.coverUrl
       }
 
-      // If the waterfall returned no cover (e.g. Douban/OpenLibrary hit without an image,
-      // or isbnsearch already resolved but had no cover), try isbnsearch via the captcha
-      // popup — unless we already went through the captcha path above.
+      // If the waterfall returned no usable cover (Douban/OpenLibrary had no image,
+      // or isbnsearch returned a placeholder URL), try isbnsearch via the captcha popup —
+      // unless we already went through the captcha path above.
       if (!coverUrl && !captchaAlreadyAttempted) {
         const captchaRes = await window.meta.resolveCaptcha(isbn13)
         if (captchaRes.ok && captchaRes.value.coverUrl) {
