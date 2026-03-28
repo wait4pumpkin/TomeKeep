@@ -12,6 +12,7 @@ import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from 
 import { isPlaceholderCoverUrl } from '../lib/isbnSearch'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { normalizeAuthor } from '../lib/author'
+import { tagColor } from '../lib/tagColor'
 import type { OcrResult } from '../lib/coverOcr'
 import { extractCoverText } from '../lib/coverOcr'
 
@@ -1562,6 +1563,7 @@ export function Inventory() {
           })()}
           {allTags.map(tag => {
             const active = tagFilter.includes(tag)
+            const palette = tagColor(tag)
             return (
               <button
                 key={tag}
@@ -1573,8 +1575,8 @@ export function Inventory() {
                 }
                 className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
                   active
-                    ? 'bg-violet-500 border-violet-500 text-white'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400'
+                    ? palette.active
+                    : `bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 ${palette.hover}`
                 }`}
               >
                 {tag}
@@ -2388,13 +2390,13 @@ function BookTagEditor({
       {tags.map(tag => (
         <span
           key={tag}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700"
+          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border ${tagColor(tag).badge}`}
         >
           {tag}
           <button
             type="button"
             onClick={() => removeTag(tag)}
-            className="ml-0.5 text-violet-400 hover:text-violet-700 dark:hover:text-violet-100 transition-colors leading-none"
+            className="ml-0.5 opacity-60 hover:opacity-100 transition-opacity leading-none"
             title={t('remove_tag', { tag })}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
