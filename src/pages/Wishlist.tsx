@@ -157,6 +157,9 @@ export function Wishlist() {
 
   // On startup: repair wishlist items whose coverUrl points to an app:// URL that no
   // longer exists on disk (lost due to async-unlink race during redirect chain).
+  // Fast path: try OpenLibrary cover CDN directly by ISBN (no API call, just one HTTP
+  // request that follows redirects).  Only falls back to the full metadata waterfall
+  // (Douban → OpenLibrary → isbnsearch) if the direct cover fetch fails.
   useEffect(() => {
     void (async () => {
       const all = await window.db.getWishlist()
@@ -173,12 +176,19 @@ export function Wishlist() {
           setItems(prev => prev.map(i => i.id === item.id ? updated : i))
           continue
         }
-        const result = await window.meta.lookupWaterfall(item.isbn)
-        if (!result.ok) continue
-        const rawCover = result.value.coverUrl
-        if (!rawCover || rawCover.startsWith('app://')) continue
-        const appUrl = await window.covers.saveCover(item.id, rawCover)
-        if (!appUrl) continue
+        // Fast path: OpenLibrary cover CDN — no API round-trip, just a direct image fetch
+        const olCoverUrl = `https://covers.openlibrary.org/b/isbn/${item.isbn}-L.jpg`
+        let appUrl = await window.covers.saveCover(item.id, olCoverUrl)
+        if (!appUrl) {
+          // Slow path: full metadata waterfall as fallback
+          console.log('[cover-repair] OL direct cover failed for "%s", trying waterfall', item.title)
+          const result = await window.meta.lookupWaterfall(item.isbn)
+          if (!result.ok) continue
+          const rawCover = result.value.coverUrl
+          if (!rawCover || rawCover.startsWith('app://')) continue
+          appUrl = await window.covers.saveCover(item.id, rawCover)
+          if (!appUrl) continue
+        }
         const updated: WishlistItem = { ...item, coverUrl: appUrl }
         await window.db.updateWishlistItem(updated)
         setItems(prev => prev.map(i => i.id === item.id ? updated : i))

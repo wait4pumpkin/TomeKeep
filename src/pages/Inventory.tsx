@@ -601,8 +601,10 @@ export function Inventory() {
 
   // On startup: repair books whose coverUrl points to an app:// URL that no longer
   // exists on disk (e.g. lost due to the async-unlink race during a redirect chain).
-  // For each such book, re-run the metadata waterfall and re-download the cover.
-  // Books without an ISBN are cleared to undefined so they can be re-fetched manually.
+  // Fast path: try OpenLibrary cover CDN directly by ISBN (no API call, just one HTTP
+  // request that follows redirects).  Only falls back to the full metadata waterfall
+  // (Douban → OpenLibrary → isbnsearch) if the direct cover fetch fails.
+  // Books without an ISBN are cleared to undefined so the placeholder shows instead.
   useEffect(() => {
     void (async () => {
       const all = await window.db.getBooks()
@@ -621,12 +623,19 @@ export function Inventory() {
           booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
           continue
         }
-        const result = await window.meta.lookupWaterfall(book.isbn)
-        if (!result.ok) continue  // captcha or not_found — skip silently
-        const rawCover = result.value.coverUrl
-        if (!rawCover || rawCover.startsWith('app://')) continue
-        const appUrl = await window.covers.saveCover(book.id, rawCover)
-        if (!appUrl) continue
+        // Fast path: OpenLibrary cover CDN — no API round-trip, just a direct image fetch
+        const olCoverUrl = `https://covers.openlibrary.org/b/isbn/${book.isbn}-L.jpg`
+        let appUrl = await window.covers.saveCover(book.id, olCoverUrl)
+        if (!appUrl) {
+          // Slow path: full metadata waterfall as fallback
+          console.log('[cover-repair] OL direct cover failed for "%s", trying waterfall', book.title)
+          const result = await window.meta.lookupWaterfall(book.isbn)
+          if (!result.ok) continue  // captcha or not_found — skip silently
+          const rawCover = result.value.coverUrl
+          if (!rawCover || rawCover.startsWith('app://')) continue
+          appUrl = await window.covers.saveCover(book.id, rawCover)
+          if (!appUrl) continue
+        }
         const updated: Book = { ...book, coverUrl: appUrl }
         await window.db.updateBook(updated)
         setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
