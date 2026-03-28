@@ -62,6 +62,12 @@ export function Inventory() {
   const [editRefetchState, setEditRefetchState] = useState<'idle' | 'loading' | 'none'>('idle')
   const [copyTitleId, setCopyTitleId] = useState<string | null>(null)
   const [isAddSubmitting, setIsAddSubmitting] = useState(false)
+
+  /** Open a book's inline edit panel, resetting transient edit-panel state. */
+  function openEditPanel(id: string) {
+    setEditRefetchState('idle')
+    setEditingId(id)
+  }
   const editFileInputRef = useRef<HTMLInputElement>(null)
   // Cache-bust map: bookId → timestamp. Appended to app:// cover URLs after a local file save
   // so the browser doesn't serve a stale cached image.
@@ -735,45 +741,65 @@ export function Inventory() {
    */
   async function handleRefetchCover(book: Book) {
     const isbn13 = editDraft.isbn.trim() || book.isbn
-    if (!isbn13) return
+    console.log('[refetch-cover] start isbn=%s bookId=%s', isbn13, book.id)
+    if (!isbn13) { console.log('[refetch-cover] abort: no isbn'); return }
     setEditRefetchState('loading')
     try {
       let coverUrl: string | undefined
 
       // Run the waterfall first — it may return a coverUrl from Douban or OpenLibrary
+      console.log('[refetch-cover] calling lookupWaterfall...')
       let result = await window.meta.lookupWaterfall(isbn13)
+      console.log('[refetch-cover] waterfall result=%o', result)
       let captchaAlreadyAttempted = false
       if (!result.ok && result.error === 'captcha') {
         captchaAlreadyAttempted = true
+        console.log('[refetch-cover] waterfall returned captcha, opening resolveCaptcha popup')
         const captchaRes = await window.meta.resolveCaptcha(isbn13)
+        console.log('[refetch-cover] captcha (from waterfall) result=%o', captchaRes)
         if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
       }
       if (result.ok && result.value.coverUrl && !isIsbndbPlaceholderUrl(result.value.coverUrl)) {
         coverUrl = result.value.coverUrl
+        console.log('[refetch-cover] waterfall gave real coverUrl=%s', coverUrl)
+      } else if (result.ok) {
+        console.log('[refetch-cover] waterfall ok but coverUrl absent or placeholder: %s', result.value.coverUrl)
       }
 
       // If the waterfall returned no usable cover (Douban/OpenLibrary had no image,
       // or isbnsearch returned a placeholder URL), try isbnsearch via the captcha popup —
       // unless we already went through the captcha path above.
+      console.log('[refetch-cover] coverUrl=%s captchaAlreadyAttempted=%s', coverUrl, captchaAlreadyAttempted)
       if (!coverUrl && !captchaAlreadyAttempted) {
+        console.log('[refetch-cover] opening resolveCaptcha popup for isbnsearch...')
         const captchaRes = await window.meta.resolveCaptcha(isbn13)
+        console.log('[refetch-cover] captcha (direct) result=%o', captchaRes)
         if (captchaRes.ok && captchaRes.value.coverUrl) {
           coverUrl = captchaRes.value.coverUrl
+          console.log('[refetch-cover] captcha gave coverUrl=%s', coverUrl)
         }
       }
 
+      console.log('[refetch-cover] final coverUrl=%s', coverUrl)
       if (coverUrl) {
         const appUrl = await window.covers.saveCover(book.id, coverUrl)
+        console.log('[refetch-cover] saveCover returned appUrl=%s', appUrl)
         if (appUrl) {
           const updated: Book = { ...book, coverUrl: appUrl }
           await window.db.updateBook(updated)
           setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
           booksRef.current = booksRef.current.map(b => b.id === book.id ? updated : b)
           setCoverBustMap(prev => new Map(prev).set(book.id, Date.now()))
+          console.log('[refetch-cover] success, cover saved')
           return // success — finally block resets to 'idle'
         }
       }
       // No cover found or placeholder rejected — show feedback for 2 s
+      console.log('[refetch-cover] no usable cover found, showing none state')
+      setEditRefetchState('none')
+      setTimeout(() => setEditRefetchState('idle'), 2000)
+    } catch (e) {
+      console.error('[refetch-cover] unexpected error', e)
       setEditRefetchState('none')
       setTimeout(() => setEditRefetchState('idle'), 2000)
     } finally {
@@ -1719,14 +1745,14 @@ export function Inventory() {
                     </h2>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {section.books.map(book => renderDetailCard(book, '', () => setEditingId(book.id)))}
+                    {section.books.map(book => renderDetailCard(book, '', () => openEditPanel(book.id)))}
                   </div>
                 </div>
               )
             })
           : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {sortedBooks.map(book => renderDetailCard(book, '', () => setEditingId(book.id)))}
+              {sortedBooks.map(book => renderDetailCard(book, '', () => openEditPanel(book.id)))}
             </div>
           )
       )}
@@ -1768,7 +1794,7 @@ export function Inventory() {
                         doubanUrl: book.doubanUrl ?? '',
                         coverDataUrl: '',
                       })
-                      setEditingId(book.id)
+                      openEditPanel(book.id)
                     })}
                   </div>
                 </div>
