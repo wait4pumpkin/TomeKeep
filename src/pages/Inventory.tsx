@@ -1774,18 +1774,18 @@ export function Inventory() {
                 <div key={`${section.year}-${section.month}`} className="flex flex-col gap-2">
                   {/* Year header — only when year changes */}
                   {showYear && section.year !== '未读完' && (
-                    <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200 pt-2 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                    <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 pt-2 pb-0.5 border-b border-gray-200 dark:border-gray-700">
                       {section.year}年
                     </h2>
                   )}
                   {/* Month sub-header */}
                   {section.month && (
-                    <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+                    <h3 className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">
                       {section.month}
                     </h3>
                   )}
                   {section.year === '未读完' && (
-                    <h2 className="text-base font-semibold text-gray-400 dark:text-gray-500 pt-2 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                    <h2 className="text-lg font-semibold text-gray-400 dark:text-gray-500 pt-2 pb-0.5 border-b border-gray-200 dark:border-gray-700">
                       {t('section_in_progress')}
                     </h2>
                   )}
@@ -1902,17 +1902,17 @@ export function Inventory() {
                 return (
                   <div key={`${section.year}-${section.month}`} className="flex flex-col gap-2">
                     {showYear && section.year !== '未读完' && (
-                      <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200 pt-1 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                      <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 pt-1 pb-0.5 border-b border-gray-200 dark:border-gray-700">
                         {section.year}年
                       </h2>
                     )}
                     {section.month && (
-                      <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+                      <h3 className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">
                         {section.month}
                       </h3>
                     )}
                     {section.year === '未读完' && (
-                      <h2 className="text-base font-semibold text-gray-400 dark:text-gray-500 pt-1 pb-0.5 border-b border-gray-200 dark:border-gray-700">
+                      <h2 className="text-lg font-semibold text-gray-400 dark:text-gray-500 pt-1 pb-0.5 border-b border-gray-200 dark:border-gray-700">
                         {t('section_in_progress')}
                       </h2>
                     )}
