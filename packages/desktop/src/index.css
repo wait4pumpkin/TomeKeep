@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* Tailwind v4: activate dark: utilities when .dark is on <html> */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Prevent macOS rubber-band scroll from revealing a white/black gap
+   behind the app shell. Match the main content background. */
+body {
+  background-color: #f9fafb; /* gray-50 */
+}
+html.dark body {
+  background-color: #111827; /* gray-900 */
+}
+
+/* Lock scroll to the designated overflow-auto container (main).
+   Prevents macOS elastic overscroll from moving the entire page,
+   which causes the sidebar and layout to disappear. */
+html, body {
+  overflow: hidden;
+  height: 100%;
+}
+
+/* Compact view expanded panel animation via scaleY (GPU-composited, no layout thrash) */
+@keyframes panel-open {
+  from { transform: scaleY(0); opacity: 0; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+@keyframes panel-close {
+  from { transform: scaleY(1); opacity: 1; }
+  to   { transform: scaleY(0); opacity: 0; }
+}
+.compact-panel-enter {
+  transform-origin: top;
+  animation: panel-open 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.compact-panel-exit {
+  transform-origin: top;
+  animation: panel-close 150ms cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>TomeKeep 拍摄封面</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --blue: #3b82f6;
+      --blue-dark: #2563eb;
+      --green: #22c55e;
+      --red: #ef4444;
+      --radius: 14px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 20px 16px env(safe-area-inset-bottom, 20px);
+      gap: 16px;
+    }
+
+    /* ── Header ── */
+    .header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 4px;
+    }
+    .header-logo {
+      width: 32px; height: 32px;
+      background: var(--blue);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 18px; flex-shrink: 0;
+    }
+    .header h1 { font-size: 17px; font-weight: 600; }
+    .header-sub { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+
+    /* ── Preview area ── */
+    .preview-wrap {
+      width: 100%;
+      aspect-ratio: 2/3;
+      background: var(--surface);
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      overflow: hidden;
+      position: relative;
+      cursor: pointer;
+      transition: border-color .2s;
+    }
+    .preview-wrap:hover { border-color: var(--blue); }
+    .preview-wrap.has-image { border-style: solid; border-color: var(--border); }
+
+    .preview-wrap img {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain;
+    }
+    .preview-placeholder {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      color: var(--text-muted); text-align: center; padding: 20px;
+      pointer-events: none;
+    }
+    .preview-placeholder svg { opacity: .45; }
+    .preview-placeholder p { font-size: 13px; line-height: 1.5; }
+    .preview-wrap.has-image .preview-placeholder { display: none; }
+
+    /* Retake overlay (shown on hover over a filled preview) */
+    .retake-overlay {
+      display: none;
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,.5);
+      align-items: center; justify-content: center;
+      flex-direction: column; gap: 6px;
+      color: white; font-size: 13px;
+      border-radius: calc(var(--radius) - 2px);
+    }
+    .preview-wrap.has-image:active .retake-overlay { display: flex; }
+    @media (hover: hover) {
+      .preview-wrap.has-image:hover .retake-overlay { display: flex; }
+    }
+
+    /* ── Hidden file input ── */
+    #file-input { display: none; }
+
+    /* ── Capture button (shown when no image) ── */
+    .capture-btn {
+      display: none;
+      width: 100%;
+      padding: 14px;
+      border-radius: var(--radius);
+      background: var(--blue);
+      color: white;
+      font-size: 15px; font-weight: 600;
+      text-align: center;
+      cursor: pointer;
+      border: none;
+      transition: background .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .capture-btn:active { background: var(--blue-dark); }
+    .capture-btn.visible { display: block; }
+
+    /* ── Action row (shown when image ready) ── */
+    .action-row {
+      display: none;
+      width: 100%;
+      gap: 10px;
+    }
+    .action-row.visible { display: flex; }
+
+    .btn {
+      flex: 1;
+      padding: 13px;
+      border-radius: var(--radius);
+      font-size: 15px; font-weight: 600;
+      text-align: center;
+      cursor: pointer;
+      border: none;
+      transition: background .15s, opacity .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:disabled { opacity: .45; pointer-events: none; }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:active { background: #263347; }
+    .btn-primary {
+      background: var(--blue);
+      color: white;
+    }
+    .btn-primary:active { background: var(--blue-dark); }
+
+    /* ── Status ── */
+    .status {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+      min-height: 20px;
+    }
+    .status.success { color: var(--green); }
+    .status.error   { color: var(--red); }
+
+    /* ── Done screen ── */
+    .done-screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      text-align: center;
+      padding: 32px 0;
+    }
+    .done-screen.visible { display: flex; }
+    .done-icon {
+      width: 64px; height: 64px;
+      background: rgba(34,197,94,.15);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .done-title { font-size: 18px; font-weight: 600; }
+    .done-sub   { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="header-logo">📚</div>
+    <div>
+      <h1>拍摄封面</h1>
+      <div class="header-sub" id="header-sub">拍摄书籍封面并发送到桌面端</div>
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div class="preview-wrap" id="preview-wrap">
+    <img id="preview-img" src="" alt="" style="display:none" />
+    <div class="preview-placeholder">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.3" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z"/>
+      </svg>
+      <p>点击拍照或从相册选取封面</p>
+    </div>
+    <div class="retake-overlay">
+      <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z"/>
+      </svg>
+      <span>重新拍摄</span>
+    </div>
+  </div>
+
+  <!-- Hidden file input: capture="environment" opens rear camera directly on iOS/Android -->
+  <input type="file" id="file-input" accept="image/*" capture="environment" />
+
+  <!-- Capture button (no image yet) -->
+  <button class="capture-btn visible" id="capture-btn">拍照 / 选取图片</button>
+
+  <!-- Action row (image ready) -->
+  <div class="action-row" id="action-row">
+    <button class="btn btn-secondary" id="retake-btn">重拍</button>
+    <button class="btn btn-primary"   id="send-btn">发送到电脑</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <!-- Done screen -->
+  <div class="done-screen" id="done-screen">
+    <div class="done-icon">
+      <svg width="32" height="32" fill="none" stroke="#22c55e" stroke-width="2.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+      </svg>
+    </div>
+    <div class="done-title">封面已发送</div>
+    <div class="done-sub">桌面端已收到封面图片，<br>可在应用中继续操作。</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict'
+
+  const params  = new URLSearchParams(location.search)
+  const token   = params.get('token') || ''
+  const session = params.get('session') || ''
+  const baseUrl = location.origin
+
+  const previewWrap = document.getElementById('preview-wrap')
+  const previewImg  = document.getElementById('preview-img')
+  const fileInput   = document.getElementById('file-input')
+  const captureBtn  = document.getElementById('capture-btn')
+  const actionRow   = document.getElementById('action-row')
+  const retakeBtn   = document.getElementById('retake-btn')
+  const sendBtn     = document.getElementById('send-btn')
+  const statusEl    = document.getElementById('status')
+  const doneScreen  = document.getElementById('done-screen')
+
+  let currentDataUrl = null
+
+  function setStatus(msg, type) {
+    statusEl.textContent = msg
+    statusEl.className = 'status' + (type ? ' ' + type : '')
+  }
+
+  function showImage(dataUrl) {
+    currentDataUrl = dataUrl
+    previewImg.src = dataUrl
+    previewImg.style.display = ''
+    previewWrap.classList.add('has-image')
+    captureBtn.classList.remove('visible')
+    actionRow.classList.add('visible')
+    setStatus('')
+  }
+
+  function resetToCapture() {
+    currentDataUrl = null
+    previewImg.src = ''
+    previewImg.style.display = 'none'
+    previewWrap.classList.remove('has-image')
+    captureBtn.classList.add('visible')
+    actionRow.classList.remove('visible')
+    setStatus('')
+    fileInput.value = ''
+  }
+
+  // Compress image to max 1200px on the long side, JPEG quality 0.88.
+  // Modern iOS Safari and Android Chrome automatically apply EXIF orientation
+  // when rendering an <img> or when calling drawImage() — naturalWidth/Height
+  // already reflect the corrected (visual) dimensions.  We therefore just draw
+  // straight onto a canvas sized to naturalWidth × naturalHeight; the browser
+  // handles the rotation.  The resulting toDataURL() JPEG has correct upright
+  // pixels with no EXIF orientation tag, so no further rotation is needed.
+  function compressImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file)
+      const img = new Image()
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片解码失败')) }
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        const MAX = 1200
+        let w = img.naturalWidth
+        let h = img.naturalHeight
+        if (w > MAX || h > MAX) {
+          if (w >= h) { h = Math.round(h * MAX / w); w = MAX }
+          else        { w = Math.round(w * MAX / h); h = MAX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = w; canvas.height = h
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', 0.88))
+      }
+      img.src = url
+    })
+  }
+
+  // Open file picker / camera
+  function openPicker() {
+    fileInput.click()
+  }
+
+  previewWrap.addEventListener('click', () => {
+    // If no image yet, open picker; if image present the retake overlay handles it visually
+    // but a tap anywhere still re-opens the picker so the user can retake
+    openPicker()
+  })
+  captureBtn.addEventListener('click', openPicker)
+  retakeBtn.addEventListener('click', () => { resetToCapture(); openPicker() })
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files && fileInput.files[0]
+    if (!file) return
+    setStatus('正在处理图片…')
+    try {
+      const dataUrl = await compressImage(file)
+      showImage(dataUrl)
+    } catch (e) {
+      setStatus('图片处理失败：' + (e.message || '未知错误'), 'error')
+      fileInput.value = ''
+    }
+  })
+
+  sendBtn.addEventListener('click', async () => {
+    if (!currentDataUrl) return
+    sendBtn.disabled = true
+    retakeBtn.disabled = true
+    setStatus('正在发送…')
+    try {
+      const res = await fetch(`${baseUrl}/upload-cover?token=${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl: currentDataUrl, session }),
+      })
+      if (!res.ok) throw new Error(`服务器返回 ${res.status}`)
+      // Show done screen
+      previewWrap.style.display = 'none'
+      actionRow.classList.remove('visible')
+      captureBtn.classList.remove('visible')
+      setStatus('')
+      doneScreen.classList.add('visible')
+    } catch (e) {
+      setStatus('发送失败：' + (e.message || '请检查网络连接'), 'error')
+      sendBtn.disabled = false
+      retakeBtn.disabled = false
+    }
+  })
+})()
+</script>
+</body>
+</html>

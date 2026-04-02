@@ -1,0 +1,94 @@
+.weather-widget {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.weather-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Day Mode Colors */
+.weather-svg {
+  --w-sun: #F59E0B;
+  --w-cloud-base: #94A3B8;
+  --w-cloud-top: #CBD5E1;
+  --w-rain: #3B82F6;
+  --w-snow: #94A3B8;
+}
+
+/* Dark Mode Colors */
+.dark .weather-svg {
+  --w-sun: #FBBF24;
+  --w-cloud-base: #64748B;
+  --w-cloud-top: #94A3B8;
+  --w-rain: #60A5FA;
+  --w-snow: #F1F5F9;
+}
+
+/* Sunny */
+@keyframes spin-slow {
+  100% { transform: rotate(360deg); }
+}
+.w-sun-body {
+  fill: var(--w-sun);
+}
+.w-sun-rays {
+  stroke: var(--w-sun);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transform-origin: 50px 50px;
+  animation: spin-slow 12s linear infinite;
+}
+
+/* Clouds */
+@keyframes float-cloud {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.w-cloud-back {
+  fill: var(--w-cloud-base);
+  animation: float-cloud 4s ease-in-out infinite;
+}
+.w-cloud-front {
+  fill: var(--w-cloud-top);
+  animation: float-cloud 4s ease-in-out infinite;
+  animation-delay: -2s;
+}
+
+/* Rain */
+@keyframes fall-rain {
+  0% { transform: translateY(-5px); opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(15px); opacity: 0; }
+}
+.w-rain-drop {
+  stroke: var(--w-rain);
+  stroke-width: 4;
+  stroke-linecap: round;
+  animation: fall-rain 1s linear infinite;
+}
+.w-rain-1 { animation-delay: 0.1s; }
+.w-rain-2 { animation-delay: 0.5s; }
+.w-rain-3 { animation-delay: 0.8s; }
+
+/* Snow */
+@keyframes fall-snow {
+  0% { transform: translateY(-5px) rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(15px) rotate(180deg); opacity: 0; }
+}
+.w-snow-flake {
+  fill: var(--w-snow);
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: fall-snow 2.5s linear infinite;
+}
+.w-snow-1 { animation-delay: 0s; }
+.w-snow-2 { animation-delay: 1.2s; }
+.w-snow-3 { animation-delay: 0.6s; }
+
