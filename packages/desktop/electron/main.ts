@@ -11,6 +11,10 @@ import { setupCompanion } from './companion-server'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// Ensure userData is always stored under "TomeKeep" regardless of the npm
+// package name (@tomekeep/desktop). Must be called before app.getPath('userData').
+app.setName('TomeKeep')
+
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(__dirname, '../public')
 

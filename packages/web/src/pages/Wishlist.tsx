@@ -1,0 +1,433 @@
+// src/pages/Wishlist.tsx
+// PWA wishlist page.
+// Reads from IndexedDB cache; writes go through the API and refresh the cache.
+
+import { useState, useEffect, useCallback } from 'react'
+import { useLang, type DictKey } from '../lib/i18n.tsx'
+import { api } from '../lib/api.ts'
+import {
+  getCachedWishlist,
+  upsertCachedWishlist,
+  type CachedWishlistItem,
+} from '../lib/db-cache.ts'
+import { AddFormCard } from '../components/AddFormCard.tsx'
+import { PullToRefresh } from '../components/PullToRefresh.tsx'
+import { runSync } from '../lib/sync.ts'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type WishFilter = 'all' | 'pending'
+type WishSort = 'added' | 'priority' | 'title'
+
+const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function sortWishlist(items: CachedWishlistItem[], key: WishSort): CachedWishlistItem[] {
+  return [...items].sort((a, b) => {
+    if (key === 'priority') {
+      const pa = priorityOrder[a.priority] ?? 99
+      const pb = priorityOrder[b.priority] ?? 99
+      if (pa !== pb) return pa - pb
+    }
+    if (key === 'title') return a.title.localeCompare(b.title)
+    // 'added' — newest first
+    return b.added_at.localeCompare(a.added_at)
+  })
+}
+
+function filterWishlist(
+  items: CachedWishlistItem[],
+  filter: WishFilter,
+  query: string,
+): CachedWishlistItem[] {
+  const q = query.trim().toLowerCase()
+  return items.filter(item => {
+    if (filter === 'pending' && !item.pending_buy) return false
+    if (q) {
+      const haystack = [item.title, item.author, item.isbn ?? '', item.publisher ?? '']
+        .join(' ')
+        .toLowerCase()
+      if (!haystack.includes(q)) return false
+    }
+    return true
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function Wishlist() {
+  const { t } = useLang()
+
+  const [items, setItems] = useState<CachedWishlistItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<WishFilter>('all')
+  const [sort, setSort] = useState<WishSort>('added')
+
+  const [showAdd, setShowAdd] = useState(false)
+  const [editItem, setEditItem] = useState<CachedWishlistItem | null>(null)
+
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [movingId, setMovingId] = useState<string | null>(null)
+
+  // ---------------------------------------------------------------------------
+  // Load from cache
+  // ---------------------------------------------------------------------------
+
+  const loadFromCache = useCallback(async () => {
+    const ws = await getCachedWishlist()
+    setItems(ws)
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    loadFromCache().finally(() => setLoading(false))
+  }, [loadFromCache])
+
+  // ---------------------------------------------------------------------------
+  // Pull-to-refresh
+  // ---------------------------------------------------------------------------
+
+  const handleRefresh = useCallback(async () => {
+    await runSync()
+    await loadFromCache()
+  }, [loadFromCache])
+
+  // ---------------------------------------------------------------------------
+  // Toggle pending_buy
+  // ---------------------------------------------------------------------------
+
+  async function handleTogglePending(item: CachedWishlistItem) {
+    const next = !item.pending_buy
+    const optimistic: CachedWishlistItem = {
+      ...item,
+      pending_buy: next,
+      updated_at: new Date().toISOString(),
+    }
+    setItems(prev => prev.map(w => (w.id === item.id ? optimistic : w)))
+
+    try {
+      const updated = await api.put<CachedWishlistItem>(`/wishlist/${item.id}`, {
+        pending_buy: next,
+      })
+      await upsertCachedWishlist([updated])
+      setItems(prev => prev.map(w => (w.id === updated.id ? updated : w)))
+    } catch {
+      // Roll back
+      setItems(prev => prev.map(w => (w.id === item.id ? item : w)))
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Move to inventory
+  // ---------------------------------------------------------------------------
+
+  async function handleMoveToInventory(item: CachedWishlistItem) {
+    setMovingId(item.id)
+    try {
+      await api.post(`/wishlist/${item.id}/move-to-inventory`, {})
+      // Mark soft-deleted in cache
+      const tombstone: CachedWishlistItem = {
+        ...item,
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      await upsertCachedWishlist([tombstone])
+      setItems(prev => prev.filter(w => w.id !== item.id))
+    } catch {
+      // leave as-is
+    } finally {
+      setMovingId(null)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Delete
+  // ---------------------------------------------------------------------------
+
+  async function handleDelete(item: CachedWishlistItem) {
+    if (!window.confirm(t('confirm_remove_wishlist'))) return
+    setDeletingId(item.id)
+    try {
+      await api.delete(`/wishlist/${item.id}`)
+      const tombstone: CachedWishlistItem = {
+        ...item,
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      await upsertCachedWishlist([tombstone])
+      setItems(prev => prev.filter(w => w.id !== item.id))
+    } catch {
+      // leave as-is
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // After add / edit
+  // ---------------------------------------------------------------------------
+
+  async function handleSaved(saved: CachedWishlistItem) {
+    await upsertCachedWishlist([saved])
+    await loadFromCache()
+    setShowAdd(false)
+    setEditItem(null)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Derived data
+  // ---------------------------------------------------------------------------
+
+  const sorted = sortWishlist(items, sort)
+  const visible = filterWishlist(sorted, filter, query)
+  const pendingCount = items.filter(w => w.pending_buy).length
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  return (
+    <PullToRefresh onRefresh={handleRefresh}>
+      <div className="min-h-full pb-6">
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 space-y-2">
+          {/* Title + add */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                {t('page_wishlist')}
+              </h1>
+              {pendingCount > 0 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {t('filter_pending')}: {pendingCount}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm rounded-lg transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              {t('add_to_wishlist')}
+            </button>
+          </div>
+
+          {/* Search */}
+          <input
+            type="search"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder={t('search_placeholder')}
+            className="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+
+          {/* Filter + sort */}
+          <div className="flex items-center gap-2">
+            {(['all', 'pending'] as WishFilter[]).map(f => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`flex-shrink-0 px-3 py-1 text-xs rounded-full border transition-colors ${
+                  filter === f
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                {f === 'all' ? t('filter_all') : t('filter_pending')}
+              </button>
+            ))}
+            <div className="ml-auto">
+              <select
+                value={sort}
+                onChange={e => setSort(e.target.value as WishSort)}
+                className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
+              >
+                <option value="added">{t('sort_added')}</option>
+                <option value="priority">{t('sort_priority')}</option>
+                <option value="title">{t('sort_title')}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Add / Edit form */}
+        {(showAdd || editItem) && (
+          <div className="px-4 pt-4">
+            <AddFormCard
+              mode="wishlist"
+              initial={editItem ?? undefined}
+              onSaved={(item: CachedWishlistItem) => { void handleSaved(item) }}
+              onCancel={() => { setShowAdd(false); setEditItem(null) }}
+            />
+          </div>
+        )}
+
+        {/* Wishlist items */}
+        <div className="px-4 pt-3 space-y-2">
+          {loading && (
+            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12">…</p>
+          )}
+          {!loading && visible.length === 0 && (
+            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12">
+              {items.length === 0 ? t('empty_wishlist') : t('empty_filter')}
+            </p>
+          )}
+          {visible.map(item => (
+            <WishCard
+              key={item.id}
+              item={item}
+              deleting={deletingId === item.id}
+              moving={movingId === item.id}
+              onTogglePending={() => { void handleTogglePending(item) }}
+              onMoveToInventory={() => { void handleMoveToInventory(item) }}
+              onEdit={() => setEditItem(item)}
+              onDelete={() => { void handleDelete(item) }}
+              t={t}
+            />
+          ))}
+        </div>
+      </div>
+    </PullToRefresh>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// WishCard
+// ---------------------------------------------------------------------------
+
+interface WishCardProps {
+  item: CachedWishlistItem
+  deleting: boolean
+  moving: boolean
+  onTogglePending: () => void
+  onMoveToInventory: () => void
+  onEdit: () => void
+  onDelete: () => void
+  t: (key: DictKey, vars?: Record<string, string | number>) => string
+}
+
+function WishCard({
+  item,
+  deleting,
+  moving,
+  onTogglePending,
+  onMoveToInventory,
+  onEdit,
+  onDelete,
+  t,
+}: WishCardProps) {
+  const isBusy = deleting || moving
+
+  return (
+    <div
+      className={`flex gap-3 bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm border border-gray-100 dark:border-gray-700 transition-opacity ${isBusy ? 'opacity-40 pointer-events-none' : ''}`}
+    >
+      {/* Cover */}
+      <div className="flex-shrink-0 w-12 h-16 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-700">
+        {item.cover_key ? (
+          <img
+            src={`/api/covers/${item.cover_key}`}
+            alt={item.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <svg className="w-5 h-5 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z" />
+            </svg>
+          </div>
+        )}
+      </div>
+
+      {/* Meta */}
+      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
+            {item.title}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+            {item.author}
+            {item.publisher && ` · ${item.publisher}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          {/* Priority badge */}
+          <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+            item.priority === 'high'
+              ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+              : item.priority === 'medium'
+              ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400'
+              : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+          }`}>
+            {item.priority}
+          </span>
+          {/* Pending buy badge */}
+          {item.pending_buy && (
+            <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+              {t('pending_buy')}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex flex-col items-center justify-between flex-shrink-0 gap-1">
+        {/* Toggle pending buy */}
+        <button
+          onClick={onTogglePending}
+          title={item.pending_buy ? t('not_pending_buy') : t('pending_buy')}
+          className={`p-1 rounded transition-colors ${item.pending_buy ? 'text-blue-500' : 'text-gray-300 dark:text-gray-600 hover:text-blue-400'}`}
+        >
+          <svg className="w-4 h-4" fill={item.pending_buy ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+          </svg>
+        </button>
+
+        {/* Move to inventory */}
+        <button
+          onClick={onMoveToInventory}
+          title={t('move_to_library')}
+          className="p-1 rounded text-gray-400 dark:text-gray-500 hover:text-green-500 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+          </svg>
+        </button>
+
+        {/* Edit */}
+        <button
+          onClick={onEdit}
+          title={t('edit')}
+          className="p-1 rounded text-gray-400 dark:text-gray-500 hover:text-blue-500 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+          </svg>
+        </button>
+
+        {/* Delete */}
+        <button
+          onClick={onDelete}
+          title={t('remove')}
+          className="p-1 rounded text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+}
