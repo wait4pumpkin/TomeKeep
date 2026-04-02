@@ -13,7 +13,7 @@ type LookupIsbnResult =
 
 type LookupDoubanResult =
   | { ok: true; value: BookMetadata }
-  | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
+  | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' | 'captcha' }
 
 export type { DoubanSearchHit }
 
@@ -24,10 +24,10 @@ type SearchDoubanResult =
 /**
  * Result from the unified ISBN waterfall (Douban → OpenLibrary → isbnsearch).
  * `source` tells the caller which service succeeded.
- * `doubanUrl` is set when source === 'douban' so the caller can persist it.
+ * `detailUrl` is set when source === 'douban' so the caller can persist it.
  */
 export type WaterfallResult =
-  | { ok: true; value: BookMetadata; source: 'douban' | 'openlibrary' | 'isbnsearch'; doubanUrl?: string }
+  | { ok: true; value: BookMetadata; source: 'douban' | 'openlibrary' | 'isbnsearch'; detailUrl?: string }
   | { ok: false; error: 'not_found' | 'captcha' }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +161,18 @@ export function setupMetadata() {
   ipcMain.handle('meta:lookup-douban', async (_event, input: string): Promise<LookupDoubanResult> => {
     if (typeof input !== 'string') return { ok: false, error: 'invalid_url' }
 
+    // ── isbnsearch.org URL ──────────────────────────────────────────────────
+    // e.g. https://isbnsearch.org/isbn/9780452265059
+    const isbnSearchMatch = input.trim().match(/isbnsearch\.org\/isbn\/(\d{10,13})/)
+    if (isbnSearchMatch) {
+      const isbn13 = isbnSearchMatch[1]
+      console.log('[meta:lookup-douban] isbnsearch URL detected, isbn=%s', isbn13)
+      const result = await fetchIsbnSearch(isbn13)
+      if (!result.ok) return { ok: false, error: result.error === 'captcha' ? 'captcha' : result.error === 'not_found' ? 'not_found' : 'network' }
+      return result
+    }
+
+    // ── Douban subject URL ──────────────────────────────────────────────────
     const subject = extractDoubanSubjectId(input)
     console.log('[meta:lookup-douban] input=%s subjectId=%o', input, subject)
     if (!subject.ok) return { ok: false, error: 'invalid_url' }
@@ -211,7 +223,7 @@ export function setupMetadata() {
             const parsed = parseDoubanSubjectHtml(subjectHtml)
             if (parsed.ok) {
               console.log('[waterfall] douban hit for isbn=%s', isbn13)
-              return { ok: true, value: parsed.value, source: 'douban', doubanUrl: subjectUrl }
+              return { ok: true, value: parsed.value, source: 'douban', detailUrl: subjectUrl }
             }
           }
         }

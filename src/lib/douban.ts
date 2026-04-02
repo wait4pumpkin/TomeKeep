@@ -1,5 +1,6 @@
 import { normalizeIsbn, toIsbn13 } from './isbn'
 import type { BookMetadata } from './openLibrary'
+import { toSimplified } from './hanzi'
 
 export type DoubanSubjectIdResult =
   | { ok: true; value: string }
@@ -171,16 +172,18 @@ function normalizePeopleList(input: string): string {
     .map(x => normalizeWhitespace(x))
     .filter(Boolean)
   if (parts.length === 0) return ''
-  if (parts.length === 1) return parts[0]
-  return parts.join(', ')
+  if (parts.length === 1) return toSimplified(parts[0])
+  return toSimplified(parts.join(', '))
 }
 
 function normalizeTitle(input: string): string {
   const v = normalizeWhitespace(input)
-  return v
-    .replace(/\s*\(豆瓣\)\s*$/u, '')
-    .replace(/\s*-\s*豆瓣\s*$/u, '')
-    .trim()
+  return toSimplified(
+    v
+      .replace(/\s*\(豆瓣\)\s*$/u, '')
+      .replace(/\s*-\s*豆瓣\s*$/u, '')
+      .trim()
+  )
 }
 
 function escapeRegExp(input: string): string {

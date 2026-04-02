@@ -158,12 +158,17 @@ const dict = {
 
   confirm_remove_wishlist: { zh: '确定要从心愿单中移除吗？', en: 'Remove from wishlist?' },
 
+  pending_buy:     { zh: '待买',   en: 'Want to buy' },
+  not_pending_buy: { zh: '未标记', en: 'Not marked' },
+  move_to_library: { zh: '已购，移入书库', en: 'Purchased — move to library' },
+  filter_pending:  { zh: '待买',   en: 'Pending' },
+
   compare_prices: { zh: '比价', en: 'Compare prices' },
   remove:         { zh: '移除', en: 'Remove' },
 
   price_fetching: { zh: '采价中…', en: 'Fetching price…' },
 
-  channel_bookschina: { zh: '中图网', en: 'BookSchina' },
+  channel_bookschina: { zh: '中图', en: 'BookSchina' },
   channel_jd:         { zh: '京东',   en: 'JD' },
   channel_dangdang:   { zh: '当当',   en: 'Dangdang' },
 
@@ -212,6 +217,22 @@ const dict = {
   remove_from_library: { zh: '从书库移除', en: 'Remove from library' },
   reprice:   { zh: '重新采价', en: 'Re-fetch price' },
   get_price: { zh: '去采价',   en: 'Fetch price' },
+
+  // Auto-pricing
+  auto_pricing:            { zh: '自动采价中…',              en: 'Auto-pricing…' },
+  refresh_all:             { zh: '刷新所有渠道价格',           en: 'Refresh all channel prices' },
+  refresh_channel:         { zh: '刷新价格',                  en: 'Refresh price' },
+  refresh_channel_loading: { zh: '刷新中…',                   en: 'Refreshing…' },
+  reprice_all:             { zh: '自动更新所有渠道价格',       en: 'Auto-refresh all channel prices' },
+  auto_capture_channel:    { zh: '自动采价',                  en: 'Auto-price' },
+  manual_capture_channel:  { zh: '手动采价',                  en: 'Manual price' },
+  source_auto_active:      { zh: '当前为自动采集',             en: 'Currently auto-fetched' },
+  source_manual_active:    { zh: '当前为手动采集',             en: 'Currently manually set' },
+  source_auto_inactive:    { zh: '切换为自动采价',             en: 'Switch to auto-price' },
+  source_manual_inactive:  { zh: '切换为手动采价',             en: 'Switch to manual price' },
+  price_delisted:     { zh: '已下架',                   en: 'Delisted' },
+  manual_source_tip:  { zh: '手动采集 · 点击移除标志',   en: 'Manual capture · click to remove flag' },
+  remove_manual_flag: { zh: '移除手动标志',              en: 'Remove manual flag' },
   done:            { zh: '完成', en: 'Done' },
   refetch_cover:         { zh: '重新获取封面', en: 'Re-fetch cover' },
   refetch_cover_loading: { zh: '获取中…',      en: 'Fetching…' },

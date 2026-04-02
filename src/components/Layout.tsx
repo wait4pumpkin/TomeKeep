@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { WeatherIcon } from './WeatherIcon'
+import { DynamicBrandIcon } from './DynamicBrandIcon'
 import { applyTheme, cycleTheme, getStoredTheme, setStoredTheme } from '../lib/theme'
 import type { ThemeMode } from '../lib/theme'
 import { fetchWeather } from '../lib/weather'
-import type { WeatherState } from '../lib/weather'
+import type { WeatherData } from '../lib/weather'
 import type { UserProfile } from '../../electron/db'
 import { useLang } from '../lib/i18n'
 
@@ -82,30 +82,11 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 // Combined logo: book-stack SVG + animated weather badge at bottom-right
 // ---------------------------------------------------------------------------
 
-function LogoBadge({ weather }: { weather: WeatherState | null }) {
-  const { t } = useLang()
-  const tipLabel = weather
-    ? `TomeKeep · ${weather.condition.replace(/-/g, ' ')}${weather.isDay ? '' : ` · ${t('logo_night')}`}`
-    : 'TomeKeep'
-
+function LogoBadge() {
   return (
-    <Tip label={tipLabel}>
+    <Tip label="TomeKeep">
       <div className="relative w-10 h-10 flex items-center justify-center select-none">
-        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-10 h-10">
-          <rect x="8" y="10" width="17" height="22" rx="2" fill="#93C5FD" stroke="#3B82F6" strokeWidth="1" />
-          <rect x="12" y="7" width="17" height="22" rx="2" fill="#FDE68A" stroke="#F59E0B" strokeWidth="1" />
-          <rect x="15" y="4" width="16" height="24" rx="2" fill="#F9FAFB" stroke="#9CA3AF" strokeWidth="1" />
-          <line x1="18" y1="10" x2="28" y2="10" stroke="#D1D5DB" strokeWidth="1" strokeLinecap="round" />
-          <line x1="18" y1="13" x2="28" y2="13" stroke="#D1D5DB" strokeWidth="1" strokeLinecap="round" />
-          <line x1="18" y1="16" x2="25" y2="16" stroke="#D1D5DB" strokeWidth="1" strokeLinecap="round" />
-          <text x="23" y="26" textAnchor="middle" fontSize="7" fontWeight="bold" fill="#374151" fontFamily="system-ui,sans-serif">TK</text>
-        </svg>
-
-        {weather && (
-          <div className="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-white dark:bg-gray-800 ring-1 ring-gray-200 dark:ring-gray-600 flex items-center justify-center overflow-visible">
-            <WeatherIcon className="w-[14px] h-[14px]" />
-          </div>
-        )}
+        <DynamicBrandIcon size={40} />
       </div>
     </Tip>
   )
@@ -311,7 +292,7 @@ function UserSwitcher() {
 export function Layout() {
   const { lang, t, setLang } = useLang()
   const [theme, setTheme] = useState<ThemeMode>(getStoredTheme)
-  const [weather, setWeather] = useState<WeatherState | null>(null)
+  const [weather, setWeather] = useState<WeatherData | null>(null)
   const [watermarkName, setWatermarkName] = useState<string | null>(null)
   const [doubanLoggedIn, setDoubanLoggedIn] = useState(false)
   const [doubanLoggingIn, setDoubanLoggingIn] = useState(false)
@@ -345,6 +326,11 @@ export function Layout() {
 
   useEffect(() => {
     fetchWeather().then(setWeather).catch(() => undefined)
+    const interval = setInterval(
+      () => { fetchWeather().then(setWeather).catch(() => undefined) },
+      1000 * 60 * 30, // 30 minutes
+    )
+    return () => clearInterval(interval)
   }, [])
 
   function handleThemeCycle() {
@@ -375,8 +361,8 @@ export function Layout() {
       {/* Narrow icon-only sidebar */}
       <aside className="w-16 bg-white dark:bg-gray-800 shadow-md flex flex-col items-center py-4 gap-1 border-r border-gray-100 dark:border-gray-700 flex-shrink-0">
 
-        {/* Combined logo + weather badge */}
-        <LogoBadge weather={weather} />
+        {/* Combined logo */}
+        <LogoBadge />
 
         <div className="my-2 w-8 border-t border-gray-100 dark:border-gray-700" />
 
@@ -445,7 +431,7 @@ export function Layout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto p-8 bg-gray-50 dark:bg-gray-900">
-        <Outlet context={{ watermarkName }} />
+        <Outlet context={{ watermarkName, weather }} />
       </main>
     </div>
   )

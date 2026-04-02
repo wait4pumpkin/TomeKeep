@@ -1,4 +1,5 @@
 import type { BookMetadata } from './openLibrary'
+import { toSimplified } from './hanzi'
 
 export type BookDraft = {
   title?: string
@@ -12,8 +13,8 @@ export function mergeBookDraftWithMetadata(draft: BookDraft, meta: BookMetadata)
   return {
     ...draft,
     isbn: draft.isbn ?? meta.isbn13,
-    title: draft.title?.trim() ? draft.title : meta.title ?? draft.title,
-    author: draft.author?.trim() ? draft.author : meta.author ?? draft.author,
+    title: toSimplified(draft.title?.trim() ? draft.title : meta.title ?? draft.title ?? ''),
+    author: toSimplified(draft.author?.trim() ? draft.author : meta.author ?? draft.author ?? ''),
     publisher: draft.publisher?.trim() ? draft.publisher : meta.publisher ?? draft.publisher,
     coverUrl: draft.coverUrl?.trim() ? draft.coverUrl : meta.coverUrl ?? draft.coverUrl,
   }

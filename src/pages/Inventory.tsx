@@ -12,9 +12,12 @@ import { parseIsbnSemantics, parseIsbnPublisher, normalizeIsbn, toIsbn13 } from 
 import { isPlaceholderCoverUrl } from '../lib/isbnSearch'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
 import { normalizeAuthor } from '../lib/author'
+import { toSimplified } from '../lib/hanzi'
 import { tagColor } from '../lib/tagColor'
 import type { OcrResult } from '../lib/coverOcr'
 import { extractCoverText } from '../lib/coverOcr'
+import type { WeatherData } from '../lib/weather'
+import { WeatherWidget } from '../components/WeatherWidget'
 
 type BookStatus = 'unread' | 'reading' | 'read'
 type SortKey = 'addedAt' | 'completedAt' | 'title' | 'author'
@@ -22,7 +25,7 @@ type SortDir = 'asc' | 'desc'
 type ViewMode = 'detail' | 'compact'
 
 export function Inventory() {
-  const { watermarkName } = useOutletContext<{ watermarkName: string | null }>()
+  const { watermarkName, weather } = useOutletContext<{ watermarkName: string | null; weather: WeatherData | null }>()
   const { lang, t } = useLang()
   const [books, setBooks] = useState<Book[]>([])
   // Refs that always hold the latest values without being closure dependencies.
@@ -42,15 +45,10 @@ export function Inventory() {
   const [sortKey, setSortKey] = useState<SortKey>('addedAt')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
-  // View mode — persisted in localStorage
-  const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    (localStorage.getItem('inventoryViewMode') as ViewMode | null) ?? 'detail'
-  )
-  // Compact view column count — persisted in localStorage (range 8–20, default 8)
-  const [compactCols, setCompactCols] = useState<number>(() => {
-    const stored = Number(localStorage.getItem('inventoryCompactCols'))
-    return stored >= 8 && stored <= 20 ? stored : 8
-  })
+  // View mode — default; overwritten from per-user prefs on mount
+  const [viewMode, setViewMode] = useState<ViewMode>('detail')
+  // Compact view column count — default; overwritten from per-user prefs on mount
+  const [compactCols, setCompactCols] = useState<number>(8)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [closingId, setClosingId] = useState<string | null>(null)
   const closingIdRef = useRef<string | null>(null)
@@ -59,7 +57,7 @@ export function Inventory() {
 
   // Inline edit state for expanded compact panel
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<{ title: string; author: string; publisher: string; isbn: string; doubanUrl: string; coverDataUrl: string }>({ title: '', author: '', publisher: '', isbn: '', doubanUrl: '', coverDataUrl: '' })
+  const [editDraft, setEditDraft] = useState<{ title: string; author: string; publisher: string; isbn: string; detailUrl: string; coverDataUrl: string }>({ title: '', author: '', publisher: '', isbn: '', detailUrl: '', coverDataUrl: '' })
   // Edit-panel cover crop / OCR state (mirrors ManualAddForm pattern)
   const [editCropMode, setEditCropMode] = useState<'file' | 'camera' | null>(null)
   const [editPendingFile, setEditPendingFile] = useState<File | undefined>(undefined)
@@ -125,14 +123,22 @@ export function Inventory() {
 
   // Persist viewMode and reset expandedId when it changes
   useEffect(() => {
-    localStorage.setItem('inventoryViewMode', viewMode)
     setExpandedId(null)
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { inventoryViewMode: viewMode })
   }, [viewMode])
 
   // Persist compactCols when it changes
   useEffect(() => {
-    localStorage.setItem('inventoryCompactCols', String(compactCols))
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { inventoryCompactCols: compactCols })
   }, [compactCols])
+
+  // Persist sortKey / sortDir when they change
+  useEffect(() => {
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { inventorySortKey: sortKey })
+  }, [sortKey])
+  useEffect(() => {
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { inventorySortDir: sortDir })
+  }, [sortDir])
 
   // Toggle compact card expand with close animation
   function handleToggleExpand(bookId: string) {
@@ -213,7 +219,7 @@ export function Inventory() {
     if (isDouban) {
       const res = await window.meta.lookupDouban(text)
       if (res.ok) {
-        setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), doubanUrl: text } as Partial<Book>))
+        setNewBook(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), detailUrl: text } as Partial<Book>))
         setClipStatus({ state: 'success', message: t('filled_douban_dot') })
         setAddMode('manual')
         return
@@ -240,7 +246,7 @@ export function Inventory() {
             setNewBook(prev => ({
               ...mergeBookDraftWithMetadata(prev, result.value),
               isbn: isbn13,
-              ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+              ...(result.source === 'douban' && result.detailUrl ? { detailUrl: result.detailUrl } : {}),
             } as Partial<Book>))
             setClipStatus({ state: 'success', message: t('filled_isbn_dot') })
             setAddMode('manual')
@@ -438,7 +444,7 @@ export function Inventory() {
             `https://book.douban.com/subject/${hit.subjectId}/`
           )
           if (doubanRes.ok) {
-            await commitBookFromRef({ ...doubanRes.value, isbn: isbn13, doubanUrl: `https://book.douban.com/subject/${hit.subjectId}/` })
+            await commitBookFromRef({ ...doubanRes.value, isbn: isbn13, detailUrl: `https://book.douban.com/subject/${hit.subjectId}/` })
             ack?.(isbn13, true, doubanRes.value.title)
             return
           }
@@ -497,7 +503,7 @@ export function Inventory() {
             ...merged,
             isbn: isbn13,
             coverUrl,
-            ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+            ...(result.source === 'douban' && result.detailUrl ? { detailUrl: result.detailUrl } : {}),
           }
           await window.db.updateBook(updated)
           setBooks(prev => prev.map(b => b.id === existing.id ? updated : b))
@@ -525,7 +531,7 @@ export function Inventory() {
     const { status: _status, ...rest } = draft as Book
     const bookToAdd = {
       ...rest,
-      author: normalizeAuthor(draft.author),
+      author: normalizeAuthor(toSimplified(draft.author ?? '')),
       coverUrl,
       id,
       addedAt: draft.addedAt ?? new Date().toISOString(),
@@ -544,6 +550,19 @@ export function Inventory() {
     setCompletedAtMap(buildCompletedAtMap(states))
   }
 
+  // Apply persisted UI prefs for the inventory page, or reset to defaults when prefs is null
+  function applyInventoryPrefs(prefs: import('../../electron/db').UIPreferences | null) {
+    setSortKey(prefs?.inventorySortKey as SortKey ?? 'addedAt')
+    setSortDir(prefs?.inventorySortDir ?? 'desc')
+    setViewMode(prefs?.inventoryViewMode ?? 'detail')
+    if (prefs?.inventoryCompactCols != null) {
+      const v = prefs.inventoryCompactCols
+      setCompactCols(v >= 8 && v <= 20 ? v : 8)
+    } else {
+      setCompactCols(8)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     async function init() {
@@ -559,10 +578,14 @@ export function Inventory() {
       if (activeUser) {
         setActiveUserId(activeUser.id)
         activeUserIdRef.current = activeUser.id
-        const states = await window.db.getReadingStates(activeUser.id)
+        const [states, prefs] = await Promise.all([
+          window.db.getReadingStates(activeUser.id),
+          window.db.getUiPrefs(activeUser.id),
+        ])
         if (!cancelled) {
           setStatusMap(buildStatusMap(states))
           setCompletedAtMap(buildCompletedAtMap(states))
+          applyInventoryPrefs(prefs)
         }
       }
     }
@@ -592,7 +615,7 @@ export function Inventory() {
           ...merged,
           isbn: isbn13,
           coverUrl,
-          ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+          ...(result.source === 'douban' && result.detailUrl ? { detailUrl: result.detailUrl } : {}),
         }
         await window.db.updateBook(updated)
         setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
@@ -656,6 +679,9 @@ export function Inventory() {
         setActiveUserId(user.id)
         activeUserIdRef.current = user.id
         void loadReadingStates(user.id)
+        void window.db.getUiPrefs(user.id).then(prefs => {
+          applyInventoryPrefs(prefs)
+        })
       } else {
         setActiveUserId(null)
         activeUserIdRef.current = null
@@ -690,7 +716,7 @@ export function Inventory() {
     const { status: _status, ...rest } = draft as Book
     const bookToAdd = {
       ...rest,
-      author: normalizeAuthor(draft.author),
+      author: normalizeAuthor(toSimplified(draft.author ?? '')),
       coverUrl,
       id,
       addedAt: draft.addedAt ?? new Date().toISOString(),
@@ -778,11 +804,11 @@ export function Inventory() {
     }
     const updated: Book = {
       ...book,
-      title: editDraft.title.trim() || book.title,
-      author: normalizeAuthor(editDraft.author.trim() || book.author),
+      title: toSimplified(editDraft.title.trim() || book.title),
+      author: normalizeAuthor(toSimplified(editDraft.author.trim() || book.author)),
       publisher: editDraft.publisher.trim() || book.publisher,
       isbn: editDraft.isbn.trim() || book.isbn,
-      doubanUrl: editDraft.doubanUrl.trim() || undefined,
+      detailUrl: editDraft.detailUrl.trim() || undefined,
       coverUrl,
     }
     setBooks(prev => prev.map(b => b.id === book.id ? updated : b))
@@ -793,48 +819,75 @@ export function Inventory() {
   }
 
   /**
-   * Re-runs the full waterfall (Douban → OpenLibrary → isbnsearch) for a book
-   * that is currently open in the edit panel, updating only the coverUrl.
-   * If isbnsearch triggers a captcha, opens the resolver popup before retrying.
+   * Re-runs cover lookup for the book currently open in the edit panel.
+   * Priority:
+   *   1. detailUrl (edit draft or persisted) — direct Douban subject fetch
+   *   2. ISBN waterfall (Douban → OpenLibrary → isbnsearch) as fallback
+   * Updates only the coverUrl field on success.
    */
   async function handleRefetchCover(book: Book) {
+    const detailUrl = editDraft.detailUrl.trim() || book.detailUrl
     const isbn13 = editDraft.isbn.trim() || book.isbn
-    console.log('[refetch-cover] start isbn=%s bookId=%s', isbn13, book.id)
-    if (!isbn13) { console.log('[refetch-cover] abort: no isbn'); return }
+    console.log('[refetch-cover] start detailUrl=%s isbn=%s bookId=%s', detailUrl, isbn13, book.id)
+    if (!detailUrl && !isbn13) { console.log('[refetch-cover] abort: no detailUrl and no isbn'); return }
     setEditRefetchState('loading')
     try {
       let coverUrl: string | undefined
 
-      // Run the waterfall first — it may return a coverUrl from Douban or OpenLibrary
-      console.log('[refetch-cover] calling lookupWaterfall...')
-      let result = await window.meta.lookupWaterfall(isbn13)
-      console.log('[refetch-cover] waterfall result=%o', result)
-      let captchaAlreadyAttempted = false
-      if (!result.ok && result.error === 'captcha') {
-        captchaAlreadyAttempted = true
-        console.log('[refetch-cover] waterfall returned captcha, opening resolveCaptcha popup')
-        const captchaRes = await window.meta.resolveCaptcha(isbn13)
-        console.log('[refetch-cover] captcha (from waterfall) result=%o', captchaRes)
-        if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
-      }
-      if (result.ok && result.value.coverUrl && !isPlaceholderCoverUrl(result.value.coverUrl)) {
-        coverUrl = result.value.coverUrl
-        console.log('[refetch-cover] waterfall gave real coverUrl=%s', coverUrl)
-      } else if (result.ok) {
-        console.log('[refetch-cover] waterfall ok but coverUrl absent or placeholder: %s', result.value.coverUrl)
+      // ── Stage 1: detailUrl direct fetch (Douban subject page or isbnsearch) ─
+      if (detailUrl) {
+        console.log('[refetch-cover] trying detailUrl=%s', detailUrl)
+        const res = await window.meta.lookupDouban(detailUrl)
+        console.log('[refetch-cover] lookupDouban result=%o', res)
+        if (res.ok && res.value.coverUrl && !isPlaceholderCoverUrl(res.value.coverUrl)) {
+          coverUrl = res.value.coverUrl
+          console.log('[refetch-cover] detailUrl gave real coverUrl=%s', coverUrl)
+        } else if (!res.ok && res.error === 'captcha') {
+          // isbnsearch captcha — extract ISBN from URL or fall back to book isbn
+          const isbnFromUrl = detailUrl.match(/isbnsearch\.org\/isbn\/(\d{10,13})/)?.[1] ?? isbn13
+          if (isbnFromUrl) {
+            console.log('[refetch-cover] Stage 1 captcha (isbnsearch), opening resolveCaptcha isbn=%s', isbnFromUrl)
+            const captchaRes = await window.meta.resolveCaptcha(isbnFromUrl)
+            console.log('[refetch-cover] resolveCaptcha (Stage 1) result=%o', captchaRes)
+            if (captchaRes.ok && captchaRes.value.coverUrl && !isPlaceholderCoverUrl(captchaRes.value.coverUrl)) {
+              coverUrl = captchaRes.value.coverUrl
+              console.log('[refetch-cover] captcha (Stage 1) gave coverUrl=%s', coverUrl)
+            }
+          }
+        } else {
+          console.log('[refetch-cover] detailUrl fetch gave no usable cover, falling through to ISBN waterfall')
+        }
       }
 
-      // If the waterfall returned no usable cover (Douban/OpenLibrary had no image,
-      // or isbnsearch returned a placeholder URL), try isbnsearch via the captcha popup —
-      // unless we already went through the captcha path above.
-      console.log('[refetch-cover] coverUrl=%s captchaAlreadyAttempted=%s', coverUrl, captchaAlreadyAttempted)
-      if (!coverUrl && !captchaAlreadyAttempted) {
-        console.log('[refetch-cover] opening resolveCaptcha popup for isbnsearch...')
-        const captchaRes = await window.meta.resolveCaptcha(isbn13)
-        console.log('[refetch-cover] captcha (direct) result=%o', captchaRes)
-        if (captchaRes.ok && captchaRes.value.coverUrl) {
-          coverUrl = captchaRes.value.coverUrl
-          console.log('[refetch-cover] captcha gave coverUrl=%s', coverUrl)
+      // ── Stage 2: ISBN waterfall fallback ───────────────────────────────────
+      if (!coverUrl && isbn13) {
+        console.log('[refetch-cover] calling lookupWaterfall isbn=%s', isbn13)
+        let result = await window.meta.lookupWaterfall(isbn13)
+        console.log('[refetch-cover] waterfall result=%o', result)
+        let captchaAlreadyAttempted = false
+        if (!result.ok && result.error === 'captcha') {
+          captchaAlreadyAttempted = true
+          console.log('[refetch-cover] waterfall returned captcha, opening resolveCaptcha popup')
+          const captchaRes = await window.meta.resolveCaptcha(isbn13)
+          console.log('[refetch-cover] captcha (from waterfall) result=%o', captchaRes)
+          if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
+        }
+        if (result.ok && result.value.coverUrl && !isPlaceholderCoverUrl(result.value.coverUrl)) {
+          coverUrl = result.value.coverUrl
+          console.log('[refetch-cover] waterfall gave real coverUrl=%s', coverUrl)
+        } else if (result.ok) {
+          console.log('[refetch-cover] waterfall ok but coverUrl absent or placeholder: %s', result.value.coverUrl)
+        }
+
+        // Stage 2b: isbnsearch captcha popup if waterfall still gave nothing
+        if (!coverUrl && !captchaAlreadyAttempted) {
+          console.log('[refetch-cover] opening resolveCaptcha popup for isbnsearch...')
+          const captchaRes = await window.meta.resolveCaptcha(isbn13)
+          console.log('[refetch-cover] captcha (direct) result=%o', captchaRes)
+          if (captchaRes.ok && captchaRes.value.coverUrl) {
+            coverUrl = captchaRes.value.coverUrl
+            console.log('[refetch-cover] captcha gave coverUrl=%s', coverUrl)
+          }
         }
       }
 
@@ -852,7 +905,7 @@ export function Inventory() {
           return // success — finally block resets to 'idle'
         }
       }
-      // No cover found or placeholder rejected — show feedback for 2 s
+      // No cover found — show feedback for 2 s
       console.log('[refetch-cover] no usable cover found, showing none state')
       setEditRefetchState('none')
       setTimeout(() => setEditRefetchState('idle'), 2000)
@@ -867,10 +920,10 @@ export function Inventory() {
   }
 
   /** Trigger debounced Douban search based on current title + author fields. */
-  // Title click: prefer doubanUrl, then isbnsearch by ISBN, else show toast
+  // Title click: prefer detailUrl, then isbnsearch by ISBN, else show toast
   function handleBookTitleClick(book: Book) {
-    if (book.doubanUrl) {
-      void window.app.openExternal(book.doubanUrl)
+    if (book.detailUrl) {
+      void window.app.openExternal(book.detailUrl)
     } else if (book.isbn) {
       void window.app.openExternal(`https://isbnsearch.org/isbn/${book.isbn}`)
     } else {
@@ -957,8 +1010,8 @@ export function Inventory() {
                         if (ocr) {
                           setEditDraft(d => ({
                             ...d,
-                            title: d.title || ocr.title || d.title,
-                            author: d.author || ocr.author || d.author,
+                            title: d.title || (ocr.title ? toSimplified(ocr.title) : d.title),
+                            author: d.author || (ocr.author ? toSimplified(ocr.author) : d.author),
                             publisher: d.publisher || ocr.publisher || d.publisher,
                           }))
                         }
@@ -970,8 +1023,8 @@ export function Inventory() {
                       </svg>
                     </button>
                   )}
-                  {/* Re-fetch cover from metadata sources (waterfall + captcha popup) */}
-                  {(editDraft.isbn.trim() || book.isbn) && (
+                  {/* Re-fetch cover from metadata sources (detailUrl first, then ISBN waterfall) */}
+                  {(editDraft.detailUrl.trim() || book.detailUrl || editDraft.isbn.trim() || book.isbn) && (
                     <button
                       type="button"
                       title={
@@ -1103,8 +1156,8 @@ export function Inventory() {
                 />
                 <input
                   type="url"
-                  value={editDraft.doubanUrl}
-                  onChange={e => setEditDraft(d => ({ ...d, doubanUrl: e.target.value }))}
+                  value={editDraft.detailUrl}
+                  onChange={e => setEditDraft(d => ({ ...d, detailUrl: e.target.value }))}
                   placeholder={t('field_detail_url')}
                   className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                 />
@@ -1275,6 +1328,11 @@ export function Inventory() {
           )}
         </h2>
         <div className="flex items-center gap-2">
+          {weather?.state && (
+            <div className="h-9 flex items-center pr-2">
+              <WeatherWidget weather={weather.state} />
+            </div>
+          )}
           {watermarkName && watermarkName !== '匿名' && (
             <span className="h-9 flex items-center px-2 text-base font-medium text-gray-400 dark:text-gray-500 select-none">
               {watermarkName}
@@ -1500,9 +1558,9 @@ export function Inventory() {
           })}
         </div>
 
-        {/* View mode toggle */}
-        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 ml-2">
-          <CardTip label={t('detail_view')}>
+        {/* View mode toggle + compact slider, right-aligned as a column */}
+        <div className="flex flex-col items-end gap-1 shrink-0 ml-2">
+          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700">          <CardTip label={t('detail_view')}>
             <button
               type="button"
               onClick={() => setViewMode('detail')}
@@ -1542,10 +1600,11 @@ export function Inventory() {
               </svg>
             </button>
           </CardTip>
+          </div>
         </div>
       </div>
 
-      {/* Tag filter bar + compact column slider */}
+      {/* Tag filter bar — also shown in compact mode to host the column slider */}
       {(allTags.length > 0 || viewMode === 'compact') && (
         <div className="flex flex-wrap items-center gap-1.5">
           {/* "No tags" filter — matches books with an empty tags array */}
@@ -1608,7 +1667,6 @@ export function Inventory() {
               {t('clear_filter')}
             </button>
           )}
-          {/* Compact column-count slider — pushed to the far right */}
           {viewMode === 'compact' && (
             <input
               type="range"
@@ -1663,8 +1721,8 @@ export function Inventory() {
               setOcrState('done')
               setNewBook(prev => ({
                 ...prev,
-                title:     !prev.title     && ocr.title     ? ocr.title     : prev.title,
-                author:    !prev.author    && ocr.author    ? ocr.author    : prev.author,
+                title:     !prev.title     && ocr.title     ? toSimplified(ocr.title)     : prev.title,
+                author:    !prev.author    && ocr.author    ? toSimplified(ocr.author)    : prev.author,
                 publisher: !prev.publisher && ocr.publisher ? ocr.publisher : prev.publisher,
               }))
             }
@@ -1677,8 +1735,8 @@ export function Inventory() {
               setOcrState('done')
               setNewBook(prev => ({
                 ...prev,
-                title:     !prev.title     && ocr.title     ? ocr.title     : prev.title,
-                author:    !prev.author    && ocr.author    ? ocr.author    : prev.author,
+                title:     !prev.title     && ocr.title     ? toSimplified(ocr.title)     : prev.title,
+                author:    !prev.author    && ocr.author    ? toSimplified(ocr.author)    : prev.author,
                 publisher: !prev.publisher && ocr.publisher ? ocr.publisher : prev.publisher,
               }))
             })
@@ -1689,7 +1747,7 @@ export function Inventory() {
       {/* Single scan modal — opens manual form immediately, runs waterfall in background */}
       <IsbnScanModal
         isOpen={addMode === 'scan-single'}
-        onClose={() => setAddMode(null)}
+        onClose={() => setAddMode(prev => prev === 'scan-single' ? null : prev)}
         mode="single"
         onDetected={raw => {
           void (async () => {
@@ -1719,7 +1777,7 @@ export function Inventory() {
               // Fill the open form with the metadata result
               const merged: Partial<Book> = {
                 ...mergeBookDraftWithMetadata({ isbn: isbn13 }, result.value) as Partial<Book>,
-                ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+                ...(result.source === 'douban' && result.detailUrl ? { detailUrl: result.detailUrl } : {}),
               }
               setNewBook(merged)
               setClipStatus({ state: 'idle' })
@@ -1751,7 +1809,7 @@ export function Inventory() {
                 ? {
                     ...mergeBookDraftWithMetadata({}, result.value),
                     isbn: isbn13,
-                    ...(result.source === 'douban' && result.doubanUrl ? { doubanUrl: result.doubanUrl } : {}),
+                    ...(result.source === 'douban' && result.detailUrl ? { detailUrl: result.detailUrl } : {}),
                   } as Partial<Book>
                 : { title: isbn13, author: '—', isbn: isbn13 }
             )
@@ -1804,7 +1862,7 @@ export function Inventory() {
                         author: book.author,
                         publisher: book.publisher ?? '',
                         isbn: book.isbn ?? '',
-                        doubanUrl: book.doubanUrl ?? '',
+                        detailUrl: book.detailUrl ?? '',
                         coverDataUrl: '',
                       })
                       openEditPanel(book.id)
@@ -1821,7 +1879,7 @@ export function Inventory() {
                   author: book.author,
                   publisher: book.publisher ?? '',
                   isbn: book.isbn ?? '',
-                  doubanUrl: book.doubanUrl ?? '',
+                  detailUrl: book.detailUrl ?? '',
                   coverDataUrl: '',
                 })
                 openEditPanel(book.id)
@@ -1864,7 +1922,7 @@ export function Inventory() {
                         author: book.author,
                         publisher: book.publisher ?? '',
                         isbn: book.isbn ?? '',
-                        doubanUrl: book.doubanUrl ?? '',
+                        detailUrl: book.detailUrl ?? '',
                         coverDataUrl: '',
                       })
                       openEditPanel(book.id)
@@ -1982,8 +2040,8 @@ export function Inventory() {
             setEditOcrState('done')
             setEditDraft(d => ({
               ...d,
-              title: d.title || ocr.title || d.title,
-              author: d.author || ocr.author || d.author,
+              title: d.title || (ocr.title ? toSimplified(ocr.title) : d.title),
+              author: d.author || (ocr.author ? toSimplified(ocr.author) : d.author),
               publisher: d.publisher || ocr.publisher || d.publisher,
             }))
           }

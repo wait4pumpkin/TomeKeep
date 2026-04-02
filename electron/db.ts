@@ -13,8 +13,8 @@ export interface Book {
   rating?: number
   coverUrl?: string
   tags?: string[]
-  /** Optional custom Douban URL override. If absent, derived from isbn or title. */
-  doubanUrl?: string
+  /** Optional book detail page URL (e.g. Douban subject). Used for cover fetching and external links. */
+  detailUrl?: string
   addedAt: string
 }
 
@@ -25,9 +25,27 @@ export interface WishlistItem {
   isbn?: string
   publisher?: string
   coverUrl?: string
+  /** Douban subject page URL or other external book detail page. Used for cover fetching and external links. */
+  detailUrl?: string
   tags?: string[]
   priority: 'high' | 'medium' | 'low'
+  pendingBuy?: boolean
   addedAt: string
+}
+
+export interface UIPreferences {
+  /** Last visited page: 'library' | 'wishlist'. */
+  activePage?: 'library' | 'wishlist'
+  // Inventory page
+  inventorySortKey?: string
+  inventorySortDir?: 'asc' | 'desc'
+  inventoryViewMode?: 'detail' | 'compact'
+  inventoryCompactCols?: number
+  // Wishlist page
+  wishlistSortKey?: string
+  wishlistSortDir?: 'asc' | 'desc'
+  wishlistViewMode?: 'detail' | 'compact'
+  wishlistCompactCols?: number
 }
 
 export interface UserProfile {
@@ -36,6 +54,8 @@ export interface UserProfile {
   createdAt: string
   /** UI language preference. Defaults to 'zh' when absent. */
   language?: 'zh' | 'en'
+  /** Per-user UI state that should survive restarts. */
+  uiPrefs?: UIPreferences
 }
 
 export interface ReadingState {
@@ -57,7 +77,10 @@ export interface PriceQuote {
   fetchedAt: string
   status: PriceQuoteStatus
   priceCny?: number
-  source?: 'manual'
+  /** Product page ID as extracted from the URL (JD sku, Dangdang id, BooksChina id). */
+  productId?: string
+  /** 'manual' = captured by user via popup window; 'auto' = captured by automated headless flow. */
+  source?: 'manual' | 'auto'
   message?: string
 }
 
@@ -330,5 +353,22 @@ export async function setupDatabase() {
     }
     await db.write()
     return state
+  })
+
+  // ---------------------------------------------------------------------------
+  // Per-user UI preferences
+  // ---------------------------------------------------------------------------
+
+  ipcMain.handle('db:get-ui-prefs', (_, userId: string): UIPreferences | null => {
+    const user = db.data.users.find(u => u.id === userId)
+    return user?.uiPrefs ?? null
+  })
+
+  ipcMain.handle('db:set-ui-prefs', async (_, userId: string, patch: Partial<UIPreferences>) => {
+    const user = db.data.users.find(u => u.id === userId)
+    if (!user) return null
+    user.uiPrefs = { ...(user.uiPrefs ?? {}), ...patch }
+    await db.write()
+    return user.uiPrefs
   })
 }

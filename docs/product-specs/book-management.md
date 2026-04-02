@@ -63,6 +63,11 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 - **FR-PRICE-01**: System SHALL provide an interface to fetch prices for a given ISBN/Title.
 - **FR-PRICE-02**: System SHALL support pluggable price providers (Architecture to support multiple sources).
 - **FR-PRICE-03**: System SHALL display price, stock status, and direct link to product page.
+- **FR-PRICE-04**: When a book is added to the wishlist, the system SHALL automatically trigger price capture for all three configured retailers (JD, Dangdang, BooksChina) concurrently in the background without requiring user interaction.
+- **FR-PRICE-05**: Automated price capture SHALL use a local LLM (`qwen2.5:3b` via ollama) to filter irrelevant search result candidates, falling back to bigram similarity when ollama is unavailable or times out. The lowest-priced matching result SHALL be selected.
+- **FR-PRICE-06**: If automated price capture encounters a login wall or CAPTCHA for a channel, the system SHALL open a visible browser window on that channel for the user to resolve. Once resolved, capture SHALL resume automatically. If not resolved within 5 minutes, that channel SHALL be skipped.
+- **FR-PRICE-07**: Prices obtained via automated capture SHALL be stored with `source: 'auto'` (or `undefined`). Prices obtained via manual capture window SHALL be stored with `source: 'manual'` and SHALL display a ✎ amber badge on the price row. Clicking the badge SHALL remove the manual flag (sets source to `undefined`) without triggering re-capture.
+- **FR-PRICE-08**: For channels where a product has already been linked (i.e. a `productId` exists), automated price capture SHALL refresh the price directly from the product page rather than repeating the search-and-match flow.
 
 ## 4. Non-Functional Requirements
 

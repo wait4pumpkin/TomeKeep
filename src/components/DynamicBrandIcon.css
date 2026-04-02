@@ -1,0 +1,37 @@
+.dynamic-brand-icon {
+  display: inline-block;
+}
+
+.brand-svg {
+  width: 100%;
+  height: 100%;
+  /* Day Mode Theme */
+  --color-book-bg: #FFFFFF;
+  --color-stroke: #0F172A;
+  --color-bookmark: #EF4444;
+}
+
+.dark .brand-svg {
+  /* Night Mode Theme - High Contrast */
+  --color-book-bg: #334155;
+  --color-stroke: #F8FAFC;
+  --color-bookmark: #F87171;
+}
+
+/* Base Styles */
+.brand-svg .book-fill { fill: var(--color-book-bg); }
+.brand-svg .stroke-main { 
+  fill: none; 
+  stroke: var(--color-stroke); 
+  stroke-width: 48; 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+}
+.brand-svg .bookmark-fill { 
+  fill: var(--color-bookmark); 
+  stroke: var(--color-stroke); 
+  stroke-width: 48; 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+}
+

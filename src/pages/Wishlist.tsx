@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import type { PriceCacheEntry, PriceChannel, PriceQuote, WishlistItem } from '../../electron/db'
-import type { DoubanSearchHit } from '../../electron/metadata'
-import type { CaptureChannel, PricingInput } from '../../electron/pricing'
+import type { Book, PriceCacheEntry, PriceChannel, PriceQuote, WishlistItem } from '../../electron/db'
+import type { AutoCaptureProgressEvent, CaptureChannel, PricingInput } from '../../electron/pricing'
 import { mergeBookDraftWithMetadata } from '../lib/bookMetadataMerge'
-import { parseIsbnSemantics as parseIsbnSem, parseIsbnPublisher } from '../lib/isbn'
+import { isPlaceholderCoverUrl } from '../lib/isbnSearch'
+import { parseIsbnSemantics as parseIsbnSem, parseIsbnPublisher, normalizeIsbn as libNormalizeIsbn, toIsbn13 } from '../lib/isbn'
 import { normalizeAuthor } from '../lib/author'
+import { toSimplified } from '../lib/hanzi'
 import { tagColor } from '../lib/tagColor'
 import { CoverCropModal } from '../components/CoverCropModal'
 import { CoverLightbox } from '../components/CoverLightbox'
 import { IsbnScanModal } from '../components/IsbnScanModal'
+import { WeatherWidget } from '../components/WeatherWidget'
+import type { WeatherData } from '../lib/weather'
 import type { OcrResult } from '../lib/coverOcr'
 import { extractCoverText } from '../lib/coverOcr'
 import { useLang } from '../lib/i18n'
@@ -19,19 +22,23 @@ type ViewMode = 'detail' | 'compact'
 
 const channelOrder: PriceChannel[] = ['jd', 'bookschina', 'dangdang']
 
-type WishlistSortKey = 'addedAt' | 'title' | 'author' | 'priority'
+type WishlistSortKey = 'addedAt' | 'title' | 'author'
 type SortDir = 'asc' | 'desc'
 
-const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 }
 
 // Channels that have capture support in this release
 const CAPTURE_SUPPORTED: PriceChannel[] = ['jd', 'dangdang', 'bookschina']
 
 export function Wishlist() {
-  const { watermarkName } = useOutletContext<{ watermarkName: string | null }>()
+  const { watermarkName, weather } = useOutletContext<{ watermarkName: string | null; weather: WeatherData | null }>()
   const { t } = useLang()
   const [items, setItems] = useState<WishlistItem[]>([])
   const [inventoryTitles, setInventoryTitles] = useState<Set<string>>(new Set())
+  const [activeUserId, setActiveUserId] = useState<string | null>(null)
+  const wishlistTitles = useMemo(
+    () => new Set(items.map(i => i.title.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase())),
+    [items]
+  )
   const [addMode, setAddMode] = useState<null | 'manual'>(null)
   const [newItem, setNewItem] = useState<Partial<WishlistItem>>({})
   const [newItemCoverDataUrl, setNewItemCoverDataUrl] = useState<string | null>(null)
@@ -66,17 +73,25 @@ export function Wishlist() {
   const [allTags, setAllTags] = useState<string[]>([])
   const [sortKey, setSortKey] = useState<WishlistSortKey>('addedAt')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [pendingBuyFilter, setPendingBuyFilter] = useState<'all' | 'pending'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   // key -> channel -> whether capture window is open
   const [capturingKeys, setCapturingKeys] = useState<Record<string, Record<string, boolean>>>({})
-
-  // View mode — persisted in localStorage
-  const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    (localStorage.getItem('wishlistViewMode') as ViewMode | null) ?? 'detail'
-  )
+  // key -> channel -> whether auto-capture is in progress (driven by main-process push events)
+  const [autoCapturingKeys, setAutoCapturingKeys] = useState<Record<string, Record<string, boolean>>>({})
+  // View mode — default; overwritten from per-user prefs on mount
+  const [viewMode, setViewMode] = useState<ViewMode>('detail')
+  const [compactCols, setCompactCols] = useState<number>(6)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
-  const [gridCols, setGridCols] = useState(4)
+  const [gridCols, setGridCols] = useState(6)
+
+  // Edit panel state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState<{ title: string; author: string; publisher: string; detailUrl: string; coverDataUrl: string }>({ title: '', author: '', publisher: '', detailUrl: '', coverDataUrl: '' })
+  const [editRefetchState, setEditRefetchState] = useState<'idle' | 'loading' | 'none'>('idle')
+  const editFileInputRef = useRef<HTMLInputElement>(null)
+  const [coverBustMap, setCoverBustMap] = useState<Map<string, number>>(new Map())
 
   // Dropdown
   const [menuOpen, setMenuOpen] = useState(false)
@@ -87,13 +102,6 @@ export function Wishlist() {
 
   // Clipboard import status
   const [clipStatus, setClipStatus] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ state: 'idle' })
-
-  // Douban search-as-you-type state (manual form)
-  const [searchHits, setSearchHits] = useState<DoubanSearchHit[]>([])
-  const [searchState, setSearchState] = useState<'idle' | 'loading' | 'error'>('idle')
-  const [fillState, setFillState] = useState<'idle' | 'loading'>('idle')
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   // Close dropdown on outside click
   useEffect(() => {
     if (!menuOpen) return
@@ -108,9 +116,23 @@ export function Wishlist() {
 
   // Persist viewMode and reset expandedId when it changes
   useEffect(() => {
-    localStorage.setItem('wishlistViewMode', viewMode)
     setExpandedId(null)
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { wishlistViewMode: viewMode })
   }, [viewMode])
+
+  // Persist compactCols
+  useEffect(() => {
+    setGridCols(compactCols)
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { wishlistCompactCols: compactCols })
+  }, [compactCols])
+
+  // Persist sortKey / sortDir when they change
+  useEffect(() => {
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { wishlistSortKey: sortKey })
+  }, [sortKey])
+  useEffect(() => {
+    if (activeUserId) void window.db.setUiPrefs(activeUserId, { wishlistSortDir: sortDir })
+  }, [sortDir])
 
   // Measure actual CSS grid column count via ResizeObserver
   useEffect(() => {
@@ -126,6 +148,75 @@ export function Wishlist() {
     return () => obs.disconnect()
   }, [viewMode]) // re-attach when switching to compact (grid is only rendered in compact)
 
+  async function handleSaveEdit(item: WishlistItem) {
+    let coverUrl = item.coverUrl
+    if (editDraft.coverDataUrl) {
+      const saved = await window.covers.saveCoverData(item.id, editDraft.coverDataUrl)
+      if (saved) {
+        coverUrl = saved
+        setCoverBustMap(prev => new Map(prev).set(item.id, Date.now()))
+      }
+    }
+    const updated: WishlistItem = {
+      ...item,
+      title: toSimplified(editDraft.title.trim() || item.title),
+      author: normalizeAuthor(toSimplified(editDraft.author.trim() || item.author)),
+      publisher: editDraft.publisher.trim() || item.publisher,
+      detailUrl: editDraft.detailUrl.trim() || undefined,
+      coverUrl,
+    }
+    setItems(prev => prev.map(i => i.id === item.id ? updated : i))
+    await window.db.updateWishlistItem(updated)
+    setEditingId(null)
+  }
+
+  async function handleRefetchCover(item: WishlistItem) {
+    const detailUrl = editDraft.detailUrl.trim() || item.detailUrl
+    const isbn13 = item.isbn
+    if (!detailUrl && !isbn13) return
+    setEditRefetchState('loading')
+    try {
+      let coverUrl: string | undefined
+
+      if (detailUrl) {
+        const res = await window.meta.lookupDouban(detailUrl)
+        if (res.ok && res.value.coverUrl && !isPlaceholderCoverUrl(res.value.coverUrl)) {
+          coverUrl = res.value.coverUrl
+        }
+      }
+
+      if (!coverUrl && isbn13) {
+        let result = await window.meta.lookupWaterfall(isbn13)
+        if (!result.ok && result.error === 'captcha') {
+          const captchaRes = await window.meta.resolveCaptcha(isbn13)
+          if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
+        }
+        if (result.ok && result.value.coverUrl && !isPlaceholderCoverUrl(result.value.coverUrl)) {
+          coverUrl = result.value.coverUrl
+        }
+      }
+
+      if (coverUrl) {
+        const appUrl = await window.covers.saveCover(item.id, coverUrl)
+        if (appUrl) {
+          const updated: WishlistItem = { ...item, coverUrl: appUrl }
+          await window.db.updateWishlistItem(updated)
+          setItems(prev => prev.map(i => i.id === item.id ? updated : i))
+          setCoverBustMap(prev => new Map(prev).set(item.id, Date.now()))
+          return
+        }
+      }
+      setEditRefetchState('none')
+      setTimeout(() => setEditRefetchState('idle'), 2000)
+    } catch (e) {
+      console.error('[refetch-cover] unexpected error', e)
+      setEditRefetchState('none')
+      setTimeout(() => setEditRefetchState('idle'), 2000)
+    } finally {
+      setEditRefetchState(s => s === 'loading' ? 'idle' : s)
+    }
+  }
+
   async function loadWishlist() {
     const data = await window.db.getWishlist()
     setItems(data)
@@ -137,11 +228,21 @@ export function Wishlist() {
   useEffect(() => {
     let cancelled = false
     async function init() {
-      const [data, tags, books] = await Promise.all([window.db.getWishlist(), window.db.getAllTags(), window.db.getBooks()])
+      const [data, tags, books, activeUser] = await Promise.all([
+        window.db.getWishlist(),
+        window.db.getAllTags(),
+        window.db.getBooks(),
+        window.db.getActiveUser(),
+      ])
       if (cancelled) return
       setItems(data)
       setAllTags(tags)
-      setInventoryTitles(new Set(books.map(b => b.title.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase())))
+      setInventoryTitles(new Set(books.map(b => normTitleForInventory(b.title))))
+      if (activeUser) {
+        setActiveUserId(activeUser.id)
+        const prefs = await window.db.getUiPrefs(activeUser.id)
+        if (!cancelled) applyWishlistPrefs(prefs)
+      }
 
       // Load whatever is already cached — no auto-fetch
       const inputs = buildPricingInputsForItems(data)
@@ -153,6 +254,69 @@ export function Wishlist() {
     }
     void init()
     return () => { cancelled = true }
+  }, [])
+
+  // Re-sync inventory titles whenever the window regains focus (e.g. after
+  // switching from Library back to Wishlist after adding a book).
+  useEffect(() => {
+    function refreshInventoryTitles() {
+      window.db.getBooks().then(books => {
+        setInventoryTitles(new Set(books.map(b => normTitleForInventory(b.title))))
+      })
+    }
+    window.addEventListener('focus', refreshInventoryTitles)
+    return () => window.removeEventListener('focus', refreshInventoryTitles)
+  }, [])
+
+  // Apply persisted UI prefs for the wishlist page, or reset to defaults when prefs is null
+  function applyWishlistPrefs(prefs: import('../../electron/db').UIPreferences | null) {
+    setSortKey(prefs?.wishlistSortKey as WishlistSortKey ?? 'addedAt')
+    setSortDir(prefs?.wishlistSortDir ?? 'desc')
+    setViewMode(prefs?.wishlistViewMode ?? 'detail')
+    if (prefs?.wishlistCompactCols != null) {
+      const v = prefs.wishlistCompactCols
+      setCompactCols(v >= 4 && v <= 16 ? v : 6)
+    } else {
+      setCompactCols(6)
+    }
+  }
+
+  // Re-apply prefs when the active user changes
+  useEffect(() => {
+    function handleUserChange(e: Event) {
+      const user = (e as CustomEvent<import('../../electron/db').UserProfile | null>).detail
+      if (user) {
+        setActiveUserId(user.id)
+        void window.db.getUiPrefs(user.id).then(prefs => {
+          applyWishlistPrefs(prefs)
+        })
+      } else {
+        setActiveUserId(null)
+      }
+    }
+    window.addEventListener('active-user-changed', handleUserChange)
+    return () => window.removeEventListener('active-user-changed', handleUserChange)
+  }, [])
+
+  // Subscribe to auto-capture progress events from the main process
+  useEffect(() => {
+    const dispose = window.pricing.onAutoProgress((ev: AutoCaptureProgressEvent) => {
+      const { key, channel, status } = ev
+      const inProgress = status === 'started'
+
+      setAutoCapturingKeys(prev => ({
+        ...prev,
+        [key]: { ...(prev[key] ?? {}), [channel]: inProgress },
+      }))
+
+      // When a channel finishes (any terminal status), refresh the cache entry
+      if (!inProgress) {
+        void window.pricing.get([key]).then(updated => {
+          setPriceCache(prev => ({ ...prev, ...updated }))
+        })
+      }
+    })
+    return dispose
   }, [])
 
   // On startup: repair wishlist items whose coverUrl points to an app:// URL that no
@@ -203,11 +367,7 @@ export function Wishlist() {
     setNewItemCoverDataUrl(null)
     setOcrResult(null)
     setOcrState('idle')
-    setSearchHits([])
-    setSearchState('idle')
-    setFillState('idle')
     setClipStatus({ state: 'idle' })
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
     newItemIdRef.current = crypto.randomUUID()
   }
 
@@ -227,7 +387,8 @@ export function Wishlist() {
 
     const itemToAdd = {
       ...newItem,
-      author: normalizeAuthor(newItem.author ?? ''),
+      title: toSimplified(newItem.title ?? ''),
+      author: normalizeAuthor(toSimplified(newItem.author ?? '')),
       coverUrl,
       id,
       addedAt: new Date().toISOString(),
@@ -237,6 +398,41 @@ export function Wishlist() {
     resetForm()
     setAddMode(null)
     await loadWishlist()
+  }
+
+  async function handleRemoveManualFlag(item: WishlistItem, channel: CaptureChannel) {
+    const key = buildPricingKey(item)
+    await window.pricing.removeManualFlag(key, channel)
+    const updated = await window.pricing.get([key])
+    setPriceCache(prev => ({ ...prev, ...updated }))
+  }
+
+  /**
+   * Refresh a single channel: if the existing quote is manual (and has a productId),
+   * re-fetch the product page keeping source='manual'. Otherwise run auto-capture.
+   */
+  async function handleRefreshChannel(item: WishlistItem, channel: CaptureChannel) {
+    const key = buildPricingKey(item)
+    const entry = priceCache[key]
+    const quote = entry?.quotes.find(q => q.channel === channel)
+    const isManual = quote?.source === 'manual'
+    const hasProductId = !!quote?.productId
+
+    if (isManual && hasProductId) {
+      void window.pricing.refreshManualChannel(buildPricingInput(item), channel)
+    } else {
+      void window.pricing.autoCaptureChannel(buildPricingInput(item), channel)
+    }
+  }
+
+  /**
+   * Refresh all channels: per-channel logic same as handleRefreshChannel.
+   */
+  function handleRefreshAll(item: WishlistItem) {
+    const channels: CaptureChannel[] = ['jd', 'dangdang', 'bookschina']
+    for (const ch of channels) {
+      void handleRefreshChannel(item, ch)
+    }
   }
 
   async function handleDelete(id: string) {
@@ -252,6 +448,28 @@ export function Wishlist() {
     await window.db.updateWishlistItem(updated)
     const newAllTags = await window.db.getAllTags()
     setAllTags(newAllTags)
+  }
+
+  async function handleTogglePendingBuy(item: WishlistItem) {
+    const updated = { ...item, pendingBuy: !item.pendingBuy }
+    setItems(prev => prev.map(i => i.id === item.id ? updated : i))
+    await window.db.updateWishlistItem(updated)
+  }
+
+  async function handlePurchase(item: WishlistItem) {
+    const book: Book = {
+      id: item.id,
+      title: item.title,
+      author: item.author,
+      isbn: item.isbn,
+      publisher: item.publisher,
+      coverUrl: item.coverUrl,
+      tags: item.tags,
+      addedAt: new Date().toISOString(),
+    }
+    await window.db.addBook(book)
+    await window.db.deleteWishlistItem(item.id)
+    void loadWishlist()
   }
 
   async function handleCapture(item: WishlistItem, channel: CaptureChannel) {
@@ -309,45 +527,33 @@ export function Wishlist() {
       return
     }
 
+    // Detect bare ISBNs (ISBN-10 or ISBN-13) and trigger a waterfall metadata lookup
+    const isbnResult = libNormalizeIsbn(text)
+    if (isbnResult.ok) {
+      const isbn13 = toIsbn13(isbnResult.value)
+      if (isbn13) {
+        let result = await window.meta.lookupWaterfall(isbn13)
+        if (!result.ok && result.error === 'captcha') {
+          const captchaRes = await window.meta.resolveCaptcha(isbn13)
+          if (captchaRes.ok) result = { ok: true, value: captchaRes.value, source: 'isbnsearch' }
+        }
+        if (result.ok) {
+          setNewItem(prev => mergeBookDraftWithMetadata({ ...prev, isbn: isbn13 }, result.value) as Partial<WishlistItem>)
+          setClipStatus({ state: 'success', message: t('filled_isbn_dot') })
+        } else {
+          // Waterfall found nothing — pre-fill ISBN so the user can continue manually
+          setNewItem(prev => ({ ...prev, isbn: isbn13 }))
+          setClipStatus({ state: 'idle' })
+        }
+        setAddMode('manual')
+        return
+      }
+    }
+
     // Fallback: treat as title seed and open manual form
     setNewItem(prev => ({ ...prev, title: text }))
     setClipStatus({ state: 'idle' })
     setAddMode('manual')
-  }
-
-  /** Trigger debounced Douban search based on current title + author fields. */
-  function triggerSearch(title: string, author: string) {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
-    const query = [title, author].filter(Boolean).join(' ').trim()
-    if (query.length < 2) {
-      setSearchHits([])
-      setSearchState('idle')
-      return
-    }
-    setSearchState('loading')
-    searchDebounceRef.current = setTimeout(async () => {
-      const res = await window.meta.searchDouban(query)
-      if (!res.ok) { setSearchState('error'); return }
-      setSearchHits(res.value)
-      setSearchState('idle')
-    }, 600)
-  }
-
-  /** Select a search hit: fetch full metadata then fill form. */
-  async function handleSelectHit(hit: DoubanSearchHit) {
-    setSearchHits([])
-    setFillState('loading')
-    const res = await window.meta.lookupDouban(`https://book.douban.com/subject/${hit.subjectId}/`)
-    if (res.ok) {
-      setNewItem(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<WishlistItem>)
-    } else {
-      setNewItem(prev => ({
-        ...prev,
-        title: prev.title || hit.title,
-        author: prev.author || hit.author,
-      }))
-    }
-    setFillState('idle')
   }
 
   const showForm = addMode === 'manual'
@@ -355,7 +561,11 @@ export function Wishlist() {
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return items.filter(i => {
-      if (tagFilter.length > 0 && !tagFilter.every(t => (i.tags ?? []).includes(t))) return false
+      if (tagFilter.length > 0 && !tagFilter.every(t => {
+        if (t === '__untagged__') return (i.tags ?? []).length === 0
+        return (i.tags ?? []).includes(t)
+      })) return false
+      if (pendingBuyFilter === 'pending' && !i.pendingBuy) return false
       if (!q) return true
       return (
         i.title.toLowerCase().includes(q) ||
@@ -363,14 +573,12 @@ export function Wishlist() {
         (i.isbn ?? '').includes(q)
       )
     })
-  }, [items, tagFilter, searchQuery])
+  }, [items, tagFilter, searchQuery, pendingBuyFilter])
 
   const sortedItems = useMemo(() => {
     return [...filteredItems].sort((a, b) => {
       let cmp: number
-      if (sortKey === 'priority') {
-        cmp = (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1)
-      } else if (sortKey === 'addedAt') {
+      if (sortKey === 'addedAt') {
         cmp = a.addedAt.localeCompare(b.addedAt)
       } else {
         const va = (sortKey === 'title' ? a.title : a.author).toLowerCase()
@@ -430,6 +638,11 @@ export function Wishlist() {
           )}
         </h2>
         <div className="flex items-center gap-2">
+          {weather?.state && (
+            <div className="h-9 flex items-center pr-2">
+              <WeatherWidget weather={weather.state} />
+            </div>
+          )}
           {watermarkName && watermarkName !== '匿名' && (
             <span className="h-9 flex items-center px-2 text-base font-medium text-gray-400 dark:text-gray-500 select-none">
               {watermarkName}
@@ -439,6 +652,7 @@ export function Wishlist() {
           <button
             onClick={() => setMenuOpen(o => !o)}
             title={t('add_to_wishlist')}
+            className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -476,20 +690,13 @@ export function Wishlist() {
         <WishlistAddForm
           item={newItem}
           inventoryTitles={inventoryTitles}
-          searchHits={searchHits}
-          searchState={searchState}
-          fillState={fillState}
+          wishlistTitles={wishlistTitles}
           clipStatus={clipStatus}
           ocrResult={ocrResult}
           ocrState={ocrState}
           onItemChange={(patch: Partial<WishlistItem>) => {
-            setNewItem(prev => {
-              const next = { ...prev, ...patch }
-              triggerSearch(next.title ?? '', next.author ?? '')
-              return next
-            })
+            setNewItem(prev => ({ ...prev, ...patch }))
           }}
-          onSelectHit={handleSelectHit}
           onSubmit={handleAdd}
           onCancel={() => { setAddMode(null); resetForm() }}
           coverDataUrl={newItemCoverDataUrl}
@@ -500,8 +707,8 @@ export function Wishlist() {
               setOcrState('done')
               setNewItem(prev => ({
                 ...prev,
-                title:     !prev.title     && ocr.title     ? ocr.title     : prev.title,
-                author:    !prev.author    && ocr.author    ? ocr.author    : prev.author,
+                title:     !prev.title     && ocr.title     ? toSimplified(ocr.title)     : prev.title,
+                author:    !prev.author    && ocr.author    ? toSimplified(ocr.author)    : prev.author,
                 publisher: !prev.publisher && ocr.publisher ? ocr.publisher : prev.publisher,
               }))
             }
@@ -514,8 +721,8 @@ export function Wishlist() {
               setOcrState('done')
               setNewItem(prev => ({
                 ...prev,
-                title:     !prev.title     && ocr.title     ? ocr.title     : prev.title,
-                author:    !prev.author    && ocr.author    ? ocr.author    : prev.author,
+                title:     !prev.title     && ocr.title     ? toSimplified(ocr.title)     : prev.title,
+                author:    !prev.author    && ocr.author    ? toSimplified(ocr.author)    : prev.author,
                 publisher: !prev.publisher && ocr.publisher ? ocr.publisher : prev.publisher,
               }))
             })
@@ -550,8 +757,40 @@ export function Wishlist() {
           )}
         </div>
 
+        {/* Pending-buy filter button group */}
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0">
+          <button
+            type="button"
+            title={t('filter_all')}
+            onClick={() => setPendingBuyFilter('all')}
+            className={`px-2.5 py-1.5 rounded-l-lg transition-colors ${
+              pendingBuyFilter === 'all'
+                ? 'bg-blue-500 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title={t('filter_pending')}
+            onClick={() => setPendingBuyFilter('pending')}
+            className={`px-2.5 py-1.5 rounded-r-lg transition-colors ${
+              pendingBuyFilter === 'pending'
+                ? 'bg-blue-500 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill={pendingBuyFilter === 'pending' ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+            </svg>
+          </button>
+        </div>
+
         {/* Sort button group */}
-        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 overflow-visible">
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 overflow-visible ml-auto">
           {([
             { key: 'title',     label: t('sort_title'),   icon: (
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -568,11 +807,6 @@ export function Wishlist() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z" />
               </svg>
             ), defaultDir: 'desc' as SortDir },
-            { key: 'priority',  label: t('sort_priority'), icon: (
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
-              </svg>
-            ), defaultDir: 'asc' as SortDir },
           ] as { key: WishlistSortKey; label: string; icon: React.ReactNode; defaultDir: SortDir }[]).map(({ key, label, icon, defaultDir }, idx, arr) => {
             const active = sortKey === key
             const isFirst = idx === 0
@@ -607,8 +841,9 @@ export function Wishlist() {
           })}
         </div>
 
-        {/* View mode toggle */}
-        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 ml-2">
+        {/* View mode toggle + compact slider, right-aligned as a column */}
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700">
           <button
             type="button"
             title={t('detail_view')}
@@ -647,10 +882,39 @@ export function Wishlist() {
               <rect x="16" y="16" width="5" height="5" rx="0.75" />
             </svg>
           </button>
+          </div>
         </div>
       </div>
-      {allTags.length > 0 && (
+      {(allTags.length > 0 || viewMode === 'compact') && (
         <div className="flex flex-wrap items-center gap-1.5">
+          {/* "No tags" filter */}
+          {allTags.length > 0 && (() => {
+            const active = tagFilter.includes('__untagged__')
+            return (
+              <button
+                key="__untagged__"
+                type="button"
+                title={t('no_tags')}
+                onClick={() =>
+                  setTagFilter(prev =>
+                    active ? prev.filter(t => t !== '__untagged__') : ['__untagged__']
+                  )
+                }
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                  active
+                    ? 'bg-violet-500 border-violet-500 text-white'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400'
+                }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L9.568 3Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+                  <line x1="3" y1="3" x2="21" y2="21" strokeLinecap="round" />
+                </svg>
+                {t('no_tags')}
+              </button>
+            )
+          })()}
           {allTags.map(tag => {
             const active = tagFilter.includes(tag)
             const palette = tagColor(tag)
@@ -660,7 +924,7 @@ export function Wishlist() {
                 type="button"
                 onClick={() =>
                   setTagFilter(prev =>
-                    active ? prev.filter(t => t !== tag) : [...prev, tag]
+                    active ? prev.filter(t => t !== tag) : [...prev.filter(t => t !== '__untagged__'), tag]
                   )
                 }
                 className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
@@ -682,6 +946,18 @@ export function Wishlist() {
               {t('clear_filter')}
             </button>
           )}
+          {viewMode === 'compact' && (
+            <input
+              type="range"
+              min={4}
+              max={16}
+              step={1}
+              value={compactCols}
+              onChange={e => setCompactCols(Number(e.target.value))}
+              className="ml-auto w-24 accent-blue-500 cursor-pointer shrink-0"
+              title={t('compact_columns')}
+            />
+          )}
         </div>
       )}
 
@@ -691,6 +967,7 @@ export function Wishlist() {
           {sortedItems.map(item => {
             const sem = item.isbn ? parseIsbnSem(item.isbn) : null
             const inferredPublisher = item.isbn && !item.publisher ? parseIsbnPublisher(item.isbn) : null
+            const isEditingThis = editingId === item.id
             return (
               <WishlistCard
                 key={item.id}
@@ -699,19 +976,41 @@ export function Wishlist() {
                 inferredPublisher={inferredPublisher}
                 entry={getEntryForItem(priceCache, item)}
                 capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
+                autoCapturingChannels={autoCapturingKeys[buildPricingKey(item)] ?? {}}
                 allTags={allTags}
+                isEditing={isEditingThis}
+                editDraft={editDraft}
+                editRefetchState={editRefetchState}
+                coverBustTs={coverBustMap.get(item.id)}
+                onEdit={() => {
+                  setEditDraft({ title: item.title, author: item.author, publisher: item.publisher ?? '', detailUrl: item.detailUrl ?? '', coverDataUrl: '' })
+                  setEditingId(item.id)
+                }}
+                onEditDraftChange={patch => setEditDraft(d => ({ ...d, ...patch }))}
+                onEditCancel={() => setEditingId(null)}
+                onEditSave={() => void handleSaveEdit(item)}
+                onEditRefetchCover={() => void handleRefetchCover(item)}
+                onEditChooseCover={() => editFileInputRef.current?.click()}
                 onCapture={ch => void handleCapture(item, ch)}
+                onAutoCapture={() => handleRefreshAll(item)}
+                onRefreshChannel={ch => void handleRefreshChannel(item, ch)}
+                onRemoveManualFlag={ch => void handleRemoveManualFlag(item, ch)}
                 onTagsChange={tags => handleUpdateItemTags(item, tags)}
                 onDelete={() => handleDelete(item.id)}
+                onPendingBuyChange={() => void handleTogglePendingBuy(item)}
+                 onPurchase={() => void handlePurchase(item)}
                  onTitleClick={() => {
-                  if (item.isbn) {
-                    void window.app.openExternal(`https://openlibrary.org/isbn/${item.isbn}`)
-                  } else {
-                    setToastMsg(t('toast_no_isbn'))
-                  }
-                }}
+                   if (item.detailUrl) {
+                     void window.app.openExternal(item.detailUrl)
+                   } else if (item.isbn) {
+                     void window.app.openExternal(`https://openlibrary.org/isbn/${item.isbn}`)
+                   } else {
+                     setToastMsg(t('toast_no_isbn'))
+                   }
+                 }}
                  onZoom={url => setLightboxUrl(url)}
-              />
+                 isInInventory={inventoryTitles.has(normTitleForInventory(item.title))}
+                />
             )
           })}
         </div>
@@ -721,7 +1020,8 @@ export function Wishlist() {
       {viewMode === 'compact' && (
         <div
           ref={gridRef}
-          className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2"
+          className="grid gap-2"
+          style={{ gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` }}
         >
           {compactRenderItems.map((renderItem, idx) => {
             if (renderItem.type === 'expanded') {
@@ -740,19 +1040,41 @@ export function Wishlist() {
                       inferredPublisher={inferredPublisher}
                       entry={getEntryForItem(priceCache, item)}
                       capturingChannels={capturingKeys[buildPricingKey(item)] ?? {}}
+                      autoCapturingChannels={autoCapturingKeys[buildPricingKey(item)] ?? {}}
                       allTags={allTags}
-                      onCapture={ch => void handleCapture(item, ch)}
-                      onTagsChange={tags => handleUpdateItemTags(item, tags)}
-                      onDelete={() => handleDelete(item.id)}
-                       onTitleClick={() => {
-                        if (item.isbn) {
-                          void window.app.openExternal(`https://openlibrary.org/isbn/${item.isbn}`)
-                        } else {
-                          setToastMsg(t('toast_no_isbn'))
-                        }
+                      isEditing={editingId === item.id}
+                      editDraft={editDraft}
+                      editRefetchState={editRefetchState}
+                      coverBustTs={coverBustMap.get(item.id)}
+                      onEdit={() => {
+                        setEditDraft({ title: item.title, author: item.author, publisher: item.publisher ?? '', detailUrl: item.detailUrl ?? '', coverDataUrl: '' })
+                        setEditingId(item.id)
                       }}
+                      onEditDraftChange={patch => setEditDraft(d => ({ ...d, ...patch }))}
+                      onEditCancel={() => setEditingId(null)}
+                      onEditSave={() => void handleSaveEdit(item)}
+                      onEditRefetchCover={() => void handleRefetchCover(item)}
+                      onEditChooseCover={() => editFileInputRef.current?.click()}
+                      onCapture={ch => void handleCapture(item, ch)}
+                      onAutoCapture={() => handleRefreshAll(item)}
+                      onRefreshChannel={ch => void handleRefreshChannel(item, ch)}
+                      onRemoveManualFlag={ch => void handleRemoveManualFlag(item, ch)}
+                      onTagsChange={tags => handleUpdateItemTags(item, tags)}
+                       onDelete={() => handleDelete(item.id)}
+                       onPendingBuyChange={() => void handleTogglePendingBuy(item)}
+                       onPurchase={() => void handlePurchase(item)}
+                       onTitleClick={() => {
+                         if (item.detailUrl) {
+                           void window.app.openExternal(item.detailUrl)
+                         } else if (item.isbn) {
+                           void window.app.openExternal(`https://openlibrary.org/isbn/${item.isbn}`)
+                         } else {
+                           setToastMsg(t('toast_no_isbn'))
+                         }
+                       }}
                        onZoom={url => setLightboxUrl(url)}
-                    />
+                       isInInventory={inventoryTitles.has(normTitleForInventory(item.title))}
+                     />
                   </div>
                 </div>
               )
@@ -790,7 +1112,8 @@ export function Wishlist() {
                       setToastMsg(t('toast_no_isbn'))
                     }
                   }}
-                  className="mt-1 text-[11px] text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug text-center hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-0.5"
+                  className="mt-1 text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug text-center hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-0.5"
+                  style={{ fontSize: Math.round(11 - (compactCols - 6) * 0.2) }}
                   title={item.title}
                 >
                   {item.title}
@@ -810,6 +1133,25 @@ export function Wishlist() {
       {lightboxUrl && (
         <CoverLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
       )}
+
+      {/* Hidden file input for edit-panel cover selection */}
+      <input
+        ref={editFileInputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={e => {
+          const file = e.target.files?.[0]
+          if (!file) return
+          const reader = new FileReader()
+          reader.onload = ev => {
+            const dataUrl = ev.target?.result as string
+            if (dataUrl) setEditDraft(d => ({ ...d, coverDataUrl: dataUrl }))
+          }
+          reader.readAsDataURL(file)
+          e.target.value = ''
+        }}
+      />
     </div>
   )
 }
@@ -822,28 +1164,29 @@ export function Wishlist() {
 type WishlistAddFormProps = {
   item: Partial<WishlistItem>
   coverDataUrl: string | null
-  searchHits: DoubanSearchHit[]
-  searchState: 'idle' | 'loading' | 'error'
-  fillState: 'idle' | 'loading'
   clipStatus: { state: 'idle' | 'loading' | 'success' | 'error'; message?: string }
   ocrResult: OcrResult | null
   ocrState: 'idle' | 'loading' | 'done'
   inventoryTitles: Set<string>
+  wishlistTitles: Set<string>
   onItemChange: (patch: Partial<WishlistItem>) => void
   onCoverConfirmed: (dataUrl: string, ocr?: OcrResult) => void
   onOcrFill: () => void
-  onSelectHit: (hit: DoubanSearchHit) => void
   onSubmit: (e: React.FormEvent) => void
   onCancel: () => void
 }
 
-function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillState, clipStatus, ocrResult: _ocrResult, ocrState, inventoryTitles, onItemChange, onCoverConfirmed, onOcrFill, onSelectHit, onSubmit, onCancel }: WishlistAddFormProps) {
+function WishlistAddForm({ item, coverDataUrl, clipStatus, ocrResult: _ocrResult, ocrState, inventoryTitles, wishlistTitles, onItemChange, onCoverConfirmed, onOcrFill, onSubmit, onCancel }: WishlistAddFormProps) {
   const { t } = useLang()
   const inputCls = 'w-full px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
-  const isDuplicateTitle = !!(item.title?.trim()) && inventoryTitles.has(item.title.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase())
-  const titleInputCls = isDuplicateTitle
-    ? 'w-full px-2 py-1 text-sm font-medium rounded border border-amber-400 dark:border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 placeholder-amber-400 dark:placeholder-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-400'
-    : 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
+  const normalizedTitle = item.title ? normTitleForInventory(item.title) : ''
+  const isWishlistDuplicate = !!(item.title?.trim()) && wishlistTitles.has(normalizedTitle)
+  const isDuplicateTitle = !isWishlistDuplicate && !!(item.title?.trim()) && inventoryTitles.has(normalizedTitle)
+  const titleInputCls = isWishlistDuplicate
+    ? 'w-full px-2 py-1 text-sm font-medium rounded border border-rose-400 dark:border-rose-500 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 placeholder-rose-400 dark:placeholder-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500 focus:border-rose-400'
+    : isDuplicateTitle
+      ? 'w-full px-2 py-1 text-sm font-medium rounded border border-amber-400 dark:border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 placeholder-amber-400 dark:placeholder-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-400'
+      : 'w-full px-2 py-1 text-sm font-medium rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400'
 
   const [cropMode, setCropMode] = useState<'file' | 'camera' | null>(null)
   const [pendingFile, setPendingFile] = useState<File | undefined>(undefined)
@@ -852,11 +1195,10 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
 
   // Single status line: clipboard takes priority, then fill state.
   // Meta-filled confirmation only shows after a clipboard import (clipStatus.state === 'success'),
-  // not when fields are filled via manual Douban search-as-you-type.
+  // not when fields are filled via clipboard import.
   const statusLine: { text: string; type: 'info' | 'error' | 'success' | 'loading' } | null =
     clipStatus.state === 'loading' ? { text: t('clip_loading'), type: 'loading' } :
     clipStatus.state === 'error'   ? { text: clipStatus.message ?? t('clip_failed'), type: 'error' } :
-    fillState === 'loading'        ? { text: t('douban_loading'), type: 'loading' } :
     ocrState === 'loading'         ? { text: t('ocr_cover_loading'), type: 'loading' } :
     clipStatus.state === 'success' ? { text: clipStatus.message ?? t('filled_douban'), type: 'success' } :
     ocrState === 'done'            ? { text: t('filled_ocr'), type: 'success' } :
@@ -943,46 +1285,12 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
                 className={titleInputCls}
                 autoFocus
               />
-              {/* Search indicator */}
-              {searchState === 'loading' && (
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
-                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
-                </span>
-              )}
-
-              {/* Search results dropdown */}
-              {searchHits.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-0.5 z-40 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden">
-                  {searchHits.map(hit => (
-                    <button
-                      key={hit.subjectId}
-                      type="button"
-                      onClick={() => onSelectHit(hit)}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0"
-                    >
-                      {hit.coverUrl ? (
-                        <img src={hit.coverUrl} alt="" className="w-6 h-8 object-cover rounded flex-shrink-0" />
-                      ) : (
-                        <div className="w-6 h-8 rounded bg-gray-100 dark:bg-gray-700 flex-shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm text-gray-900 dark:text-gray-100 truncate leading-snug">{hit.title}</p>
-                        {hit.author && <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{hit.author}</p>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Author */}
             <input
               type="text"
               required
-              autoComplete="new-password"
               placeholder={t('form_author_placeholder')}
               value={item.author ?? ''}
               onChange={e => onItemChange({ author: e.target.value })}
@@ -1009,14 +1317,14 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
               />
               <button
                 type="button"
-                title={t('scan_isbn')}
-                onClick={() => setIsbnScanOpen(true)}
-                className="shrink-0 p-1 rounded border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 hover:border-blue-400 transition-colors bg-white dark:bg-gray-800"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
-                </svg>
+                 title={t('scan_isbn')}
+                 onClick={() => setIsbnScanOpen(true)}
+                 className="shrink-0 p-1 rounded border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 hover:border-blue-400 transition-colors bg-white dark:bg-gray-800"
+               >
+                 <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
+                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
+                 </svg>
               </button>
             </div>
           </div>
@@ -1039,25 +1347,26 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
           onDetected={raw => { onItemChange({ isbn: raw }); setIsbnScanOpen(false) }}
         />
 
-        {/* Status line — above actions */}
-        {statusLine && (
-          <p className={`text-xs mt-2 flex items-center gap-1.5 ${
-            statusLine.type === 'error'   ? 'text-red-500 dark:text-red-400' :
-            statusLine.type === 'success' ? 'text-green-600 dark:text-green-400' :
-                                            'text-gray-400 dark:text-gray-500'
-          }`}>
-            {statusLine.type === 'loading' && (
-              <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-            )}
-            {statusLine.text}
-          </p>
-        )}
-
-        {/* Actions row — no status control for wishlist */}
-        <div className="flex items-center justify-end gap-2 mt-1.5">
+        {/* Status + actions on one row */}
+        <div className="flex items-center gap-2 mt-1.5">
+          {/* Status line — flex-1 so it takes remaining space */}
+          {statusLine ? (
+            <p className={`flex-1 text-xs flex items-center gap-1.5 ${
+              statusLine.type === 'error'   ? 'text-red-500 dark:text-red-400' :
+              statusLine.type === 'success' ? 'text-green-600 dark:text-green-400' :
+                                              'text-gray-400 dark:text-gray-500'
+            }`}>
+              {statusLine.type === 'loading' && (
+                <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              )}
+              {statusLine.text}
+            </p>
+          ) : (
+            <span className="flex-1" />
+          )}
           {/* Cancel */}
           <button
             type="button"
@@ -1066,11 +1375,10 @@ function WishlistAddForm({ item, coverDataUrl, searchHits, searchState, fillStat
           >
             {t('cancel')}
           </button>
-
           {/* Save */}
           <button
             type="submit"
-            disabled={!item.title || !item.author}
+            disabled={!item.title || !item.author || isWishlistDuplicate}
             className="px-2 py-0.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {t('add')}
@@ -1091,34 +1399,131 @@ function WishlistCard(props: {
   inferredPublisher: string | null
   entry?: PriceCacheEntry
   capturingChannels: Record<string, boolean>
+  autoCapturingChannels: Record<string, boolean>
   allTags: string[]
+  // Edit state (lifted to parent)
+  isEditing: boolean
+  editDraft: { title: string; author: string; publisher: string; detailUrl: string; coverDataUrl: string }
+  editRefetchState: 'idle' | 'loading' | 'none'
+  coverBustTs?: number
+  onEdit: () => void
+  onEditDraftChange: (patch: Partial<{ title: string; author: string; publisher: string; detailUrl: string; coverDataUrl: string }>) => void
+  onEditCancel: () => void
+  onEditSave: () => void
+  onEditRefetchCover: () => void
+  onEditChooseCover: () => void
   onCapture: (ch: CaptureChannel) => void
+  onAutoCapture: () => void
+  onRefreshChannel: (ch: CaptureChannel) => void
+  onRemoveManualFlag: (ch: CaptureChannel) => void
   onTagsChange: (tags: string[]) => void
   onDelete: () => void
+  onPendingBuyChange: () => void
+  onPurchase: () => void
   onTitleClick: () => void
   onZoom: (url: string) => void
+  isInInventory?: boolean
 }) {
-  const { item, sem, inferredPublisher, entry, capturingChannels, allTags, onCapture, onTagsChange, onDelete, onTitleClick, onZoom } = props
+  const { item, sem, inferredPublisher, entry, capturingChannels, autoCapturingChannels, allTags,
+    isEditing, editDraft, editRefetchState, coverBustTs,
+    onEdit, onEditDraftChange, onEditCancel, onEditSave, onEditRefetchCover, onEditChooseCover,
+    onCapture, onAutoCapture, onRefreshChannel, onRemoveManualFlag, onTagsChange, onDelete, onPendingBuyChange, onPurchase, onTitleClick, onZoom,
+    isInInventory } = props
   const { t } = useLang()
   const [priceOpen, setPriceOpen] = useState(false)
   const quotes = getQuotesForRender(entry)
   const bestPrice = quotes.filter(q => q.status === 'ok' && typeof q.priceCny === 'number')
     .sort((a, b) => (a.priceCny as number) - (b.priceCny as number))[0]
+  const isAnyAutoCapturing = Object.values(autoCapturingChannels).some(Boolean)
+  const isAnyCapturing = Object.values(capturingChannels).some(Boolean)
+  const isBusy = isAnyAutoCapturing || isAnyCapturing
+  const displayCoverUrl = coverBustTs ? `${item.coverUrl}?t=${coverBustTs}` : item.coverUrl
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-col group">
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow flex flex-col group relative">
+      {/* Pending-buy toggle — top-right corner, hidden while editing */}
+       <button
+         onClick={onPendingBuyChange}
+         title={t(item.pendingBuy ? 'pending_buy' : 'not_pending_buy')}
+         className={`absolute top-1.5 right-1.5 z-10 p-0.5 rounded transition-colors ${
+           item.pendingBuy
+             ? 'text-amber-400'
+             : 'text-gray-300 hover:text-amber-400'
+         } ${isEditing ? 'hidden' : ''}`}
+       >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill={item.pendingBuy ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+        </svg>
+      </button>
       {/* Top: A (cover) + B (text) */}
       <div className="flex flex-row h-28">
         {/* A — Cover */}
         <div className="flex-shrink-0 w-20 self-stretch bg-gray-100 dark:bg-gray-700 flex items-center justify-center rounded-tl-xl overflow-hidden relative">
-          {item.coverUrl ? (
+          {isEditing ? (
             <>
-              <img src={item.coverUrl} alt={item.title} className="w-full h-full object-contain" />
+              {(editDraft.coverDataUrl || displayCoverUrl) ? (
+                <img
+                  src={editDraft.coverDataUrl || displayCoverUrl}
+                  alt={item.title}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="flex items-center justify-center text-gray-300 dark:text-gray-600">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                  </svg>
+                </div>
+              )}
+              {/* Bottom overlay: file upload + re-fetch */}
+              <div className="absolute bottom-0 inset-x-0 flex justify-center gap-1 py-0.5 bg-black/40">
+                <button
+                  type="button"
+                  title={t('choose_cover')}
+                  onClick={onEditChooseCover}
+                  className="p-0.5 rounded text-white/80 hover:text-white transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                  </svg>
+                </button>
+                {(editDraft.detailUrl.trim() || item.detailUrl || item.isbn) && (
+                  <button
+                    type="button"
+                    title={
+                      editRefetchState === 'loading' ? t('refetch_cover_loading') :
+                      editRefetchState === 'none'    ? t('refetch_cover_none') :
+                      t('refetch_cover')
+                    }
+                    disabled={editRefetchState === 'loading' || editRefetchState === 'none'}
+                    onClick={onEditRefetchCover}
+                    className="p-0.5 rounded text-white/80 hover:text-white transition-colors disabled:opacity-40"
+                  >
+                    {editRefetchState === 'loading' ? (
+                      <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                    ) : editRefetchState === 'none' ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </div>
+            </>
+          ) : displayCoverUrl ? (
+            <>
+              <img src={displayCoverUrl} alt={item.title} className="w-full h-full object-contain" />
               <button
                 type="button"
                 title={t('view_fullsize')}
                 className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 z-10"
-                onClick={e => { e.stopPropagation(); onZoom(item.coverUrl!) }}
+                onClick={e => { e.stopPropagation(); onZoom(displayCoverUrl!) }}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
@@ -1138,32 +1543,74 @@ function WishlistCard(props: {
         <div className="p-3 flex flex-col flex-1 min-w-0">
           {/* Title */}
           <div className="mb-0.5">
+            {isEditing ? (
+              <input
+                type="text"
+                value={editDraft.title}
+                onChange={e => onEditDraftChange({ title: e.target.value })}
+                className="font-semibold text-sm text-gray-800 dark:text-gray-100 leading-snug w-full rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              />
+            ) : (
             <button
               type="button"
               onClick={onTitleClick}
-              className="font-semibold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
+              className={`font-semibold text-sm line-clamp-2 leading-snug text-left hover:underline transition-colors ${
+                isInInventory
+                  ? 'text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300'
+                  : 'text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400'
+              }`}
             >
               {item.title}
             </button>
+            )}
           </div>
 
-          <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{item.author}</p>
-          {(item.publisher || inferredPublisher) && (
-            <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
-              {item.publisher ?? <span className="italic">{inferredPublisher}</span>}
-            </p>
-          )}
+          {isEditing ? (
+            <div className="flex flex-col gap-0.5 -mx-px">
+              <input
+                type="text"
+                autoComplete="new-password"
+                value={editDraft.author}
+                onChange={e => onEditDraftChange({ author: e.target.value })}
+                placeholder={t('field_author')}
+                className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              />
+              <input
+                type="text"
+                value={editDraft.publisher}
+                onChange={e => onEditDraftChange({ publisher: e.target.value })}
+                placeholder={t('field_publisher')}
+                className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              />
+              <input
+                type="url"
+                value={editDraft.detailUrl}
+                onChange={e => onEditDraftChange({ detailUrl: e.target.value })}
+                placeholder={t('field_detail_url')}
+                className="text-xs text-gray-800 dark:text-gray-100 rounded border border-blue-400 px-1 py-px bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              />
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-gray-600 dark:text-gray-400 mb-0.5 truncate">{item.author}</p>
+              {(item.publisher || inferredPublisher) && (
+                <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                  {item.publisher ?? <span className="italic">{inferredPublisher}</span>}
+                </p>
+              )}
 
-          {/* Tag editor */}
-          <WishlistTagEditor
-            tags={item.tags ?? []}
-            allTags={allTags}
-            onChange={onTagsChange}
-          />
+              {/* Tag editor */}
+              <WishlistTagEditor
+                tags={item.tags ?? []}
+                allTags={allTags}
+                onChange={onTagsChange}
+              />
+            </>
+          )}
         </div>
       </div>
 
-      {/* C — Full-width bottom bar: ISBN badge + best price + price toggle + delete */}
+      {/* C — Full-width bottom bar: ISBN badge + best price + refresh + price toggle + delete */}
       <div className="flex items-center justify-between px-3 py-1 border-t border-gray-100 dark:border-gray-700">
         {sem && item.isbn ? (
           <WishlistIsbnBadge isbn={item.isbn} sem={sem} />
@@ -1171,44 +1618,108 @@ function WishlistCard(props: {
           <span />
         )}
         <div className="flex items-center gap-1">
-          {/* Best price summary */}
-          {bestPrice && (
-            <button
-              onClick={() => void window.app.openExternal(bestPrice.url)}
-              className={`text-xs font-semibold ${channelColorText(bestPrice.channel)} hover:underline`}
-            >
-              ¥{(bestPrice.priceCny as number).toFixed(2)}
-            </button>
+          {isEditing ? (
+            <>
+              <button
+                type="button"
+                onClick={onEditCancel}
+                className="px-2 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={onEditSave}
+                className="px-2 py-0.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              >
+                {t('save')}
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Best price summary */}
+              {bestPrice && (
+                <button
+                  onClick={() => void window.app.openExternal(bestPrice.url)}
+                  className={`text-xs font-semibold mr-2 ${channelColorText(bestPrice.channel)} hover:underline`}
+                >
+                  ¥{(bestPrice.priceCny as number).toFixed(2)}
+                </button>
+              )}
+              {/* Purchase — move to library */}
+              <button
+                onClick={onPurchase}
+                title={t('move_to_library')}
+                className="p-1 rounded transition-colors text-gray-300 hover:text-green-500"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+              </button>
+              {/* Refresh all channels */}
+              <button
+                onClick={onAutoCapture}
+                disabled={isBusy}
+                title={t('refresh_all')}
+                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 dark:hover:text-blue-400 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isBusy ? (
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 3v5h-5"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-5h5"/>
+                  </svg>
+                )}
+              </button>
+              {/* Price toggle */}
+              <button
+                onClick={() => setPriceOpen(o => !o)}
+                title={t('compare_prices')}
+                className={`p-1 rounded transition-colors ${priceOpen ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500 dark:hover:text-gray-300'}`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+              </button>
+              {/* Edit */}
+              <button
+                type="button"
+                title={t('edit')}
+                onClick={onEdit}
+                className="p-1 text-gray-300 hover:text-blue-500 rounded transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+                </svg>
+              </button>
+              {/* Delete */}
+              <button
+                onClick={onDelete}
+                title={t('delete')}
+                className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </>
           )}
-          {/* Price toggle */}
-          <button
-            onClick={() => setPriceOpen(o => !o)}
-            title={priceOpen ? t('compare_prices') : t('compare_prices')}
-            className={`p-1 rounded transition-colors ${priceOpen ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500 dark:hover:text-gray-300'}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-            </svg>
-          </button>
-          {/* Delete */}
-          <button
-            onClick={onDelete}
-            title={t('delete')}
-            className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-            </svg>
-          </button>
         </div>
       </div>
 
       {/* Collapsible price panel */}
       {priceOpen && (
-        <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2 space-y-1.5">
+        <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-1 space-y-0">
           {channelOrder.map(ch => {
             const quote = quotes.find(q => q.channel === ch)
             const isCapturing = capturingChannels[ch] === true
+            const isAutoCapturing = autoCapturingChannels[ch] === true
             const supported = CAPTURE_SUPPORTED.includes(ch)
             return (
               <ChannelRow
@@ -1216,8 +1727,13 @@ function WishlistCard(props: {
                 channel={ch}
                 quote={quote}
                 isCapturing={isCapturing}
+                isAutoCapturing={isAutoCapturing}
                 captureSupported={supported}
+                isBestPrice={!!(bestPrice && bestPrice.channel === ch)}
                 onCapture={() => onCapture(ch as CaptureChannel)}
+                onAutoCapture={() => void window.pricing.autoCaptureChannel(buildPricingInput(item), ch as CaptureChannel)}
+                onRefresh={() => onRefreshChannel(ch as CaptureChannel)}
+                onRemoveManualFlag={() => onRemoveManualFlag(ch as CaptureChannel)}
               />
             )
           })}
@@ -1235,38 +1751,55 @@ function ChannelRow(props: {
   channel: PriceChannel
   quote?: PriceQuote
   isCapturing: boolean
+  isAutoCapturing: boolean
   captureSupported: boolean
+  isBestPrice?: boolean
   onCapture: () => void
+  onAutoCapture: () => void
+  onRefresh: () => void
+  onRemoveManualFlag: () => void
 }) {
-  const { channel, quote, isCapturing, captureSupported, onCapture } = props
+  const { channel, quote, isCapturing, isAutoCapturing, captureSupported, isBestPrice, onCapture, onAutoCapture, onRefresh, onRemoveManualFlag } = props
   const { lang, t } = useLang()
   const hasPrice = quote?.status === 'ok' && typeof quote.priceCny === 'number'
+  const isDelisted = quote?.status === 'not_found' && quote.productId
+  const isBusy = isCapturing || isAutoCapturing
+
+  // Source: 'auto' if no quote yet, or if quote.source === 'auto'. 'manual' only if explicitly set.
+  const isManualSource = hasPrice && quote!.source === 'manual'
+  const isAutoSource = !isManualSource  // default = auto
+
+  // Whether refresh is possible (needs a productId for direct product-page refresh)
+  const canRefresh = !!(quote?.productId) || isAutoSource
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-h-[1.5rem]">
       {/* Channel name */}
       <span className="w-10 text-xs text-gray-400 dark:text-gray-500 shrink-0">
         {t(`channel_${channel}` as DictKey)}
       </span>
 
       {/* Price / status */}
-      <div className="flex-1 flex items-baseline gap-1.5">
-        {isCapturing ? (
-          <span className="text-xs text-gray-400 dark:text-gray-500 italic">{t('price_fetching')}</span>
+      <div className="flex-1 flex items-baseline gap-0">
+        {/* Price column — fixed width so timestamps align */}
+        <div className="w-24 shrink-0">
+        {isBusy ? (
+          <span className="text-xs text-gray-400 dark:text-gray-500 italic flex items-center gap-1 whitespace-nowrap leading-none">
+            <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+            {isCapturing ? t('price_fetching') : t('auto_pricing')}
+          </span>
+        ) : isDelisted ? (
+          <span className="text-xs text-red-500 dark:text-red-400">{t('price_delisted')}</span>
         ) : hasPrice ? (
-          <>
-            <button
-              onClick={() => void window.app.openExternal(quote!.url)}
-              className={`text-sm font-semibold ${channelColorText(channel)} hover:underline leading-none`}
-            >
-              ¥{(quote!.priceCny as number).toFixed(2)}
-            </button>
-            {quote!.fetchedAt && (
-              <span className="text-[10px] text-gray-300 dark:text-gray-600 leading-none" title={formatExact(quote!.fetchedAt, lang)}>
-                {formatFetchedAt(quote!.fetchedAt, t)}
-              </span>
-            )}
-          </>
+          <button
+            onClick={() => void window.app.openExternal(quote!.url)}
+            className={`text-xs font-semibold hover:underline leading-none ${isBestPrice ? channelColorText(channel) : 'text-gray-400 dark:text-gray-500'}`}
+          >
+            ¥{(quote!.priceCny as number).toFixed(2)}
+          </button>
         ) : quote ? (
           <span className="text-xs text-gray-400 dark:text-gray-500">
             {quote.status === 'not_found' ? t('price_not_found') : (quote.message ?? t('price_failed'))}
@@ -1274,29 +1807,66 @@ function ChannelRow(props: {
         ) : (
           <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
         )}
+        </div>
+        {/* Timestamp column — fixed width for alignment */}
+        <div className="w-14 shrink-0">
+        {hasPrice && !isBusy && quote!.fetchedAt && (
+          <span className="text-[10px] text-gray-300 dark:text-gray-600 leading-none" title={formatExact(quote!.fetchedAt, lang)}>
+            {formatFetchedAt(quote!.fetchedAt, t)}
+          </span>
+        )}
+        </div>
       </div>
 
-      {/* Action button */}
-      {captureSupported && !isCapturing && (
-        <button
-          onClick={onCapture}
-          title={hasPrice ? t('reprice') : t('get_price')}
-          className="p-1 rounded text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
-        >
-          {hasPrice ? (
+      {/* Fixed 3 action buttons: Refresh · Auto · Manual */}
+      {captureSupported && (
+        <div className="flex items-center gap-0.5 shrink-0">
+          {/* Refresh button */}
+          <button
+            onClick={isBusy ? undefined : onRefresh}
+            disabled={isBusy || !canRefresh}
+            title={t('refresh_channel')}
+            className="p-0.5 rounded transition-colors text-gray-300 dark:text-gray-600 hover:text-blue-500 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
               <path d="M21 3v5h-5"/>
               <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
               <path d="M3 21v-5h5"/>
             </svg>
-          ) : (
+          </button>
+          {/* Auto-price button — highlighted when current source is auto */}
+          <button
+            onClick={isBusy ? undefined : (isAutoSource ? undefined : () => { onRemoveManualFlag(); onAutoCapture() })}
+            disabled={isBusy}
+            title={isAutoSource ? t('source_auto_active') : t('source_auto_inactive')}
+            className={`p-0.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+              isAutoSource
+                ? 'text-sky-500 dark:text-sky-400'
+                : 'text-gray-300 dark:text-gray-600 hover:text-sky-500 dark:hover:text-sky-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
+            </svg>
+          </button>
+          {/* Manual-price button — highlighted when current source is manual */}
+          <button
+            onClick={isBusy ? undefined : onCapture}
+            disabled={isBusy}
+            title={isManualSource ? t('source_manual_active') : t('source_manual_inactive')}
+            className={`p-0.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+              isManualSource
+                ? 'text-amber-500 dark:text-amber-400'
+                : 'text-gray-300 dark:text-gray-600 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8"/>
               <path d="m21 21-4.35-4.35"/>
             </svg>
-          )}
-        </button>
+          </button>
+        </div>
       )}
       {!captureSupported && (
         <span className="text-[10px] text-gray-300 dark:text-gray-600 shrink-0">{t('channel_unsupported')}</span>
@@ -1312,8 +1882,8 @@ function ChannelRow(props: {
 function channelColorText(ch: PriceChannel): string {
   switch (ch) {
     case 'bookschina': return 'text-emerald-700'
-    case 'jd':         return 'text-red-700'
-    case 'dangdang':   return 'text-orange-700'
+    case 'jd':         return 'text-red-600'
+    case 'dangdang':   return 'text-amber-500'
   }
 }
 
@@ -1347,6 +1917,19 @@ function formatFetchedAt(iso: string, t: (key: DictKey, vars?: Record<string, st
 
 function getEntryForItem(cache: Record<string, PriceCacheEntry>, item: WishlistItem): PriceCacheEntry | undefined {
   return cache[buildPricingKey(item)]
+}
+
+/**
+ * Normalize a book title for cross-library duplicate detection.
+ * Strips bracketed suffixes (e.g. "（插图修订第4版）", "(第6版)") and all
+ * non-letter/non-digit characters before lowercasing, so that edition notes
+ * don't prevent a match between the wishlist and the inventory.
+ */
+function normTitleForInventory(title: string): string {
+  return title
+    .replace(/[（(][^）)]*[）)]/gu, '')   // remove bracket content
+    .replace(/[^\p{L}\p{N}]/gu, '')       // strip non-letter/non-digit
+    .toLowerCase()
 }
 
 function getQuotesForRender(entry?: PriceCacheEntry): PriceQuote[] {

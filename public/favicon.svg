@@ -1,9 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-  <rect x="8" y="10" width="17" height="22" rx="2" fill="#93C5FD" stroke="#3B82F6" stroke-width="1"/>
-  <rect x="12" y="7" width="17" height="22" rx="2" fill="#FDE68A" stroke="#F59E0B" stroke-width="1"/>
-  <rect x="15" y="4" width="16" height="24" rx="2" fill="#F9FAFB" stroke="#9CA3AF" stroke-width="1"/>
-  <line x1="18" y1="10" x2="28" y2="10" stroke="#D1D5DB" stroke-width="1" stroke-linecap="round"/>
-  <line x1="18" y1="13" x2="28" y2="13" stroke="#D1D5DB" stroke-width="1" stroke-linecap="round"/>
-  <line x1="18" y1="16" x2="25" y2="16" stroke="#D1D5DB" stroke-width="1" stroke-linecap="round"/>
-  <text x="23" y="26" text-anchor="middle" font-size="7" font-weight="bold" fill="#374151" font-family="system-ui,sans-serif">TK</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" style="background: transparent;">
+  <defs>
+    <style>
+      .bg-base { fill: #F1F5F9; }
+      .book-fill { fill: #FFFFFF; }
+      .stroke-main { fill: none; stroke: #0F172A; stroke-width: 48; stroke-linecap: round; stroke-linejoin: round; }
+      .bookmark-fill { fill: #EF4444; stroke: #0F172A; stroke-width: 48; stroke-linecap: round; stroke-linejoin: round; }
+      
+      @media (prefers-color-scheme: dark) {
+        .bg-base { fill: #1E293B; }
+        .book-fill { fill: #334155; }
+        .stroke-main { stroke: #F8FAFC; }
+        .bookmark-fill { fill: #F87171; stroke: #F8FAFC; }
+      }
+    </style>
+  </defs>
+
+  <g transform="translate(100, 100) scale(0.8046875)">
+    <rect width="1024" height="1024" rx="230" class="bg-base" />
+
+    <g>
+      <rect x="220" y="192" width="584" height="640" rx="60" class="book-fill stroke-main" />
+      <line x1="360" y1="192" x2="360" y2="832" class="stroke-main" />
+      <path d="M 460 192 L 640 192 L 640 552 L 550 472 L 460 552 Z" class="bookmark-fill" />
+      <line x1="460" y1="672" x2="700" y2="672" class="stroke-main" />
+      <line x1="460" y1="752" x2="600" y2="752" class="stroke-main" />
+    </g>
+  </g>
 </svg>

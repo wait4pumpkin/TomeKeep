@@ -23,6 +23,9 @@ interface Window {
     // Per-user reading state
     getReadingStates: (userId: string) => Promise<import('../electron/db').ReadingState[]>
     setReadingState: (state: import('../electron/db').ReadingState) => Promise<import('../electron/db').ReadingState>
+    // Per-user UI preferences
+    getUiPrefs: (userId: string) => Promise<import('../electron/db').UIPreferences | null>
+    setUiPrefs: (userId: string, patch: Partial<import('../electron/db').UIPreferences>) => Promise<import('../electron/db').UIPreferences | null>
   }
   meta: {
     lookupIsbn: (isbn13: string) => Promise<
@@ -35,7 +38,7 @@ interface Window {
     >
     lookupDouban: (input: string) => Promise<
       | { ok: true; value: import('./lib/openLibrary').BookMetadata }
-      | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' }
+      | { ok: false; error: 'invalid_url' | 'not_found' | 'timeout' | 'network' | 'bad_response' | 'captcha' }
     >
     searchDouban: (query: string) => Promise<
       | { ok: true; value: import('../electron/metadata').DoubanSearchHit[] }
@@ -48,7 +51,7 @@ interface Window {
      * — call resolveCaptcha() to let the user solve it, then retry if needed.
      */
     lookupWaterfall: (isbn13: string) => Promise<
-      | { ok: true; value: import('./lib/openLibrary').BookMetadata; source: 'douban' | 'openlibrary' | 'isbnsearch'; doubanUrl?: string }
+      | { ok: true; value: import('./lib/openLibrary').BookMetadata; source: 'douban' | 'openlibrary' | 'isbnsearch'; detailUrl?: string }
       | { ok: false; error: 'not_found' | 'captcha' }
     >
     /**
@@ -70,6 +73,19 @@ interface Window {
     openCapture: (
       input: import('../electron/pricing').PricingInput & { channel: import('../electron/pricing').CaptureChannel },
     ) => Promise<import('../electron/pricing').OpenCaptureResult>
+    /** Trigger headless auto-capture for all three channels concurrently. */
+    autoCaptureAll: (input: import('../electron/pricing').PricingInput) => Promise<void>
+    /** Trigger headless auto-capture for a single channel. */
+    autoCaptureChannel: (input: import('../electron/pricing').PricingInput, channel: import('../electron/pricing').CaptureChannel) => Promise<void>
+    /** Remove the 'manual' source flag from a quote without re-fetching. */
+    removeManualFlag: (key: string, channel: import('../electron/pricing').CaptureChannel) => Promise<void>
+    /** Re-fetch the product page for a manually-captured channel, keeping source='manual'. */
+    refreshManualChannel: (input: import('../electron/pricing').PricingInput, channel: import('../electron/pricing').CaptureChannel) => Promise<void>
+    /**
+     * Subscribe to per-channel auto-capture progress events pushed from main.
+     * Returns a dispose function that removes the listener.
+     */
+    onAutoProgress: (cb: (event: import('../electron/pricing').AutoCaptureProgressEvent) => void) => () => void
   }
   stores: {
     openLogin: (channel: import('../electron/stores').StoreChannel) => Promise<boolean>

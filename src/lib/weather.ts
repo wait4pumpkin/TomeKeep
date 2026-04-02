@@ -1,61 +1,80 @@
-export type WeatherCondition =
-  | 'clear'
-  | 'partly-cloudy'
-  | 'cloudy'
-  | 'fog'
-  | 'drizzle'
-  | 'rain'
-  | 'snow'
-  | 'thunderstorm'
-  | 'unknown'
+import type { WeatherState } from '../components/DynamicBrandIcon';
 
-export interface WeatherState {
-  condition: WeatherCondition
-  isDay: boolean
+export interface WeatherData {
+  state: WeatherState;
+  temperature?: number;
 }
 
-/** Map WMO weather interpretation code → WeatherCondition */
-function wmoToCondition(code: number): WeatherCondition {
-  if (code === 0) return 'clear'
-  if (code <= 3) return 'partly-cloudy'
-  if (code <= 19) return 'cloudy'
-  if (code <= 29) return 'fog' // 10-19 mist/fog; 20-29 past weather
-  if (code <= 39) return 'fog' // 30-39 duststorm / fog variants
-  if (code <= 49) return 'fog' // 40-49 fog
-  if (code <= 59) return 'drizzle' // 50-59 drizzle
-  if (code <= 69) return 'rain' // 60-69 rain
-  if (code <= 79) return 'snow' // 70-79 snow
-  if (code <= 84) return 'rain' // 80-84 rain showers
-  if (code <= 86) return 'snow' // 85-86 snow showers
-  if (code <= 94) return 'thunderstorm' // 87-94 hail / thunderstorm vicinity
-  if (code <= 99) return 'thunderstorm' // 95-99 thunderstorm
-  return 'unknown'
+const CACHE_KEY = 'tomekeep_weather_cache';
+const CACHE_DURATION = 1000 * 60 * 30; // 30 minutes
+
+interface CachedWeather {
+  timestamp: number;
+  data: WeatherData;
 }
 
-/** Fetch current weather using browser geolocation + Open-Meteo (no API key). */
-export async function fetchWeather(): Promise<WeatherState> {
-  const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 }),
-  )
+export async function fetchWeather(): Promise<WeatherData> {
+  try {
+    const cachedStr = localStorage.getItem(CACHE_KEY);
+    if (cachedStr) {
+      const cached: CachedWeather = JSON.parse(cachedStr);
+      if (Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.data;
+      }
+    }
 
-  const { latitude, longitude } = pos.coords
-  const url =
-    `https://api.open-meteo.com/v1/forecast` +
-    `?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}` +
-    `&current_weather=true`
+    // 1. Get approximate location via IP
+    const locRes = await fetch('https://ipapi.co/json/');
+    if (!locRes.ok) throw new Error('Location fetch failed');
+    const locData = await locRes.json();
+    const { latitude, longitude } = locData;
 
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Open-Meteo error ${res.status}`)
+    // 2. Fetch current weather from OpenMeteo
+    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`);
+    if (!weatherRes.ok) throw new Error('Weather fetch failed');
+    const weatherData = await weatherRes.json();
+    
+    // WMO Weather interpretation codes
+    // 0: Clear sky
+    // 1, 2, 3: Mainly clear, partly cloudy, and overcast
+    // 45, 48: Fog and depositing rime fog
+    // 51, 53, 55: Drizzle: Light, moderate, and dense intensity
+    // 56, 57: Freezing Drizzle: Light and dense intensity
+    // 61, 63, 65: Rain: Slight, moderate and heavy intensity
+    // 66, 67: Freezing Rain: Light and heavy intensity
+    // 71, 73, 75: Snow fall: Slight, moderate, and heavy intensity
+    // 77: Snow grains
+    // 80, 81, 82: Rain showers: Slight, moderate, and violent
+    // 85, 86: Snow showers slight and heavy
+    // 95: Thunderstorm: Slight or moderate
+    // 96, 99: Thunderstorm with slight and heavy hail
 
-  const json = (await res.json()) as {
-    current_weather?: { weathercode: number; is_day: number }
-  }
+    const code = weatherData.current_weather.weathercode;
+    let state: WeatherState = 'none';
 
-  const cw = json.current_weather
-  if (!cw) throw new Error('No current_weather in response')
+    if (code === 0 || code === 1 || code === 2) {
+      state = 'sunny';
+    } else if (code === 3 || code === 45 || code === 48) {
+      state = 'cloudy';
+    } else if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(code)) {
+      state = 'rainy';
+    } else if ([71, 73, 75, 77, 85, 86].includes(code)) {
+      state = 'snowy';
+    }
 
-  return {
-    condition: wmoToCondition(cw.weathercode),
-    isDay: cw.is_day !== 0,
+    const result: WeatherData = {
+      state,
+      temperature: weatherData.current_weather.temperature,
+    };
+
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      timestamp: Date.now(),
+      data: result
+    }));
+
+    return result;
+  } catch (err) {
+    console.error('Failed to fetch dynamic weather:', err);
+    return { state: 'none' };
   }
 }

@@ -67,6 +67,20 @@ interface WishlistItem {
 }
 ```
 
+#### PriceQuote
+```ts
+interface PriceQuote {
+  channel: PriceChannel          // 'jd' | 'dangdang' | 'bookschina'
+  status: 'ok' | 'not_found' | 'error'
+  priceCny?: number              // present when status === 'ok'
+  url: string                    // product detail page URL
+  productId?: string             // channel-specific product ID; set after first successful capture
+  source?: 'manual' | 'auto'    // 'manual' = captured via capture window; 'auto' = automated capture; undefined = legacy
+  fetchedAt?: string             // ISO 8601
+  message?: string               // human-readable error detail when status === 'error'
+}
+```
+
 ### Renderer Global APIs (preload)
 - window.db
   - purpose: local persistence for inventory, wishlist, users, and per-user reading state
@@ -118,7 +132,7 @@ interface WishlistItem {
       - bad_response
 
 - window.pricing
-  - purpose: read price cache and open in-app capture windows for manual price collection
+  - purpose: read price cache, open in-app capture windows for manual price collection, and trigger automated background price capture
   - methods:
     - get(keys: string[]) -> Record<string, PriceCacheEntry>
       - reads cached price entries for the given normalized keys (no network requests)
@@ -129,10 +143,22 @@ interface WishlistItem {
       - on cancel / window close: returns { ok: false, reason: 'cancelled' }
       - on error: returns { ok: false, reason: 'error' }
       - currently supported channels: jd, dangdang, bookschina
+    - autoCaptureAll(input: PricingInput) -> void
+      - triggers background price capture for all three channels concurrently
+      - progress events are pushed to the renderer via the `pricing:auto-progress` IPC channel
+      - if a channel returns a login wall or CAPTCHA, a visible BrowserWindow opens for user resolution (5-minute timeout)
+      - channels with an existing `productId` refresh price directly from the product page
+    - removeManualFlag(key: string, channel: CaptureChannel) -> void
+      - sets `PriceQuote.source` to `undefined` for the given key+channel (removes ✎ badge); does NOT trigger re-capture
+    - onAutoProgress(cb: (event: AutoCaptureProgressEvent) => void) -> () => void
+      - registers a callback for auto-capture progress events pushed from the main process
+      - returns a dispose function; call it to remove the listener
   - types:
     - CaptureChannel: 'jd' | 'dangdang' | 'bookschina'
     - PricingInput: { key: string; title: string; author?: string; isbn?: string }
-    - PriceQuote.source: 'manual' | undefined  (manual = captured via capture window)
+    - AutoCaptureProgressEvent: { key: string; channel: CaptureChannel; status: 'started' | 'done' | 'error' | 'skipped'; quote?: PriceQuote }
+    - PriceQuote.source: 'manual' | 'auto' | undefined  (manual = captured via capture window; auto = automated capture)
+    - PriceQuote.productId?: string  (channel-specific product ID; set after first successful capture)
     - PriceQuote.url: product detail page URL (e.g. https://item.jd.com/<sku>.html, https://product.dangdang.com/<id>.html, https://www.bookschina.com/<id>.htm)
 
 - window.stores
@@ -333,6 +359,9 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | meta:douban-status | renderer→main | returns `{ loggedIn: boolean }` based on `dbcl2` cookie in `persist:douban` session |
 | pricing:get | renderer→main | reads priceCache for given keys |
 | pricing:open-capture | renderer→main | opens capture BrowserWindow, awaits user confirmation |
+| pricing:auto-capture-all | renderer→main | triggers concurrent automated price capture for all channels; progress pushed via `pricing:auto-progress` |
+| pricing:remove-manual-flag | renderer→main | sets PriceQuote.source to undefined for a given key+channel |
+| pricing:auto-progress | main→renderer | pushed per-channel during `pricing:auto-capture-all`; payload: `AutoCaptureProgressEvent` |
 | capture:result | capture-preload→main | payload from user confirming a product price |
 | capture:cancel | capture-preload→main | user closed or cancelled capture window |
 | stores:open-login | renderer→main | opens retailer login window |

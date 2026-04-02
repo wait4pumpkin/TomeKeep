@@ -1,5 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
-import type { Book, WishlistItem, UserProfile, ReadingState } from './db'
+import type { Book, WishlistItem, UserProfile, ReadingState, UIPreferences } from './db'
 import type { StoreChannel } from './stores'
 
 // --------- Expose some API to the Renderer process ---------
@@ -43,6 +43,9 @@ contextBridge.exposeInMainWorld('db', {
   // Per-user reading state
   getReadingStates: (userId: string) => ipcRenderer.invoke('db:get-reading-states', userId) as Promise<ReadingState[]>,
   setReadingState: (state: ReadingState) => ipcRenderer.invoke('db:set-reading-state', state) as Promise<ReadingState>,
+  // Per-user UI preferences
+  getUiPrefs: (userId: string) => ipcRenderer.invoke('db:get-ui-prefs', userId) as Promise<UIPreferences | null>,
+  setUiPrefs: (userId: string, patch: Partial<UIPreferences>) => ipcRenderer.invoke('db:set-ui-prefs', userId, patch) as Promise<UIPreferences | null>,
 })
 
 contextBridge.exposeInMainWorld('meta', {
@@ -64,6 +67,27 @@ contextBridge.exposeInMainWorld('pricing', {
   get: (keys: string[]) => ipcRenderer.invoke('pricing:get', keys),
   openCapture: (input: import('./pricing').PricingInput & { channel: import('./pricing').CaptureChannel }) =>
     ipcRenderer.invoke('pricing:open-capture', input),
+  /** Trigger automated headless price capture for all three channels. */
+  autoCaptureAll: (input: import('./pricing').PricingInput) =>
+    ipcRenderer.invoke('pricing:auto-capture-all', input) as Promise<void>,
+  /** Trigger automated headless price capture for a single channel. */
+  autoCaptureChannel: (input: import('./pricing').PricingInput, channel: import('./pricing').CaptureChannel) =>
+    ipcRenderer.invoke('pricing:auto-capture-channel', input, channel) as Promise<void>,
+  /** Remove the 'manual' flag from a quote (sets source to 'auto') without re-fetching. */
+  removeManualFlag: (key: string, channel: import('./pricing').CaptureChannel) =>
+    ipcRenderer.invoke('pricing:remove-manual-flag', key, channel) as Promise<void>,
+  /** Re-fetch the product page for a manually-captured channel, keeping source='manual'. */
+  refreshManualChannel: (input: import('./pricing').PricingInput, channel: import('./pricing').CaptureChannel) =>
+    ipcRenderer.invoke('pricing:refresh-manual-channel', input, channel) as Promise<void>,
+  /**
+   * Subscribe to auto-capture progress events pushed from the main process.
+   * Returns a dispose function that removes the listener.
+   */
+  onAutoProgress: (cb: (event: import('./pricing').AutoCaptureProgressEvent) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, ev: import('./pricing').AutoCaptureProgressEvent) => cb(ev)
+    ipcRenderer.on('pricing:auto-progress', listener)
+    return () => ipcRenderer.off('pricing:auto-progress', listener)
+  },
 })
 
 contextBridge.exposeInMainWorld('stores', {
