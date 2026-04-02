@@ -26,13 +26,13 @@ export async function fetchWeather(): Promise<WeatherData> {
     // 1. Get approximate location via IP
     const locRes = await fetch('https://ipapi.co/json/');
     if (!locRes.ok) throw new Error('Location fetch failed');
-    const locData = await locRes.json();
+    const locData = await locRes.json() as { latitude: number; longitude: number };
     const { latitude, longitude } = locData;
 
     // 2. Fetch current weather from OpenMeteo
     const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`);
     if (!weatherRes.ok) throw new Error('Weather fetch failed');
-    const weatherData = await weatherRes.json();
+    const weatherData = await weatherRes.json() as { current_weather: { weathercode: number; temperature: number } };
     
     // WMO Weather interpretation codes
     // 0: Clear sky

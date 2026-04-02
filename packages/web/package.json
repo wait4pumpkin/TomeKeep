@@ -1,0 +1,32 @@
+{
+  "name": "@tomekeep/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev --compatibility-date=2024-09-23 -- vite dev",
+    "build": "vite build",
+    "preview": "wrangler pages dev --compatibility-date=2024-09-23 dist",
+    "typecheck": "tsc --noEmit",
+    "deploy": "vite build && wrangler pages deploy dist"
+  },
+  "dependencies": {
+    "@tomekeep/shared": "workspace:*",
+    "hono": "^4.6.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "~5.9.3",
+    "vite": "^6.4.1",
+    "vite-plugin-pwa": "^0.21.1",
+    "wrangler": "^3.87.0"
+  }
+}

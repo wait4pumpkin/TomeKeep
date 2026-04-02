@@ -1,0 +1,16 @@
+name = "tomekeep-web"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tomekeep-db"
+database_id = "REPLACE_WITH_ACTUAL_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "COVERS"
+bucket_name = "tomekeep-covers"
+
+[vars]
+# Non-secret runtime variables (secrets go in wrangler secret put)
+# JWT_SECRET is set via: wrangler secret put JWT_SECRET
