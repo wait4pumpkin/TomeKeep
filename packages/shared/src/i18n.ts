@@ -239,6 +239,28 @@ const dict = {
   copy_title:            { zh: '复制书名',      en: 'Copy title' },
   copy_title_done:       { zh: '已复制',        en: 'Copied' },
   saving:                { zh: '保存中…',        en: 'Saving…' },
+
+  // ── Settings / Cloud Sync ─────────────────────────────────────────────────
+  settings_title:             { zh: '设置',              en: 'Settings' },
+  nav_settings:               { zh: '设置',              en: 'Settings' },
+  sync_section_title:         { zh: '云同步',             en: 'Cloud Sync' },
+  sync_connected:             { zh: '已连接',             en: 'Connected' },
+  sync_last_sync:             { zh: '上次同步',           en: 'Last sync' },
+  sync_never:                 { zh: '从未同步',           en: 'Never' },
+  sync_pull_now:              { zh: '立即同步',           en: 'Sync now' },
+  sync_pulling:               { zh: '同步中…',            en: 'Syncing…' },
+  sync_pull_updated:          { zh: '同步完成，数据已更新', en: 'Sync complete — data updated' },
+  sync_pull_no_changes:       { zh: '同步完成，无新内容',  en: 'Sync complete — no changes' },
+  sync_pull_error:            { zh: '同步失败：{error}',  en: 'Sync failed: {error}' },
+  sync_logout:                { zh: '退出登录',           en: 'Log out' },
+  sync_login:                 { zh: '登录',               en: 'Log in' },
+  sync_logging_in:            { zh: '登录中…',            en: 'Logging in…' },
+  sync_login_description:     { zh: '登录后，书库和心愿单数据将自动同步到云端。', en: 'Log in to sync your library and wishlist to the cloud.' },
+  sync_username_placeholder:  { zh: '用户名',             en: 'Username' },
+  sync_password_placeholder:  { zh: '密码',               en: 'Password' },
+  sync_migrate_title:         { zh: '迁移现有数据到云端',  en: 'Migrate existing data to cloud' },
+  sync_migrate_description:   { zh: '首次登录后，请运行以下命令将本地书库一次性迁移到云端。', en: 'After your first login, run the command below to migrate your local library to the cloud.' },
+  sync_migrate_command:       { zh: 'pnpm --filter @tomekeep/desktop migrate-to-cloud', en: 'pnpm --filter @tomekeep/desktop migrate-to-cloud' },
 } as const
 
 export type DictKey = keyof typeof dict

@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { Layout } from './components/Layout'
 import { Inventory } from './pages/Inventory'
 import { Wishlist } from './pages/Wishlist'
+import { Settings } from './pages/Settings'
 import { LangProvider } from './lib/i18n'
 
 // Restores and persists the last active page per user.
@@ -14,7 +15,10 @@ function PagePersistence() {
   useEffect(() => {
     void window.db.getActiveUser().then(user => {
       if (!user?.uiPrefs?.activePage) return
-      const target = user.uiPrefs.activePage === 'wishlist' ? '/wishlist' : '/'
+      const target =
+        user.uiPrefs.activePage === 'wishlist' ? '/wishlist' :
+        user.uiPrefs.activePage === 'settings' ? '/settings' :
+        '/'
       if (location.pathname !== target) navigate(target, { replace: true })
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -24,7 +28,10 @@ function PagePersistence() {
   useEffect(() => {
     void window.db.getActiveUser().then(user => {
       if (!user) return
-      const page = location.pathname === '/wishlist' ? 'wishlist' : 'library'
+      const page: import('../electron/db').UIPreferences['activePage'] =
+        location.pathname === '/wishlist' ? 'wishlist' :
+        location.pathname === '/settings' ? 'settings' :
+        'library'
       void window.db.setUiPrefs(user.id, { activePage: page })
     })
   }, [location.pathname])
@@ -34,7 +41,10 @@ function PagePersistence() {
     function handleUserChange(e: Event) {
       const user = (e as CustomEvent<import('../electron/db').UserProfile | null>).detail
       if (!user) return
-      const target = user.uiPrefs?.activePage === 'wishlist' ? '/wishlist' : '/'
+      const target =
+        user.uiPrefs?.activePage === 'wishlist' ? '/wishlist' :
+        user.uiPrefs?.activePage === 'settings' ? '/settings' :
+        '/'
       navigate(target, { replace: true })
     }
     window.addEventListener('active-user-changed', handleUserChange)
@@ -53,6 +63,7 @@ function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<Inventory />} />
             <Route path="wishlist" element={<Wishlist />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
       </HashRouter>

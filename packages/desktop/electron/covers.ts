@@ -167,6 +167,30 @@ export function setupCovers() {
     }
     const result = await downloadCover(id, url)
     console.log('[covers:save-cover] result=%s', result)
+
+    // After saving locally, attempt async upload to R2 if logged in
+    if (result) {
+      void import('./sync.ts').then(async m => {
+        const coverKey = await m.uploadCoverToCloud(id)
+        if (coverKey) {
+          // Update book or wishlist item with the R2 cover key
+          const { getDb } = await import('./db.ts')
+          const db = getDb()
+          const bookIdx = db.data.books.findIndex(b => b.id === id)
+          if (bookIdx !== -1) {
+            db.data.books[bookIdx]!.coverKey = coverKey
+            await db.write()
+          } else {
+            const wishIdx = db.data.wishlist.findIndex(w => w.id === id)
+            if (wishIdx !== -1) {
+              db.data.wishlist[wishIdx]!.coverKey = coverKey
+              await db.write()
+            }
+          }
+        }
+      }).catch(err => console.error('[covers:save-cover] R2 upload error', err))
+    }
+
     return result ?? undefined
   })
 

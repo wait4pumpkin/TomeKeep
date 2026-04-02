@@ -12,10 +12,16 @@ export interface Book {
   status?: 'unread' | 'reading' | 'read'
   rating?: number
   coverUrl?: string
+  /** R2 cover key returned by POST /api/covers/upload. Used for cloud cover serving. */
+  coverKey?: string
   tags?: string[]
   /** Optional book detail page URL (e.g. Douban subject). Used for cover fetching and external links. */
   detailUrl?: string
   addedAt: string
+  /** ISO timestamp of the last local write. Used for LWW sync conflict resolution. */
+  updatedAt?: string
+  /** Sync status: 'synced' = pushed to cloud; 'pending' = not yet pushed. */
+  syncStatus?: 'synced' | 'pending'
 }
 
 export interface WishlistItem {
@@ -25,17 +31,23 @@ export interface WishlistItem {
   isbn?: string
   publisher?: string
   coverUrl?: string
+  /** R2 cover key returned by POST /api/covers/upload. Used for cloud cover serving. */
+  coverKey?: string
   /** Douban subject page URL or other external book detail page. Used for cover fetching and external links. */
   detailUrl?: string
   tags?: string[]
   priority: 'high' | 'medium' | 'low'
   pendingBuy?: boolean
   addedAt: string
+  /** ISO timestamp of the last local write. Used for LWW sync conflict resolution. */
+  updatedAt?: string
+  /** Sync status: 'synced' = pushed to cloud; 'pending' = not yet pushed. */
+  syncStatus?: 'synced' | 'pending'
 }
 
 export interface UIPreferences {
-  /** Last visited page: 'library' | 'wishlist'. */
-  activePage?: 'library' | 'wishlist'
+  /** Last visited page: 'library' | 'wishlist' | 'settings'. */
+  activePage?: 'library' | 'wishlist' | 'settings'
   // Inventory page
   inventorySortKey?: string
   inventorySortDir?: 'asc' | 'desc'
@@ -64,6 +76,10 @@ export interface ReadingState {
   status: 'unread' | 'reading' | 'read'
   /** ISO datetime string set when status first transitions to 'read'. Cleared when status moves away from 'read'. */
   completedAt?: string
+  /** ISO timestamp of the last local write. Used for LWW sync conflict resolution. */
+  updatedAt?: string
+  /** Sync status: 'synced' = pushed to cloud; 'pending' = not yet pushed. */
+  syncStatus?: 'synced' | 'pending'
 }
 
 export type PriceChannel = 'jd' | 'bookschina' | 'dangdang'
@@ -105,6 +121,10 @@ export interface DatabaseSchema {
   users: UserProfile[]
   readingStates: ReadingState[]
   activeUserId: string | null
+  /** Incremental sync cursors (latest updated_at seen per table). */
+  syncCursors?: { books: string; wishlist: string; readingStates: string }
+  /** ISO timestamp of the last successful pull from the cloud. */
+  lastSyncAt?: string
 }
 
 const defaultData: DatabaseSchema = {
@@ -211,17 +231,21 @@ export async function setupDatabase() {
   ipcMain.handle('db:add-book', async (_, book: Book) => {
     // Idempotency guard: if a book with this id already exists, skip the insert
     if (db.data.books.some(b => b.id === book.id)) return book
-    db.data.books.push(book)
+    const stamped: Book = { ...book, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
+    db.data.books.push(stamped)
     await db.write()
-    return book
+    void import('./sync.ts').then(m => m.pushBook(stamped)).catch(() => undefined)
+    return stamped
   })
 
   ipcMain.handle('db:update-book', async (_, updatedBook: Book) => {
     const index = db.data.books.findIndex(b => b.id === updatedBook.id)
     if (index !== -1) {
-      db.data.books[index] = updatedBook
+      const stamped: Book = { ...updatedBook, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
+      db.data.books[index] = stamped
       await db.write()
-      return updatedBook
+      void import('./sync.ts').then(m => m.pushBook(stamped)).catch(() => undefined)
+      return stamped
     }
     return null
   })
@@ -233,6 +257,7 @@ export async function setupDatabase() {
       // Clean up readingStates for this book across all users
       db.data.readingStates = db.data.readingStates.filter(rs => rs.bookId !== id)
       await db.write()
+      void import('./sync.ts').then(m => m.pushDeletedBook(id)).catch(() => undefined)
       return true
     }
     return false
@@ -244,9 +269,11 @@ export async function setupDatabase() {
   ipcMain.handle('db:get-wishlist', () => db.data.wishlist)
 
   ipcMain.handle('db:add-wishlist-item', async (_, item: WishlistItem) => {
-    db.data.wishlist.push(item)
+    const stamped: WishlistItem = { ...item, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
+    db.data.wishlist.push(stamped)
     await db.write()
-    return item
+    void import('./sync.ts').then(m => m.pushWishlistItem(stamped)).catch(() => undefined)
+    return stamped
   })
 
   ipcMain.handle('db:delete-wishlist-item', async (_, id: string) => {
@@ -254,6 +281,7 @@ export async function setupDatabase() {
     if (index !== -1) {
       db.data.wishlist.splice(index, 1)
       await db.write()
+      void import('./sync.ts').then(m => m.pushDeletedWishlistItem(id)).catch(() => undefined)
       return true
     }
     return false
@@ -262,9 +290,11 @@ export async function setupDatabase() {
   ipcMain.handle('db:update-wishlist-item', async (_, updatedItem: WishlistItem) => {
     const index = db.data.wishlist.findIndex(w => w.id === updatedItem.id)
     if (index !== -1) {
-      db.data.wishlist[index] = updatedItem
+      const stamped: WishlistItem = { ...updatedItem, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
+      db.data.wishlist[index] = stamped
       await db.write()
-      return updatedItem
+      void import('./sync.ts').then(m => m.pushWishlistItem(stamped)).catch(() => undefined)
+      return stamped
     }
     return null
   })
@@ -346,13 +376,15 @@ export async function setupDatabase() {
     const existing = db.data.readingStates.findIndex(
       rs => rs.userId === state.userId && rs.bookId === state.bookId
     )
+    const stamped: ReadingState = { ...state, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
     if (existing !== -1) {
-      db.data.readingStates[existing] = state
+      db.data.readingStates[existing] = stamped
     } else {
-      db.data.readingStates.push(state)
+      db.data.readingStates.push(stamped)
     }
     await db.write()
-    return state
+    void import('./sync.ts').then(m => m.pushReadingState(stamped)).catch(() => undefined)
+    return stamped
   })
 
   // ---------------------------------------------------------------------------

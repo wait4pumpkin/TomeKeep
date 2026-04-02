@@ -147,3 +147,16 @@ contextBridge.exposeInMainWorld('companion', {
     return () => ipcRenderer.off('companion:cover-received', listener)
   },
 })
+
+contextBridge.exposeInMainWorld('sync', {
+  login: (username: string, password: string) =>
+    ipcRenderer.invoke('sync:login', { username, password }) as Promise<{ ok: true } | { ok: false; error: string }>,
+  logout: () =>
+    ipcRenderer.invoke('sync:logout') as Promise<{ ok: true }>,
+  getStatus: () =>
+    ipcRenderer.invoke('sync:status') as Promise<{ loggedIn: boolean; lastSyncAt: string | null }>,
+  pull: () =>
+    ipcRenderer.invoke('sync:pull') as Promise<{ updated: boolean; error?: string }>,
+  pushPending: () =>
+    ipcRenderer.invoke('sync:push-pending') as Promise<{ ok: true }>,
+})

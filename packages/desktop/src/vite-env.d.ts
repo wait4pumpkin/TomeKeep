@@ -144,4 +144,16 @@ interface Window {
      */
     onCoverReceived: (cb: (payload: { dataUrl: string; session: string }) => void) => () => void
   }
+  sync: {
+    /** Log in with username + password. Returns { ok, error? }. */
+    login: (username: string, password: string) => Promise<{ ok: true } | { ok: false; error: string }>
+    /** Log out and clear stored token. */
+    logout: () => Promise<{ ok: true }>
+    /** Get current sync status. */
+    getStatus: () => Promise<{ loggedIn: boolean; lastSyncAt: string | null }>
+    /** Trigger an incremental pull from the cloud. */
+    pull: () => Promise<{ updated: boolean; error?: string }>
+    /** Replay the local pending queue. */
+    pushPending: () => Promise<{ ok: true }>
+  }
 }

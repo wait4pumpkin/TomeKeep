@@ -8,6 +8,7 @@ import { setupPricing } from './pricing'
 import { resolvePreloadPath } from './preloadPath'
 import { setupStores } from './stores'
 import { setupCompanion } from './companion-server'
+import { setupSync, pullAll } from './sync'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -98,5 +99,8 @@ app.whenReady().then(async () => {
   setupStores()
   setupPricing()
   setupCompanion()
+  setupSync()
+  // Background pull after startup — fire-and-forget to keep launch fast
+  void pullAll()
   createWindow()
 })
