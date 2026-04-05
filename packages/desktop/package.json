@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "TOMEKEEP_API_URL=http://localhost:8788/api vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
