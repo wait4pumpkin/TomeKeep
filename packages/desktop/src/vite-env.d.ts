@@ -155,5 +155,12 @@ interface Window {
     pull: () => Promise<{ updated: boolean; error?: string }>
     /** Replay the local pending queue. */
     pushPending: () => Promise<{ ok: true }>
+    /** One-shot migration: push all local books/wishlist/reading-states to the cloud. */
+    migrate: () => Promise<
+      | { ok: true; books: number; wishlist: number; readingStates: number; covers: number; skipped: number }
+      | { ok: false; error: string; books: number; wishlist: number; readingStates: number; covers: number; skipped: number }
+    >
+    /** Subscribe to migration progress events. Returns a dispose function. */
+    onMigrateProgress: (cb: (p: import('../electron/sync').MigrateProgress) => void) => () => void
   }
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLang } from '../lib/i18n'
 
 // ---------------------------------------------------------------------------
@@ -17,6 +17,12 @@ export function Settings() {
   const [pullBusy, setPullBusy] = useState(false)
   const [pullResult, setPullResult] = useState<string | null>(null)
 
+  // Migration state
+  const [migrateBusy, setMigrateBusy] = useState(false)
+  const [migrateStatus, setMigrateStatus] = useState<string | null>(null)
+  const [migrateError, setMigrateError] = useState<string | null>(null)
+  const disposeProgressRef = useRef<(() => void) | null>(null)
+
   async function loadStatus() {
     const status = await window.sync.getStatus()
     setLoggedIn(status.loggedIn)
@@ -24,6 +30,9 @@ export function Settings() {
   }
 
   useEffect(() => { void loadStatus() }, [])
+
+  // Cleanup progress listener on unmount
+  useEffect(() => () => { disposeProgressRef.current?.() }, [])
 
   async function handleLogin() {
     if (!username.trim() || !password.trim()) return
@@ -61,6 +70,41 @@ export function Settings() {
       }
     } finally {
       setPullBusy(false)
+    }
+  }
+
+  async function handleMigrate() {
+    setMigrateBusy(true)
+    setMigrateStatus(null)
+    setMigrateError(null)
+
+    // Subscribe to progress events
+    disposeProgressRef.current?.()
+    disposeProgressRef.current = window.sync.onMigrateProgress((p) => {
+      if (p.phase === 'done') return
+      const key = p.phase === 'covers' ? 'sync_migrate_phase_covers'
+        : p.phase === 'books' ? 'sync_migrate_phase_books'
+        : p.phase === 'wishlist' ? 'sync_migrate_phase_wishlist'
+        : 'sync_migrate_phase_states'
+      setMigrateStatus(t(key, { current: p.current, total: p.total }))
+    })
+
+    try {
+      const result = await window.sync.migrate()
+      disposeProgressRef.current?.()
+      disposeProgressRef.current = null
+
+      if (result.ok) {
+        setMigrateStatus(t('sync_migrate_done', {
+          books: result.books,
+          wishlist: result.wishlist,
+          covers: result.covers,
+        }))
+      } else {
+        setMigrateError(t('sync_migrate_error', { error: result.error ?? 'unknown' }))
+      }
+    } finally {
+      setMigrateBusy(false)
     }
   }
 
@@ -165,9 +209,22 @@ export function Settings() {
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
             {t('sync_migrate_description')}
           </p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
-            {t('sync_migrate_command')}
-          </p>
+
+          <button
+            type="button"
+            onClick={() => void handleMigrate()}
+            disabled={migrateBusy}
+            className="w-full py-2 px-4 rounded-xl bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {migrateBusy ? t('sync_migrate_running') : t('sync_migrate_start')}
+          </button>
+
+          {migrateStatus && !migrateError && (
+            <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">{migrateStatus}</p>
+          )}
+          {migrateError && (
+            <p className="mt-3 text-sm text-red-500 dark:text-red-400">{migrateError}</p>
+          )}
         </section>
       )}
     </div>

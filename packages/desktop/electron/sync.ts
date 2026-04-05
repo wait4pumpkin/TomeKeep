@@ -498,6 +498,132 @@ export async function pushPendingQueue(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// One-shot migration: push all local data that hasn't been synced yet
+// ---------------------------------------------------------------------------
+
+export interface MigrateProgress {
+  phase: 'covers' | 'books' | 'wishlist' | 'readingStates' | 'done'
+  current: number
+  total: number
+}
+
+export interface MigrateResult {
+  ok: boolean
+  error?: string
+  books: number
+  wishlist: number
+  readingStates: number
+  covers: number
+  skipped: number
+}
+
+async function migrateAll(
+  onProgress: (p: MigrateProgress) => void,
+): Promise<MigrateResult> {
+  const db = getDb()
+  const result: MigrateResult = { ok: true, books: 0, wishlist: 0, readingStates: 0, covers: 0, skipped: 0 }
+
+  const books = db.data.books
+  const wishlist = db.data.wishlist
+  const readingStates = db.data.readingStates
+
+  // Phase 1: upload missing covers for books
+  onProgress({ phase: 'covers', current: 0, total: books.length + wishlist.length })
+  let coversDone = 0
+  for (const book of books) {
+    if (!book.coverKey) {
+      const coverKey = await uploadCoverToCloud(book.id)
+      if (coverKey) {
+        const idx = db.data.books.findIndex(b => b.id === book.id)
+        if (idx !== -1) {
+          db.data.books[idx]!.coverKey = coverKey
+          result.covers++
+        }
+      }
+    }
+    coversDone++
+    onProgress({ phase: 'covers', current: coversDone, total: books.length + wishlist.length })
+  }
+  for (const item of wishlist) {
+    if (!item.coverKey) {
+      const coverKey = await uploadCoverToCloud(item.id)
+      if (coverKey) {
+        const idx = db.data.wishlist.findIndex(w => w.id === item.id)
+        if (idx !== -1) {
+          db.data.wishlist[idx]!.coverKey = coverKey
+          result.covers++
+        }
+      }
+    }
+    coversDone++
+    onProgress({ phase: 'covers', current: coversDone, total: books.length + wishlist.length })
+  }
+  await db.write()
+
+  // Phase 2: push books
+  onProgress({ phase: 'books', current: 0, total: books.length })
+  for (let i = 0; i < books.length; i++) {
+    const book = db.data.books[i]!
+    try {
+      const payload = bookToApi(book)
+      try {
+        await apiRequest('PUT', `/books/${book.id}`, payload)
+      } catch (e) {
+        if (e instanceof Error && e.message === 'not_found') {
+          await apiRequest('POST', '/books', payload)
+        } else throw e
+      }
+      db.data.books[i]!.syncStatus = 'synced'
+      result.books++
+    } catch (err) {
+      console.error('[migrate] book failed', book.id, err)
+    }
+    onProgress({ phase: 'books', current: i + 1, total: books.length })
+  }
+  await db.write()
+
+  // Phase 3: push wishlist
+  onProgress({ phase: 'wishlist', current: 0, total: wishlist.length })
+  for (let i = 0; i < wishlist.length; i++) {
+    const item = db.data.wishlist[i]!
+    try {
+      const payload = wishlistItemToApi(item)
+      try {
+        await apiRequest('PUT', `/wishlist/${item.id}`, payload)
+      } catch (e) {
+        if (e instanceof Error && e.message === 'not_found') {
+          await apiRequest('POST', '/wishlist', payload)
+        } else throw e
+      }
+      db.data.wishlist[i]!.syncStatus = 'synced'
+      result.wishlist++
+    } catch (err) {
+      console.error('[migrate] wishlist failed', item.id, err)
+    }
+    onProgress({ phase: 'wishlist', current: i + 1, total: wishlist.length })
+  }
+  await db.write()
+
+  // Phase 4: push reading states
+  onProgress({ phase: 'readingStates', current: 0, total: readingStates.length })
+  for (let i = 0; i < readingStates.length; i++) {
+    const state = db.data.readingStates[i]!
+    try {
+      await apiRequest('PUT', '/reading-states', readingStateToApi(state))
+      db.data.readingStates[i]!.syncStatus = 'synced'
+      result.readingStates++
+    } catch (err) {
+      console.error('[migrate] readingState failed', state.bookId, err)
+    }
+    onProgress({ phase: 'readingStates', current: i + 1, total: readingStates.length })
+  }
+  await db.write()
+
+  onProgress({ phase: 'done', current: 0, total: 0 })
+  return result
+}
+
+// ---------------------------------------------------------------------------
 // IPC setup
 // ---------------------------------------------------------------------------
 
@@ -550,5 +676,19 @@ export function setupSync(): void {
   ipcMain.handle('sync:push-pending', async () => {
     await pushPendingQueue()
     return { ok: true }
+  })
+
+  // sync:migrate — one-shot migration of all local data to the cloud.
+  // Progress events are pushed to the renderer via 'sync:migrate-progress'.
+  ipcMain.handle('sync:migrate', async (event) => {
+    try {
+      const result = await migrateAll((progress) => {
+        event.sender.send('sync:migrate-progress', progress)
+      })
+      return { ok: true as const, books: result.books, wishlist: result.wishlist, readingStates: result.readingStates, covers: result.covers, skipped: result.skipped }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: msg, books: 0, wishlist: 0, readingStates: 0, covers: 0, skipped: 0 }
+    }
   })
 }

@@ -1,5 +1,5 @@
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Layout } from './components/Layout'
 import { Inventory } from './pages/Inventory'
 import { Wishlist } from './pages/Wishlist'
@@ -7,25 +7,39 @@ import { Settings } from './pages/Settings'
 import { LangProvider } from './lib/i18n'
 
 // Restores and persists the last active page per user.
+// Also gates navigation: if not logged in, redirect to /settings.
 function PagePersistence() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [authChecked, setAuthChecked] = useState(false)
 
-  // On mount: navigate to the user's last active page
+  // On mount: check login, then restore last page
   useEffect(() => {
-    void window.db.getActiveUser().then(user => {
-      if (!user?.uiPrefs?.activePage) return
-      const target =
-        user.uiPrefs.activePage === 'wishlist' ? '/wishlist' :
-        user.uiPrefs.activePage === 'settings' ? '/settings' :
-        '/'
-      if (location.pathname !== target) navigate(target, { replace: true })
-    })
+    void (async () => {
+      const status = await window.sync.getStatus()
+      if (!status.loggedIn) {
+        // Not logged in — force to settings
+        navigate('/settings', { replace: true })
+        setAuthChecked(true)
+        return
+      }
+      // Logged in — restore last active page
+      const user = await window.db.getActiveUser()
+      if (user?.uiPrefs?.activePage) {
+        const target =
+          user.uiPrefs.activePage === 'wishlist' ? '/wishlist' :
+          user.uiPrefs.activePage === 'settings' ? '/settings' :
+          '/'
+        if (location.pathname !== target) navigate(target, { replace: true })
+      }
+      setAuthChecked(true)
+    })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // On route change: save the new active page
+  // On route change: save the new active page (only after auth check to avoid spurious writes)
   useEffect(() => {
+    if (!authChecked) return
     void window.db.getActiveUser().then(user => {
       if (!user) return
       const page: import('../electron/db').UIPreferences['activePage'] =
@@ -34,7 +48,7 @@ function PagePersistence() {
         'library'
       void window.db.setUiPrefs(user.id, { activePage: page })
     })
-  }, [location.pathname])
+  }, [location.pathname, authChecked])
 
   // On user switch: navigate to the new user's last active page
   useEffect(() => {

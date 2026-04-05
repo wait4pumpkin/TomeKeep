@@ -159,4 +159,14 @@ contextBridge.exposeInMainWorld('sync', {
     ipcRenderer.invoke('sync:pull') as Promise<{ updated: boolean; error?: string }>,
   pushPending: () =>
     ipcRenderer.invoke('sync:push-pending') as Promise<{ ok: true }>,
+  migrate: () =>
+    ipcRenderer.invoke('sync:migrate') as Promise<
+      { ok: true; books: number; wishlist: number; readingStates: number; covers: number; skipped: number } |
+      { ok: false; error: string; books: number; wishlist: number; readingStates: number; covers: number; skipped: number }
+    >,
+  onMigrateProgress: (cb: (p: import('./sync').MigrateProgress) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: import('./sync').MigrateProgress) => cb(p)
+    ipcRenderer.on('sync:migrate-progress', listener)
+    return () => ipcRenderer.off('sync:migrate-progress', listener)
+  },
 })

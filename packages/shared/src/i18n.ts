@@ -294,8 +294,15 @@ const dict = {
   sync_username_placeholder:  { zh: '用户名',             en: 'Username' },
   sync_password_placeholder:  { zh: '密码',               en: 'Password' },
   sync_migrate_title:         { zh: '迁移现有数据到云端',  en: 'Migrate existing data to cloud' },
-  sync_migrate_description:   { zh: '首次登录后，请运行以下命令将本地书库一次性迁移到云端。', en: 'After your first login, run the command below to migrate your local library to the cloud.' },
-  sync_migrate_command:       { zh: 'pnpm --filter @tomekeep/desktop migrate-to-cloud', en: 'pnpm --filter @tomekeep/desktop migrate-to-cloud' },
+  sync_migrate_description:   { zh: '首次登录后，请将本地书库一次性迁移到云端。迁移不会删除本地数据，可安全重复执行。', en: 'After your first login, migrate your local library to the cloud. Migration is safe to run multiple times.' },
+  sync_migrate_start:         { zh: '开始迁移',            en: 'Start migration' },
+  sync_migrate_running:       { zh: '迁移中…',             en: 'Migrating…' },
+  sync_migrate_done:          { zh: '迁移完成：{books} 本书 · {wishlist} 条心愿 · {covers} 张封面', en: 'Done: {books} books · {wishlist} wishlist · {covers} covers' },
+  sync_migrate_error:         { zh: '迁移失败：{error}',   en: 'Migration failed: {error}' },
+  sync_migrate_phase_covers:  { zh: '上传封面 {current}/{total}…', en: 'Uploading covers {current}/{total}…' },
+  sync_migrate_phase_books:   { zh: '同步书籍 {current}/{total}…', en: 'Syncing books {current}/{total}…' },
+  sync_migrate_phase_wishlist: { zh: '同步心愿单 {current}/{total}…', en: 'Syncing wishlist {current}/{total}…' },
+  sync_migrate_phase_states:  { zh: '同步阅读状态 {current}/{total}…', en: 'Syncing reading states {current}/{total}…' },
 } as const
 
 export type DictKey = keyof typeof dict

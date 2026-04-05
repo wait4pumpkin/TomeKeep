@@ -378,6 +378,13 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | companion:scan-ack | renderer→main | renderer notifies main to broadcast SSE ack to phone; payload `{ isbn, hasMetadata, title? }` |
 | companion:delete-entry | main→renderer | pushed when phone requests deletion of a failed scan entry; payload `isbn: string` |
 | companion:cover-received | main→renderer | pushed when phone sends a cover photo; payload `{ dataUrl: string, session: string }` |
+| sync:login | renderer→main | POST credentials to `/auth/login`, store token, kick off `pullAll()` |
+| sync:logout | renderer→main | clear stored token |
+| sync:status | renderer→main | returns `{ loggedIn: boolean, lastSyncAt: string \| null }` |
+| sync:pull | renderer→main | triggers incremental `pullAll()` |
+| sync:push-pending | renderer→main | replays all locally-pending items |
+| sync:migrate | renderer→main | one-shot migration: upload covers then upsert all books/wishlist/reading-states; reports per-phase progress via `sync:migrate-progress` |
+| sync:migrate-progress | main→renderer | pushed during `sync:migrate`; payload: `{ phase: 'covers' \| 'books' \| 'wishlist' \| 'readingStates' \| 'done', current: number, total: number }` |
 
 ---
 
