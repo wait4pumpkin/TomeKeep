@@ -9,6 +9,9 @@ export interface Env {
   DB: D1Database
   COVERS: R2Bucket
   JWT_SECRET: string
+  ADMIN_SETUP_TOKEN?: string
+  /** Set automatically by Cloudflare Pages on production deployments */
+  CF_PAGES?: string
 }
 
 export type HonoEnv = {

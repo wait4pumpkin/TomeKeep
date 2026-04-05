@@ -240,6 +240,41 @@ const dict = {
   copy_title_done:       { zh: '已复制',        en: 'Copied' },
   saving:                { zh: '保存中…',        en: 'Saving…' },
 
+  // ── Admin ────────────────────────────────────────────────────────────────
+  nav_admin:              { zh: '管理',              en: 'Admin' },
+  page_admin:             { zh: '管理员',             en: 'Admin' },
+  admin_invite_section:   { zh: '邀请码',             en: 'Invite Codes' },
+  admin_generate_invite:  { zh: '生成邀请码',         en: 'Generate Invite Code' },
+  admin_generating:       { zh: '生成中…',            en: 'Generating…' },
+  admin_invite_generated: { zh: '邀请码：{code}',    en: 'Invite code: {code}' },
+  admin_invite_copy:      { zh: '复制',               en: 'Copy' },
+  admin_invite_copied:    { zh: '已复制！',           en: 'Copied!' },
+  admin_invite_error:     { zh: '生成失败：{error}', en: 'Failed: {error}' },
+  register_success_banner: { zh: '注册成功，请登录', en: 'Registration successful — please log in' },
+
+  // Invite list table
+  admin_col_code:       { zh: '邀请码',   en: 'Code' },
+  admin_col_created:    { zh: '创建时间', en: 'Created' },
+  admin_col_used_by:    { zh: '使用者',   en: 'Used by' },
+  admin_col_used_at:    { zh: '使用时间', en: 'Used at' },
+  admin_unused:         { zh: '未使用',   en: 'Unused' },
+  admin_empty_invites:  { zh: '暂无邀请码', en: 'No invite codes yet' },
+  admin_loading:        { zh: '加载中…',   en: 'Loading…' },
+  admin_load_error:     { zh: '加载失败：{error}', en: 'Failed to load: {error}' },
+  admin_page_prev:      { zh: '上一页', en: 'Previous' },
+  admin_page_next:      { zh: '下一页', en: 'Next' },
+  admin_page_info:      { zh: '第 {page} / {total} 页', en: 'Page {page} of {total}' },
+
+  // AdminLayout
+  admin_logout:         { zh: '退出管理', en: 'Log out' },
+
+  // Invite actions
+  admin_invite_share:        { zh: '复制注册链接', en: 'Copy register link' },
+  admin_invite_share_copied: { zh: '链接已复制！',  en: 'Link copied!' },
+  admin_invite_delete:       { zh: '删除邀请码',   en: 'Delete' },
+  admin_invite_deleting:     { zh: '删除中…',      en: 'Deleting…' },
+  admin_invite_delete_used:  { zh: '已使用，无法删除', en: 'Cannot delete — already used' },
+
   // ── Settings / Cloud Sync ─────────────────────────────────────────────────
   settings_title:             { zh: '设置',              en: 'Settings' },
   nav_settings:               { zh: '设置',              en: 'Settings' },

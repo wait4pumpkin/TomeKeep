@@ -1,16 +1,18 @@
 // src/pages/Register.tsx
 
 import { useState, type FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api.ts'
 import { setStoredUser, type AuthUser } from '../lib/auth.ts'
 
 export function Register() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
+  // Pre-fill invite code from ?invite= query param
+  const [inviteCode, setInviteCode] = useState(() => searchParams.get('invite') ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -20,13 +22,15 @@ export function Register() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.post<{ user: AuthUser }>('/auth/register', {
+      await api.post<{ token: string }>('/auth/register', {
         username,
         password,
         name,
         inviteCode,
       })
-      setStoredUser(data.user)
+      // Cookie is now set by the register endpoint — fetch profile and go straight to app
+      const me = await api.get<AuthUser>('/auth/me')
+      setStoredUser(me)
       navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

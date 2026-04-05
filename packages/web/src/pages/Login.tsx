@@ -1,7 +1,7 @@
 // src/pages/Login.tsx
 
 import { useState, type FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { api } from '../lib/api.ts'
 import { setStoredUser, type AuthUser } from '../lib/auth.ts'
 import { useLang } from '../lib/i18n.tsx'
@@ -9,6 +9,8 @@ import { useLang } from '../lib/i18n.tsx'
 export function Login() {
   const { t } = useLang()
   const navigate = useNavigate()
+  const location = useLocation()
+  const registered = (location.state as { registered?: boolean } | null)?.registered === true
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -20,8 +22,16 @@ export function Login() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.post<{ user: AuthUser }>('/auth/login', { username, password })
-      setStoredUser(data.user)
+      await api.post<{ token: string }>('/auth/login', { username, password })
+      // After login the backend sets an httpOnly cookie; fetch /me to get the full user profile
+      const me = await api.get<AuthUser>('/auth/me')
+      if (me.is_admin) {
+        // Admin accounts must use /admin/login — log them back out and show an error
+        await api.post('/auth/logout', {})
+        setError('管理员账号请通过管理后台登录')
+        return
+      }
+      setStoredUser(me)
       navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -39,6 +49,12 @@ export function Login() {
             {t('nav_library')}
           </p>
         </div>
+
+        {registered && (
+          <div className="mb-4 px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 text-sm text-green-700 dark:text-green-300 text-center">
+            {t('register_success_banner')}
+          </div>
+        )}
 
         <form
           onSubmit={(e) => { void handleSubmit(e) }}
@@ -95,3 +111,4 @@ export function Login() {
     </div>
   )
 }
+

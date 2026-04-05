@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev --compatibility-date=2024-09-23 -- vite dev",
+    "dev": "pnpm run dev:vite & pnpm run dev:wrangler",
+    "dev:vite": "vite dev --port 5173",
+    "dev:wrangler": "wrangler pages dev --compatibility-date=2024-09-23 --proxy 5173",
     "build": "vite build",
     "preview": "wrangler pages dev --compatibility-date=2024-09-23 dist",
     "typecheck": "tsc --noEmit",
@@ -18,7 +20,7 @@
     "react-router-dom": "^7.13.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241106.0",
+    "@cloudflare/workers-types": "^4.20260111.0",
     "@tailwindcss/vite": "^4.2.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -27,6 +29,6 @@
     "typescript": "~5.9.3",
     "vite": "^6.4.1",
     "vite-plugin-pwa": "^0.21.1",
-    "wrangler": "^3.87.0"
+    "wrangler": "4.59.0"
   }
 }

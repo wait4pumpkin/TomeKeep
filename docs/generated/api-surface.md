@@ -379,6 +379,66 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | companion:delete-entry | main→renderer | pushed when phone requests deletion of a failed scan entry; payload `isbn: string` |
 | companion:cover-received | main→renderer | pushed when phone sends a cover photo; payload `{ dataUrl: string, session: string }` |
 
+---
+
+## Web / PWA API (Hono on Cloudflare Pages Functions)
+
+All routes are prefixed `/api`. Routes outside `/api/auth/*` require a valid JWT (via httpOnly cookie for PWA, or `Authorization: Bearer <token>` for Electron).
+
+### Data schemas
+
+#### AuthUser
+```ts
+interface AuthUser {
+  id: string          // UUID v4
+  username: string
+  name: string
+  language: 'zh' | 'en'
+  is_admin: boolean
+}
+```
+
+#### InviteCode
+```ts
+interface InviteCode {
+  code: string
+  created_by: string        // user id
+  used_by: string | null    // user id, null if unused
+  used_by_username: string | null  // joined from users table
+  used_at: string | null    // ISO 8601
+  created_at: string        // ISO 8601
+}
+```
+
+### Auth endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/auth/admin-setup` | `Authorization: Bearer <ADMIN_SETUP_TOKEN>` | Create the single admin account. Returns 409 if an admin already exists. Body: `{ username, password, name }` |
+| `POST` | `/api/auth/register` | Public (invite code required) | Register a new user. Sets httpOnly JWT cookie. Body: `{ username, password, name, inviteCode }` |
+| `POST` | `/api/auth/login` | Public | Log in. Sets httpOnly JWT cookie. Body: `{ username, password }` |
+| `POST` | `/api/auth/logout` | Logged in | Clear httpOnly JWT cookie |
+| `GET`  | `/api/auth/me` | Logged in | Return `AuthUser` for the current session |
+| `POST` | `/api/auth/invite` | Admin only | Generate a new invite code. Returns `{ code: string }` |
+| `GET`  | `/api/auth/invites?page=1` | Admin only | Paginated list of all invite codes (10/page). Returns `{ items: InviteCode[], page: number, totalPages: number }` |
+| `DELETE` | `/api/auth/invites/:code` | Admin only | Delete an unused invite code. Returns 409 if the code has already been used |
+
+**Cookie behavior**: `httpOnly; SameSite=Strict`. `Secure` flag is added only when the `CF_PAGES` environment variable is present (omitted for local `http://` dev).
+
+**JWT payload**:
+```json
+{ "sub": "<user-id>", "username": "alice", "is_admin": false, "iat": 0, "exp": 86400 }
+```
+
+### Web/PWA localStorage keys
+
+| Key | Values | Default | Description |
+|-----|--------|---------|-------------|
+| `tk_user` | JSON `AuthUser` or absent | — | Cached regular-user session. `getStoredUser()` returns `null` if value has `is_admin: true` |
+| `tk_admin` | JSON `AuthUser` or absent | — | Cached admin session. `getStoredAdmin()` returns `null` if value has `is_admin: false` |
+| `tk_lang` | `'zh' \| 'en'` | `'zh'` | UI language preference for PWA (persisted independently of user DB record) |
+| `theme` | `'auto' \| 'light' \| 'dark'` | `'auto'` | Shared with desktop; managed by `@tomekeep/shared/theme` |
+
 ### Companion HTTP Routes (companion-server.ts)
 | Method + Path | Auth | Description |
 |---|---|---|

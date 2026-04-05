@@ -153,12 +153,15 @@ TomeKeep/                              <- workspace root
         App.tsx                        <- BrowserRouter
         index.css
         pages/
-          Login.tsx
-          Register.tsx
+          Login.tsx                    <- 普通用户登录；拒绝 is_admin 账号
+          Register.tsx                 <- 注册（?invite= 预填邀请码；注册成功直接登录）
+          AdminLogin.tsx               <- 管理员登录（写入 tk_admin）
+          Admin.tsx                    <- 邀请码管理（分页列表、生成、复制、分享、删除）
           Inventory.tsx                <- 大量复用桌面端 UI
           Wishlist.tsx
         components/
-          Layout.tsx
+          Layout.tsx                   <- 普通用户 Shell（底部导航，无管理员入口）
+          AdminLayout.tsx              <- 管理员独立 Shell（独立主题/语言/登出）
           BookCard.tsx
           AddFormCard.tsx
           IsbnScanner.tsx              <- Web Camera + ZXing
@@ -168,7 +171,7 @@ TomeKeep/                              <- workspace root
           InstallPrompt.tsx            <- iOS 添加到主屏幕引导
         lib/
           api.ts                       <- fetch wrapper（替代 window.db IPC）
-          auth.ts                      <- JWT token 管理（httpOnly cookie）
+          auth.ts                      <- 双会话管理（tk_user / tk_admin）
           sync.ts                      <- 智能同步逻辑
           offlineQueue.ts              <- 离线写操作队列（IndexedDB）
           db-cache.ts                  <- IndexedDB 缓存层
@@ -200,6 +203,15 @@ TomeKeep/                              <- workspace root
       functions/
         api/
           [[route]].ts                 <- Cloudflare Pages Functions 入口，挂载 Hono app
+        [[catchall]].ts                <- SPA 回退路由代理（将非 /api/* 请求转发给 Vite）
+
+      migrations/
+        0001_initial_schema.sql        <- 初始表结构
+        0002_add_admin.sql             <- ALTER TABLE users ADD COLUMN is_admin INTEGER
+
+      public/
+        _routes.json                   <- Pages Functions 路由规则（生产环境）
+        favicon.svg
 ```
 
 ---
@@ -312,24 +324,29 @@ CREATE INDEX idx_price_isbn ON price_cache(book_isbn);
 
 ### 4.1 认证 API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/auth/register` | 注册（需邀请码） |
-| POST | `/api/auth/login` | 登录（返回 JWT via httpOnly cookie） |
-| POST | `/api/auth/logout` | 登出（清除 cookie） |
-| GET  | `/api/auth/me` | 获取当前用户信息 |
-| POST | `/api/auth/invite` | 生成邀请码（已登录用户调用） |
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| POST | `/api/auth/admin-setup` | 一次性（`ADMIN_SETUP_TOKEN`） | 创建唯一管理员账号；需 `Authorization: Bearer <ADMIN_SETUP_TOKEN>` header；已存在管理员时返回 409 |
+| POST | `/api/auth/register` | 公开（需邀请码） | 注册普通用户；成功后设置 httpOnly cookie，直接登录 |
+| POST | `/api/auth/login` | 公开 | 登录（返回 JWT via httpOnly cookie）；管理员账号可通过此端点登录 |
+| POST | `/api/auth/logout` | 已登录 | 登出（清除 cookie） |
+| GET  | `/api/auth/me` | 已登录 | 获取当前用户信息（含 `is_admin` 字段） |
+| POST | `/api/auth/invite` | 管理员 | 生成邀请码（仅管理员可调用） |
+| GET  | `/api/auth/invites` | 管理员 | 分页列出所有邀请码（10 条/页，含 `used_by` 用户名 JOIN）；`?page=1` |
+| DELETE | `/api/auth/invites/:code` | 管理员 | 删除未使用的邀请码 |
 
 **注册请求体**：
 ```json
 { "username": "alice", "password": "...", "name": "Alice", "inviteCode": "XXXX" }
 ```
 
+**注册响应**：成功注册后与登录行为一致，设置 httpOnly cookie 并返回用户信息，无需二次登录。
+
 **JWT 存储**：`httpOnly` cookie（PWA），Electron 侧使用 `Authorization: Bearer <token>` header。
 
 **JWT Payload**：
 ```json
-{ "sub": "<user-id>", "username": "alice", "iat": 0, "exp": 86400 }
+{ "sub": "<user-id>", "username": "alice", "is_admin": false, "iat": 0, "exp": 86400 }
 ```
 
 **密码安全**：使用 PBKDF2-SHA256（Web Crypto API 原生支持，无需额外依赖，Workers 环境兼容）。
@@ -480,10 +497,29 @@ PWA 端展示价格，每个渠道提供「去购买」按钮跳转到 `url` 字
 
 - 注册入口仅接受有效邀请码
 - 邀请码一次性使用（使用后记录 `used_by` + `used_at`）
-- 已登录用户可生成邀请码（`POST /api/auth/invite`）
-- 初始管理员账号通过部署脚本或 D1 Console 直接插入
+- 邀请码仅管理员可生成（`POST /api/auth/invite`）；普通用户无法生成邀请码
+- 初始管理员账号通过 `POST /api/auth/admin-setup`（一次性 token 鉴权）创建；系统中只允许存在一个管理员账号
+- 管理员 token（`ADMIN_SETUP_TOKEN`）通过 `wrangler secret put ADMIN_SETUP_TOKEN` 配置，不写入代码或 `.dev.vars` 以外的文件
 
-### 6.4 豆瓣代理防滥用
+### 6.4 管理员/用户会话隔离
+
+管理员后台与普通用户前台完全隔离，防止跨角色越权访问：
+
+| 维度 | 普通用户 | 管理员 |
+|------|---------|--------|
+| 登录入口 | `/login` | `/admin/login` |
+| 主页 | `/` | `/admin` |
+| localStorage key | `tk_user` | `tk_admin` |
+| 读取函数 | `getStoredUser()` | `getStoredAdmin()` |
+| 路由守卫 | `RequireAuth`（使用 `getStoredUser`） | `RequireAdmin`（使用 `getStoredAdmin`） |
+| 布局组件 | `Layout` | `AdminLayout` |
+
+**安全守卫规则**：
+- `getStoredUser()` 若 localStorage 中存储的值含 `is_admin: true`，返回 `null`（防止管理员账号绕过 `RequireAuth` 访问用户页）
+- `getStoredAdmin()` 若存储值含 `is_admin: false`，返回 `null`（防止普通用户绕过 `RequireAdmin`）
+- `/login` 页面检测到 `is_admin: true` 的登录响应时，拒绝登录并显示错误，不重定向到 `/admin`
+
+### 6.5 豆瓣代理防滥用
 
 - 代理端点需要 JWT 认证（非公开接口）
 - 对同一用户限速（10 次/分钟）
@@ -730,17 +766,25 @@ npx wrangler r2 bucket create tomekeep-covers
 
 # 2. 更新 wrangler.toml 中的 database_id
 
-# 3. 初始化数据库表结构
-npx wrangler d1 execute tomekeep-db --file=./packages/web/schema.sql
+# 3. 初始化数据库表结构（按序执行所有 migrations）
+npx wrangler d1 migrations apply tomekeep-db
 
-# 4. 设置 JWT 签名密钥
-npx wrangler secret put JWT_SECRET
+# 4. 设置密钥
+npx wrangler secret put JWT_SECRET          # JWT 签名密钥（随机强密钥）
+npx wrangler secret put ADMIN_SETUP_TOKEN   # 管理员初始化 token（一次性使用后可删除）
 
 # 5. 构建并部署
 pnpm --filter @tomekeep/web build
 npx wrangler pages deploy packages/web/dist
 
-# 6. 通过 D1 Console 创建初始管理员账号
+# 6. 创建初始管理员账号（仅限首次，之后接口自动拒绝）
+curl -X POST https://<your-domain>/api/auth/admin-setup \
+  -H "Authorization: Bearer <ADMIN_SETUP_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<strong-password>","name":"Admin"}'
+
+# 7. 删除 ADMIN_SETUP_TOKEN secret（可选，admin-setup 接口在管理员存在后自动返回 409）
+npx wrangler secret delete ADMIN_SETUP_TOKEN
 ```
 
 ### 11.2 日常更新
