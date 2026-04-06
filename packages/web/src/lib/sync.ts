@@ -95,17 +95,28 @@ export async function runSync(): Promise<boolean> {
 /**
  * Push a single reading-state change to the server.
  * profile_id null → owner's default (legacy) row.
+ * Returns a synthetic CachedReadingState built from the request payload,
+ * since PUT /api/reading-states returns { ok: true } rather than the full row.
  */
 export async function pushReadingState(
   bookId: string,
   status: string,
   profileId: string | null,
 ): Promise<CachedReadingState> {
-  return api.put<CachedReadingState>('/reading-states', {
+  await api.put<{ ok: boolean }>('/reading-states', {
     book_id: bookId,
     status,
     profile_id: profileId,
   })
+  const now = new Date().toISOString()
+  return {
+    user_id: '',          // filled in by server; not needed for local cache key lookup
+    book_id: bookId,
+    profile_id: profileId,
+    status,
+    completed_at: status === 'read' ? now : null,
+    updated_at: now,
+  }
 }
 
 /**

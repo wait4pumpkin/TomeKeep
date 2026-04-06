@@ -13,6 +13,7 @@ import { ProfileSwitcher } from './ProfileSwitcher.tsx'
 import { clearProfiles } from '../lib/profiles.ts'
 import { getStoredTheme, setStoredTheme, applyTheme, cycleTheme } from '@tomekeep/shared'
 import { syncProfiles, getActiveProfile } from '../lib/profiles.ts'
+import { getSyncCursors, setSyncCursors } from '../lib/db-cache.ts'
 
 export function Layout() {
   const { lang, t, setLang } = useLang()
@@ -36,27 +37,38 @@ export function Layout() {
 
   // Initial sync on mount
   useEffect(() => {
-    const profileBefore = getActiveProfile()?.id ?? null
     setSyncing(true)
-    // Sync profiles first so ProfileSwitcher and Inventory have the right active profile
-    syncProfiles()
-      .then(profiles => {
-        // If we now have a profile that wasn't set before, notify pages to reload
-        const profileAfter = profiles.length > 0
-          ? (profiles.find(p => p.id === profileBefore) ? profileBefore : profiles[0]?.id ?? null)
-          : null
-        if (profileAfter !== profileBefore) {
-          window.dispatchEvent(new CustomEvent('tomekeep:profile'))
-        }
-      })
-      .catch(() => { /* offline — use cached profiles */ })
-    runSync()
-      .then(updated => {
+    void (async () => {
+      try {
+        // 1. Sync profiles first — desktop users get upserted as cloud profiles.
+        //    Then reset the readingStates cursor so runSync re-fetches all rows,
+        //    picking up rows now tagged with profile_ids from the desktop.
+        const profileBefore = getActiveProfile()?.id ?? null
+        let profileChanged = false
+        try {
+          const profiles = await syncProfiles()
+          const profileAfter = profiles.length > 0
+            ? (profiles.find(p => p.id === profileBefore) ? profileBefore : profiles[0]?.id ?? null)
+            : null
+          // Always reset reading-states cursor after syncing profiles so we
+          // re-fetch rows that may have gained a profile_id since last sync.
+          const cursors = await getSyncCursors()
+          cursors.readingStates = ''
+          await setSyncCursors(cursors)
+          profileChanged = profileAfter !== profileBefore
+        } catch { /* offline — use cached profiles */ }
+
+        // 2. Incremental data sync (reading states cursor is now reset to fetch all)
+        const updated = await runSync()
         setSyncing(false)
         setSyncError(false)
         if (updated) window.dispatchEvent(new CustomEvent('tomekeep:sync'))
-      })
-      .catch(() => { setSyncing(false); setSyncError(true) })
+        if (profileChanged) window.dispatchEvent(new CustomEvent('tomekeep:profile'))
+      } catch {
+        setSyncing(false)
+        setSyncError(true)
+      }
+    })()
   }, [])
 
   // Visibility-based background sync
