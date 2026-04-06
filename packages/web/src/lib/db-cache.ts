@@ -4,7 +4,7 @@
 // Uses a simple key-value store pattern on top of IndexedDB.
 
 const DB_NAME = 'tomekeep'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 // ---------------------------------------------------------------------------
 // Shared types (mirror API row shapes)
@@ -45,6 +45,7 @@ export interface CachedWishlistItem {
 export interface CachedReadingState {
   user_id: string
   book_id: string
+  profile_id: string | null
   status: string
   completed_at: string | null
   updated_at: string
@@ -69,8 +70,10 @@ function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
 
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event) => {
       const db = req.result
+      const oldVersion = event.oldVersion
+
       if (!db.objectStoreNames.contains('books')) {
         const books = db.createObjectStore('books', { keyPath: 'id' })
         books.createIndex('updated_at', 'updated_at')
@@ -79,12 +82,21 @@ function openDb(): Promise<IDBDatabase> {
         const wl = db.createObjectStore('wishlist', { keyPath: 'id' })
         wl.createIndex('updated_at', 'updated_at')
       }
-      if (!db.objectStoreNames.contains('reading_states')) {
-        const rs = db.createObjectStore('reading_states', { keyPath: ['user_id', 'book_id'] })
-        rs.createIndex('updated_at', 'updated_at')
-      }
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' })
+      }
+
+      // v1 used keyPath ['user_id','book_id']; v2 adds profile_id to the key.
+      // Drop and recreate so the composite key is correct.
+      if (oldVersion < 2) {
+        if (db.objectStoreNames.contains('reading_states')) {
+          db.deleteObjectStore('reading_states')
+        }
+        const rs = db.createObjectStore('reading_states', { keyPath: ['user_id', 'book_id', 'profile_id'] })
+        rs.createIndex('updated_at', 'updated_at')
+      } else if (!db.objectStoreNames.contains('reading_states')) {
+        const rs = db.createObjectStore('reading_states', { keyPath: ['user_id', 'book_id', 'profile_id'] })
+        rs.createIndex('updated_at', 'updated_at')
       }
     }
 
@@ -164,9 +176,11 @@ export async function upsertCachedWishlist(items: CachedWishlistItem[]): Promise
 // Reading states
 // ---------------------------------------------------------------------------
 
-export async function getCachedReadingStates(): Promise<CachedReadingState[]> {
+export async function getCachedReadingStates(profileId?: string | null): Promise<CachedReadingState[]> {
   const db = await openDb()
-  return getAllFromStore<CachedReadingState>(db, 'reading_states')
+  const all = await getAllFromStore<CachedReadingState>(db, 'reading_states')
+  if (profileId === undefined) return all   // caller wants everything (e.g. sync)
+  return all.filter(r => r.profile_id === (profileId ?? null))
 }
 
 export async function upsertCachedReadingStates(states: CachedReadingState[]): Promise<void> {

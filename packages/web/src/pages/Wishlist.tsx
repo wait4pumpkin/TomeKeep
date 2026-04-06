@@ -13,6 +13,7 @@ import {
 import { AddFormCard } from '../components/AddFormCard.tsx'
 import { PullToRefresh } from '../components/PullToRefresh.tsx'
 import { runSync } from '../lib/sync.ts'
+import { tagColor } from '@tomekeep/shared'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,6 +91,13 @@ export function Wishlist() {
   useEffect(() => {
     setLoading(true)
     loadFromCache().finally(() => setLoading(false))
+  }, [loadFromCache])
+
+  // Reload from cache whenever a background sync writes new data
+  useEffect(() => {
+    function onSync() { void loadFromCache() }
+    window.addEventListener('tomekeep:sync', onSync)
+    return () => window.removeEventListener('tomekeep:sync', onSync)
   }, [loadFromCache])
 
   // ---------------------------------------------------------------------------
@@ -379,6 +387,12 @@ function WishCard({
               {t('pending_buy')}
             </span>
           )}
+          {/* Tags */}
+          {item.tags.slice(0, 2).map(tag => (
+            <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full ${tagColor(tag).badge}`}>
+              {tag}
+            </span>
+          ))}
         </div>
       </div>
 

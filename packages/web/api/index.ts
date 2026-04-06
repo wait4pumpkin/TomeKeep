@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.ts'
 import bookRoutes from './routes/books.ts'
 import wishlistRoutes from './routes/wishlist.ts'
 import readingStateRoutes from './routes/readingStates.ts'
+import profileRoutes from './routes/profiles.ts'
 import coverRoutes from './routes/covers.ts'
 import metadataRoutes from './routes/metadata.ts'
 import priceRoutes from './routes/prices.ts'
@@ -19,6 +20,7 @@ app.route('/auth', authRoutes)
 app.route('/books', bookRoutes)
 app.route('/wishlist', wishlistRoutes)
 app.route('/reading-states', readingStateRoutes)
+app.route('/profiles', profileRoutes)
 app.route('/covers', coverRoutes)
 app.route('/metadata', metadataRoutes)
 app.route('/prices', priceRoutes)

@@ -9,6 +9,8 @@ import { api } from '../lib/api.ts'
 import { clearCache } from '../lib/db-cache.ts'
 import { runSync, setupVisibilitySyncListener } from '../lib/sync.ts'
 import { InstallPrompt } from './InstallPrompt.tsx'
+import { ProfileSwitcher } from './ProfileSwitcher.tsx'
+import { clearProfiles } from '../lib/profiles.ts'
 import { getStoredTheme, setStoredTheme, applyTheme, cycleTheme } from '@tomekeep/shared'
 
 export function Layout() {
@@ -17,6 +19,7 @@ export function Layout() {
   const user = getStoredUser()
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState(false)
+  const [themeKey, setThemeKey] = useState(() => getStoredTheme())
 
   // Apply theme on mount
   useEffect(() => {
@@ -27,7 +30,11 @@ export function Layout() {
   useEffect(() => {
     setSyncing(true)
     runSync()
-      .then(() => { setSyncing(false); setSyncError(false) })
+      .then(updated => {
+        setSyncing(false)
+        setSyncError(false)
+        if (updated) window.dispatchEvent(new CustomEvent('tomekeep:sync'))
+      })
       .catch(() => { setSyncing(false); setSyncError(true) })
   }, [])
 
@@ -35,7 +42,11 @@ export function Layout() {
   const handleVisibilitySync = useCallback(() => {
     setSyncing(true)
     runSync()
-      .then(() => { setSyncing(false); setSyncError(false) })
+      .then(updated => {
+        setSyncing(false)
+        setSyncError(false)
+        if (updated) window.dispatchEvent(new CustomEvent('tomekeep:sync'))
+      })
       .catch(() => { setSyncing(false); setSyncError(true) })
   }, [])
 
@@ -46,6 +57,7 @@ export function Layout() {
   async function handleLogout() {
     try { await api.post('/auth/logout', {}) } catch { /* ignore */ }
     clearStoredUser()
+    clearProfiles()
     await clearCache()
     navigate('/login', { replace: true })
   }
@@ -54,9 +66,9 @@ export function Layout() {
     const next = cycleTheme(getStoredTheme())
     setStoredTheme(next)
     applyTheme(next)
+    setThemeKey(next)
   }
 
-  const themeKey = getStoredTheme()
   const themeLabel = themeKey === 'light' ? t('theme_light') : themeKey === 'dark' ? t('theme_dark') : t('theme_auto')
 
   return (
@@ -112,6 +124,9 @@ export function Layout() {
           >
             {lang === 'zh' ? 'EN' : '中'}
           </button>
+
+          {/* Profile switcher */}
+          {user && <ProfileSwitcher />}
 
           {/* User + logout */}
           {user && (

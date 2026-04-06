@@ -303,6 +303,16 @@ const dict = {
   sync_migrate_phase_books:   { zh: '同步书籍 {current}/{total}…', en: 'Syncing books {current}/{total}…' },
   sync_migrate_phase_wishlist: { zh: '同步心愿单 {current}/{total}…', en: 'Syncing wishlist {current}/{total}…' },
   sync_migrate_phase_states:  { zh: '同步阅读状态 {current}/{total}…', en: 'Syncing reading states {current}/{total}…' },
+
+  // Profiles
+  profile_label:              { zh: '画像',               en: 'Profile' },
+  profile_switch:             { zh: '切换画像',            en: 'Switch profile' },
+  profile_new:                { zh: '新建画像',            en: 'New profile' },
+  profile_rename:             { zh: '重命名',              en: 'Rename' },
+  profile_delete:             { zh: '删除画像',            en: 'Delete profile' },
+  profile_delete_confirm:     { zh: '确认删除画像"{name}"？其阅读记录将一并删除。', en: 'Delete profile "{name}"? Its reading history will also be deleted.' },
+  profile_name_placeholder:   { zh: '画像名称（如：爸爸）',  en: 'Profile name (e.g. Dad)' },
+  profile_saving:             { zh: '保存中…',             en: 'Saving…' },
 } as const
 
 export type DictKey = keyof typeof dict

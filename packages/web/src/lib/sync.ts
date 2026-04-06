@@ -74,7 +74,7 @@ export async function runSync(): Promise<boolean> {
       cursors.wishlist = status.wishlist
     }
 
-    // Reading states
+    // Reading states — fetch all profiles at once (no profile_id filter; server returns all)
     if (!cursors.readingStates || status.readingStates > cursors.readingStates) {
       const since = cursors.readingStates ? `?since=${encodeURIComponent(cursors.readingStates)}` : ''
       const states = await api.get<CachedReadingState[]>(`/reading-states${since}`)
@@ -90,6 +90,22 @@ export async function runSync(): Promise<boolean> {
   } finally {
     _syncing = false
   }
+}
+
+/**
+ * Push a single reading-state change to the server.
+ * profile_id null → owner's default (legacy) row.
+ */
+export async function pushReadingState(
+  bookId: string,
+  status: string,
+  profileId: string | null,
+): Promise<CachedReadingState> {
+  return api.put<CachedReadingState>('/reading-states', {
+    book_id: bookId,
+    status,
+    profile_id: profileId,
+  })
 }
 
 /**

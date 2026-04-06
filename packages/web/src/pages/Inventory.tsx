@@ -15,7 +15,9 @@ import {
 } from '../lib/db-cache.ts'
 import { AddFormCard } from '../components/AddFormCard.tsx'
 import { PullToRefresh } from '../components/PullToRefresh.tsx'
-import { runSync } from '../lib/sync.ts'
+import { runSync, pushReadingState } from '../lib/sync.ts'
+import { tagColor } from '@tomekeep/shared'
+import { getActiveProfile } from '../lib/profiles.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,6 +90,9 @@ export function Inventory() {
   const [stateMap, setStateMap] = useState<Map<string, CachedReadingState>>(new Map())
   const [loading, setLoading] = useState(true)
 
+  // Active profile — null means the account-level default
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => getActiveProfile()?.id ?? null)
+
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterStatus>('all')
   const [sort, setSort] = useState<SortKey>('added')
@@ -103,7 +108,8 @@ export function Inventory() {
   // ---------------------------------------------------------------------------
 
   const loadFromCache = useCallback(async () => {
-    const [bs, rs] = await Promise.all([getCachedBooks(), getCachedReadingStates()])
+    const profileId = getActiveProfile()?.id ?? null
+    const [bs, rs] = await Promise.all([getCachedBooks(), getCachedReadingStates(profileId)])
     setBooks(bs)
     const map = new Map<string, CachedReadingState>()
     for (const r of rs) map.set(r.book_id, r)
@@ -113,6 +119,23 @@ export function Inventory() {
   useEffect(() => {
     setLoading(true)
     loadFromCache().finally(() => setLoading(false))
+  }, [loadFromCache])
+
+  // Reload from cache whenever a background sync writes new data
+  useEffect(() => {
+    function onSync() { void loadFromCache() }
+    window.addEventListener('tomekeep:sync', onSync)
+    return () => window.removeEventListener('tomekeep:sync', onSync)
+  }, [loadFromCache])
+
+  // Reload when active profile changes
+  useEffect(() => {
+    function onProfile() {
+      setActiveProfileId(getActiveProfile()?.id ?? null)
+      void loadFromCache()
+    }
+    window.addEventListener('tomekeep:profile', onProfile)
+    return () => window.removeEventListener('tomekeep:profile', onProfile)
   }, [loadFromCache])
 
   // ---------------------------------------------------------------------------
@@ -131,12 +154,14 @@ export function Inventory() {
   async function handleStatusCycle(book: CachedBook) {
     const current = statusForBook(book, stateMap)
     const next = statusCycle[current]
+    const profileId = activeProfileId
 
     // Optimistic update
     const prev = stateMap.get(book.id)
     const optimistic: CachedReadingState = {
       user_id: prev?.user_id ?? '',
       book_id: book.id,
+      profile_id: profileId,
       status: next,
       completed_at: next === 'read' ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
@@ -144,10 +169,7 @@ export function Inventory() {
     setStateMap(m => new Map(m).set(book.id, optimistic))
 
     try {
-      const updated = await api.put<CachedReadingState>(
-        `/reading-states/${book.id}`,
-        { status: next },
-      )
+      const updated = await pushReadingState(book.id, next, profileId)
       await upsertCachedReadingStates([updated])
       setStateMap(m => new Map(m).set(book.id, updated))
     } catch {
@@ -383,7 +405,7 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
         {book.tags.length > 0 && (
           <div className="flex gap-1 mt-1 flex-wrap">
             {book.tags.slice(0, 3).map(tag => (
-              <span key={tag} className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full">
+              <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full ${tagColor(tag).badge}`}>
                 {tag}
               </span>
             ))}
