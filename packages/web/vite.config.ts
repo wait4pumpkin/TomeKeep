@@ -14,14 +14,14 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icons/*.png', 'favicon.svg'],
+      includeAssets: ['icons/*.png', 'splash/*.png', 'favicon.svg'],
       manifest: {
         name: 'TomeKeep',
         short_name: 'TomeKeep',
         start_url: '/',
         display: 'standalone',
         background_color: '#ffffff',
-        theme_color: '#ffffff',
+        theme_color: '#2563eb',
         icons: [
           { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
