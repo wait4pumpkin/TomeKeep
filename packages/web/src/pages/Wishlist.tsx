@@ -2,7 +2,7 @@
 // PWA wishlist page.
 // Reads from IndexedDB cache; writes go through the API and refresh the cache.
 
-import { useState, useEffect, useCallback, useTransition } from 'react'
+import { useState, useEffect, useCallback, useTransition, useRef } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
 import { api } from '../lib/api.ts'
 import {
@@ -90,6 +90,20 @@ export function Wishlist() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [movingId, setMovingId] = useState<string | null>(null)
+
+  // Collapsed header when scrolled away from top
+  const [collapsed, setCollapsed] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let el: HTMLElement | null = scrollRef.current?.parentElement ?? null
+    while (el && getComputedStyle(el).overflowY === 'visible') el = el.parentElement
+    if (!el) return
+    const scroller = el
+    function onScroll() { setCollapsed(scroller.scrollTop > 8) }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [])
 
   // ---------------------------------------------------------------------------
   // Load from cache
@@ -221,9 +235,9 @@ export function Wishlist() {
 
   return (
     <PullToRefresh onRefresh={handleRefresh}>
-      <div className="min-h-full pb-6">
+      <div ref={scrollRef} className="min-h-full pb-6">
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 space-y-2">
+        <div className={`sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 px-4 transition-[padding] duration-300 ${collapsed ? 'pt-2 pb-0' : 'pt-3 pb-3'}`}>
           {/* Title + add */}
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2 min-w-0">
@@ -239,108 +253,124 @@ export function Wishlist() {
             <button
               onClick={() => setShowAdd(true)}
               title={t('add_to_wishlist')}
-              className="flex items-center justify-center w-7 h-7 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
+              className="flex items-center justify-center w-6 h-6 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </button>
           </div>
 
-          {/* Search + sort — same row */}
-          <div className="flex items-center gap-2">
-            <input
-              type="search"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={t('search_placeholder')}
-              className="flex-1 min-w-0 h-8 px-3 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <select
-              value={sort}
-              onChange={e => setSort(e.target.value as WishSort)}
-              className="flex-shrink-0 h-8 text-sm px-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
-            >
-              <option value="added">{t('sort_added')}</option>
-              <option value="priority">{t('sort_priority')}</option>
-              <option value="title">{t('sort_title')}</option>
-            </select>
-          </div>
+          {/* Collapsible controls */}
+          <div
+            className="grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
+            style={{
+              gridTemplateRows: collapsed ? '0fr' : '1fr',
+              opacity: collapsed ? 0 : 1,
+              pointerEvents: collapsed ? 'none' : undefined,
+            }}
+          >
+            <div className="overflow-hidden">
+              <div className="space-y-2 mt-2">
+                {/* Search + sort — same row */}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder={t('search_placeholder')}
+                    className="flex-1 min-w-0 h-6 px-2 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <select
+                    value={sort}
+                    onChange={e => setSort(e.target.value as WishSort)}
+                    className="flex-shrink-0 h-6 text-xs px-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
+                  >
+                    <option value="added">{t('sort_added')}</option>
+                    <option value="priority">{t('sort_priority')}</option>
+                    <option value="title">{t('sort_title')}</option>
+                  </select>
+                </div>
 
-          {/* Filter icons + view toggle + col count — same row */}
-          <div className="flex items-center gap-1.5">
-            {/* Wishlist filter icon buttons */}
-            {([
-              { key: 'all' as WishFilter,     label: t('filter_all'),     icon: (
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
-                </svg>
-              ) },
-              { key: 'pending' as WishFilter, label: t('filter_pending'), icon: (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
-                </svg>
-              ) },
-            ]).map(({ key: f, label, icon }) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                title={label}
-                className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
-                  filter === f
-                    ? 'bg-blue-600 border-blue-600 text-white'
-                    : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
-                }`}
-              >
-                {icon}
-              </button>
-            ))}
-
-            <div className="ml-auto flex items-center gap-1.5">
-              {/* Column count — only in compact mode */}
-              {viewMode === 'compact' && (
-                <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                  {([2, 3, 4, 5, 6] as const).map(n => (
+                {/* Filter icons + view toggle + col count — same row */}
+                <div className="flex items-center gap-1.5">
+                  {([
+                    { key: 'all' as WishFilter, label: t('filter_all'), icon: (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+                      </svg>
+                    ) },
+                    { key: 'pending' as WishFilter, label: t('filter_pending'), icon: (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill={filter === 'pending' ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+                      </svg>
+                    ) },
+                  ]).map(({ key: f, label, icon }) => (
                     <button
-                      key={n}
-                      onClick={() => { setCompactCols(n); localStorage.setItem(COMPACT_COLS_KEY, String(n)) }}
-                      className={`px-1.5 py-1 text-xs transition-colors ${compactCols === n ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                      key={f}
+                      onClick={() => setFilter(f)}
+                      title={label}
+                      className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-lg border transition-colors ${
+                        filter === f
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
+                      }`}
                     >
-                      {n}
+                      {icon}
                     </button>
                   ))}
+
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {viewMode === 'compact' && (
+                      <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                        {([2, 3, 4, 5, 6] as const).map(n => (
+                          <button
+                            key={n}
+                            onClick={() => { setCompactCols(n); localStorage.setItem(COMPACT_COLS_KEY, String(n)) }}
+                            className={`px-1.5 py-1 text-xs transition-colors ${compactCols === n ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                      <button
+                        onClick={() => { setViewMode('detail'); localStorage.setItem(VIEW_MODE_KEY, 'detail') }}
+                        title={t('detail_view')}
+                        className={`p-1 transition-colors ${viewMode === 'detail' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => { setViewMode('compact'); localStorage.setItem(VIEW_MODE_KEY, 'compact') }}
+                        title={t('compact_view')}
+                        className={`p-1 transition-colors ${viewMode === 'compact' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <rect x="3" y="3" width="5" height="5" rx="0.75" />
+                          <rect x="9.5" y="3" width="5" height="5" rx="0.75" />
+                          <rect x="16" y="3" width="5" height="5" rx="0.75" />
+                          <rect x="3" y="9.5" width="5" height="5" rx="0.75" />
+                          <rect x="9.5" y="9.5" width="5" height="5" rx="0.75" />
+                          <rect x="16" y="9.5" width="5" height="5" rx="0.75" />
+                          <rect x="3" y="16" width="5" height="5" rx="0.75" />
+                          <rect x="9.5" y="16" width="5" height="5" rx="0.75" />
+                          <rect x="16" y="16" width="5" height="5" rx="0.75" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              )}
-              {/* View toggle */}
-              <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                <button
-                  onClick={() => { setViewMode('detail'); localStorage.setItem(VIEW_MODE_KEY, 'detail') }}
-                  title={t('detail_view')}
-                  className={`p-1 transition-colors ${viewMode === 'detail' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => { setViewMode('compact'); localStorage.setItem(VIEW_MODE_KEY, 'compact') }}
-                  title={t('compact_view')}
-                  className={`p-1 transition-colors ${viewMode === 'compact' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <rect x="3" y="3" width="5" height="5" rx="0.75" />
-                    <rect x="9.5" y="3" width="5" height="5" rx="0.75" />
-                    <rect x="16" y="3" width="5" height="5" rx="0.75" />
-                    <rect x="3" y="9.5" width="5" height="5" rx="0.75" />
-                    <rect x="9.5" y="9.5" width="5" height="5" rx="0.75" />
-                    <rect x="16" y="9.5" width="5" height="5" rx="0.75" />
-                    <rect x="3" y="16" width="5" height="5" rx="0.75" />
-                    <rect x="9.5" y="16" width="5" height="5" rx="0.75" />
-                    <rect x="16" y="16" width="5" height="5" rx="0.75" />
-                  </svg>
-                </button>
               </div>
             </div>
+          </div>
+
+          {/* Progress bar divider */}
+          <div className={`-mx-4 transition-[margin] duration-300 ${collapsed ? 'mt-2' : 'mt-3'}`}>
+            <div className="h-0.5 bg-gray-200 dark:bg-gray-700" />
           </div>
         </div>
 
@@ -549,14 +579,14 @@ function WishCard({
 
       {/* Actions */}
       <div className="flex flex-col items-center justify-between flex-shrink-0 gap-1">
-        {/* Toggle pending buy */}
+        {/* Toggle pending buy — amber bookmark, matches desktop */}
         <button
           onClick={onTogglePending}
           title={item.pending_buy ? t('not_pending_buy') : t('pending_buy')}
-          className={`p-1 rounded transition-colors ${item.pending_buy ? 'text-blue-500' : 'text-gray-300 dark:text-gray-600 hover:text-blue-400'}`}
+          className={`p-0.5 rounded transition-colors ${item.pending_buy ? 'text-amber-400' : 'text-gray-300 dark:text-gray-600 hover:text-amber-400'}`}
         >
-          <svg className="w-4 h-4" fill={item.pending_buy ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill={item.pending_buy ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
           </svg>
         </button>
 
