@@ -240,7 +240,7 @@ export function Wishlist() {
           {/* Title + add */}
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2 min-w-0">
-              <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
+              <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
                 {t('page_wishlist')}
               </h1>
               {items.length > 0 && (

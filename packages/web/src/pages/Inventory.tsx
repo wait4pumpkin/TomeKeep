@@ -301,7 +301,7 @@ export function Inventory() {
           {/* Title + add button — always visible */}
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2 min-w-0">
-              <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
+              <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
                 {t('page_library')}
               </h1>
               <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
