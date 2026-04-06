@@ -105,10 +105,10 @@ export function Layout() {
   const themeLabel = themeKey === 'light' ? t('theme_light') : themeKey === 'dark' ? t('theme_dark') : t('theme_auto')
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900">
+    <div className="flex flex-col h-dvh bg-gray-50 dark:bg-gray-900">
       {/* Top bar */}
       <header className="flex-shrink-0 flex items-center justify-between px-4 h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
-        style={{ paddingTop: 'var(--sat, 0)' }}
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
         <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">TomeKeep</span>
 
