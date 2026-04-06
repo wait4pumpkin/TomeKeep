@@ -18,13 +18,13 @@ import { useState, useRef } from 'react'
 import { useLang } from '../lib/i18n.tsx'
 import { api } from '../lib/api.ts'
 import { type CachedBook, type CachedWishlistItem } from '../lib/db-cache.ts'
+import { tagColor } from '@tomekeep/shared'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type Mode = 'inventory' | 'wishlist'
-type Priority = 'high' | 'medium' | 'low'
 
 interface BookPayload {
   title: string
@@ -34,10 +34,6 @@ interface BookPayload {
   cover_key: string
   detail_url: string
   tags: string[]
-}
-
-interface WishlistPayload extends BookPayload {
-  priority: Priority
 }
 
 interface MetadataResponse {
@@ -60,14 +56,6 @@ export interface AddFormCardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: is wishlist item?
-// ---------------------------------------------------------------------------
-
-function isWishlistItem(item: CachedBook | CachedWishlistItem): item is CachedWishlistItem {
-  return 'priority' in item
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -85,9 +73,6 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
   const [coverKey, setCoverKey] = useState(initial?.cover_key ?? '')
   const [tags, setTags] = useState<string[]>(initial?.tags ?? [])
   const [tagInput, setTagInput] = useState('')
-  const [priority, setPriority] = useState<Priority>(
-    initial && isWishlistItem(initial) ? (initial.priority as Priority) : 'medium',
-  )
 
   // Status
   const [saving, setSaving] = useState(false)
@@ -191,11 +176,10 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           result = await api.post<CachedBook & CachedWishlistItem>('/books', base)
         }
       } else {
-        const payload: WishlistPayload = { ...base, priority }
         if (isEdit && initial) {
-          result = await api.put<CachedBook & CachedWishlistItem>(`/wishlist/${initial.id}`, payload)
+          result = await api.put<CachedBook & CachedWishlistItem>(`/wishlist/${initial.id}`, base)
         } else {
-          result = await api.post<CachedBook & CachedWishlistItem>('/wishlist', payload)
+          result = await api.post<CachedBook & CachedWishlistItem>('/wishlist', base)
         }
       }
 
@@ -250,32 +234,31 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
               className="hidden"
               onChange={handleCoverChange}
             />
-            <span className="text-xs text-gray-400 leading-none">{t('choose_cover').slice(0, 4)}</span>
           </div>
 
           {/* Fields */}
-          <div className="flex-1 space-y-2">
+          <div className="flex-1 flex flex-col gap-1.5 justify-between" style={{ height: '80px' }}>
             <input
               type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder={t('form_title_placeholder')}
               required
-              className="w-full px-3 py-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <input
               type="text"
               value={author}
               onChange={e => setAuthor(e.target.value)}
               placeholder={t('form_author_placeholder')}
-              className="w-full px-3 py-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <input
               type="text"
               value={publisher}
               onChange={e => setPublisher(e.target.value)}
               placeholder={t('form_publisher_placeholder')}
-              className="w-full px-3 py-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
@@ -287,7 +270,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           onChange={e => setIsbn(e.target.value)}
           placeholder="ISBN"
           inputMode="numeric"
-          className="w-full px-3 py-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
         {/* Douban URL + fetch */}
@@ -297,42 +280,19 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
             value={detailUrl}
             onChange={e => setDetailUrl(e.target.value)}
             placeholder={t('field_detail_url')}
-            className="flex-1 px-3 py-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
             type="button"
             onClick={() => { void handleFetchMeta() }}
             disabled={!detailUrl.trim() || fetchingMeta}
-            className="px-3 py-2 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors whitespace-nowrap"
+            className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors whitespace-nowrap"
           >
-            {fetchingMeta ? '…' : t('douban_login').slice(0, 2)}豆
+            {fetchingMeta ? '…' : t('filled_douban_dot').slice(0, 2)}
           </button>
         </div>
         {metaMsg && (
           <p className="text-xs text-blue-500 dark:text-blue-400">{metaMsg}</p>
-        )}
-
-        {/* Priority (wishlist only) */}
-        {mode === 'wishlist' && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 dark:text-gray-400 w-12 flex-shrink-0">
-              {t('sort_priority')}
-            </span>
-            {(['high', 'medium', 'low'] as Priority[]).map(p => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPriority(p)}
-                className={`flex-1 py-1 text-xs rounded-lg border transition-colors ${
-                  priority === p
-                    ? 'bg-blue-600 border-blue-600 text-white'
-                    : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
         )}
 
         {/* Tags */}
@@ -341,13 +301,13 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
             {tags.map(tag => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
+                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${tagColor(tag).badge}`}
               >
                 {tag}
                 <button
                   type="button"
                   onClick={() => removeTag(tag)}
-                  className="text-gray-400 hover:text-red-500 transition-colors leading-none"
+                  className="opacity-60 hover:opacity-100 transition-opacity leading-none"
                   title={t('remove_tag', { tag })}
                 >
                   ×
@@ -362,7 +322,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
               onChange={e => setTagInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
               placeholder={t('tag_input_placeholder')}
-              className="flex-1 px-3 py-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
               type="button"
