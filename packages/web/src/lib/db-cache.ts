@@ -53,9 +53,9 @@ export interface CachedReadingState {
 
 // Cursors track the last synced updated_at per table.
 export interface SyncCursors {
-  books: string
-  wishlist: string
-  readingStates: string
+  books: string | null
+  wishlist: string | null
+  readingStates: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -176,9 +176,22 @@ export async function upsertCachedWishlist(items: CachedWishlistItem[]): Promise
 // Reading states
 // ---------------------------------------------------------------------------
 
+// IndexedDB keyPath cannot contain null, so we store profile_id=null as the
+// sentinel string '\x00' and restore it to null on the way out.
+const NULL_PROFILE_SENTINEL = '\x00'
+
+function serializeReadingState(r: CachedReadingState): CachedReadingState {
+  return r.profile_id === null ? { ...r, profile_id: NULL_PROFILE_SENTINEL } : r
+}
+
+function deserializeReadingState(r: CachedReadingState): CachedReadingState {
+  return r.profile_id === NULL_PROFILE_SENTINEL ? { ...r, profile_id: null } : r
+}
+
 export async function getCachedReadingStates(profileId?: string | null): Promise<CachedReadingState[]> {
   const db = await openDb()
-  const all = await getAllFromStore<CachedReadingState>(db, 'reading_states')
+  const raw = await getAllFromStore<CachedReadingState>(db, 'reading_states')
+  const all = raw.map(deserializeReadingState)
   if (profileId === undefined) return all   // caller wants everything (e.g. sync)
   return all.filter(r => r.profile_id === (profileId ?? null))
 }
@@ -186,7 +199,7 @@ export async function getCachedReadingStates(profileId?: string | null): Promise
 export async function upsertCachedReadingStates(states: CachedReadingState[]): Promise<void> {
   if (states.length === 0) return
   const db = await openDb()
-  await putAllToStore(db, 'reading_states', states)
+  await putAllToStore(db, 'reading_states', states.map(serializeReadingState))
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +208,7 @@ export async function upsertCachedReadingStates(states: CachedReadingState[]): P
 
 const CURSOR_KEY = 'sync_cursors'
 
-const emptyCursors: SyncCursors = { books: '', wishlist: '', readingStates: '' }
+const emptyCursors: SyncCursors = { books: null, wishlist: null, readingStates: null }
 
 export async function getSyncCursors(): Promise<SyncCursors> {
   const db = await openDb()

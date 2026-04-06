@@ -53,7 +53,7 @@ export function Layout() {
           // Always reset reading-states cursor after syncing profiles so we
           // re-fetch rows that may have gained a profile_id since last sync.
           const cursors = await getSyncCursors()
-          cursors.readingStates = ''
+          cursors.readingStates = null
           await setSyncCursors(cursors)
           profileChanged = profileAfter !== profileBefore
         } catch { /* offline — use cached profiles */ }

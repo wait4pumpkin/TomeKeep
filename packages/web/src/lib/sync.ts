@@ -27,9 +27,9 @@ import {
 } from './db-cache.ts'
 
 interface SyncStatus {
-  books: string
-  wishlist: string
-  readingStates: string
+  books: string | null
+  wishlist: string | null
+  readingStates: string | null
 }
 
 export type SyncState = 'idle' | 'syncing' | 'error'
@@ -53,7 +53,7 @@ export async function runSync(): Promise<boolean> {
     let updated = false
 
     // Books
-    if (!cursors.books || status.books > cursors.books) {
+    if (status.books && (!cursors.books || status.books > cursors.books)) {
       const since = cursors.books ? `?since=${encodeURIComponent(cursors.books)}` : ''
       const books = await api.get<CachedBook[]>(`/books${since}`)
       if (books.length > 0) {
@@ -64,7 +64,7 @@ export async function runSync(): Promise<boolean> {
     }
 
     // Wishlist
-    if (!cursors.wishlist || status.wishlist > cursors.wishlist) {
+    if (status.wishlist && (!cursors.wishlist || status.wishlist > cursors.wishlist)) {
       const since = cursors.wishlist ? `?since=${encodeURIComponent(cursors.wishlist)}` : ''
       const items = await api.get<CachedWishlistItem[]>(`/wishlist${since}`)
       if (items.length > 0) {
@@ -75,7 +75,7 @@ export async function runSync(): Promise<boolean> {
     }
 
     // Reading states — fetch all profiles at once (no profile_id filter; server returns all)
-    if (!cursors.readingStates || status.readingStates > cursors.readingStates) {
+    if (status.readingStates && (!cursors.readingStates || status.readingStates > cursors.readingStates)) {
       const since = cursors.readingStates ? `?since=${encodeURIComponent(cursors.readingStates)}` : ''
       const states = await api.get<CachedReadingState[]>(`/reading-states${since}`)
       if (states.length > 0) {
