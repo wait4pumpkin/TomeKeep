@@ -554,7 +554,7 @@ function WishCard({
       </div>
 
       {/* Right side */}
-      <div className="flex flex-1 min-w-0 flex-col gap-0.5">
+      <div className="flex flex-1 min-w-0 flex-col">
         {/* Top: title + pending-buy bookmark */}
         <div className="flex items-start gap-1 min-w-0">
           <p className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
@@ -572,13 +572,13 @@ function WishCard({
         </div>
 
         {/* Middle: author */}
-        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+        <p className="flex-1 text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
           {item.author}
           {item.publisher && ` · ${item.publisher}`}
         </p>
 
         {/* Bottom: tags ↔ actions */}
-        <div className="flex items-center gap-1 min-w-0 mt-0.5">
+        <div className="flex items-center gap-1 min-w-0">
           {expanded ? (
             <>
               <div className="flex items-center gap-0.5 flex-1">
