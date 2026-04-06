@@ -339,12 +339,12 @@ export function Inventory() {
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   placeholder={t('search_placeholder')}
-                  className="flex-1 min-w-0 h-6 px-2 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 min-w-0 h-8 px-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <select
                   value={sort}
                   onChange={e => setSort(e.target.value as SortKey)}
-                  className="flex-shrink-0 h-6 text-xs px-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
+                  className="flex-shrink-0 h-8 text-base px-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
                 >
                   <option value="added">{t('sort_added')}</option>
                   <option value="finished">{t('sort_finished')}</option>
