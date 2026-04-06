@@ -238,12 +238,12 @@ export function Wishlist() {
             </div>
             <button
               onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm rounded-lg transition-colors"
+              title={t('add_to_wishlist')}
+              className="flex items-center justify-center w-8 h-8 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              {t('add_to_wishlist')}
             </button>
           </div>
 
@@ -271,9 +271,17 @@ export function Wishlist() {
           <div className="flex items-center gap-1.5">
             {/* Wishlist filter icon buttons */}
             {([
-              { key: 'all',     label: t('filter_all'),     icon: null },
-              { key: 'pending', label: t('filter_pending'), icon: '🛒' },
-            ] as { key: WishFilter; label: string; icon: string | null }[]).map(({ key: f, label, icon }) => (
+              { key: 'all' as WishFilter,     label: t('filter_all'),     icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                </svg>
+              ) },
+              { key: 'pending' as WishFilter, label: t('filter_pending'), icon: (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+                </svg>
+              ) },
+            ]).map(({ key: f, label, icon }) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -284,10 +292,7 @@ export function Wishlist() {
                     : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
                 }`}
               >
-                {icon
-                  ? <span className="text-sm leading-none">{icon}</span>
-                  : <span className="text-xs font-semibold leading-none">{t('filter_all')}</span>
-                }
+                {icon}
               </button>
             ))}
 
@@ -365,6 +370,7 @@ export function Wishlist() {
                 key={item.id}
                 item={item}
                 deleting={deletingId === item.id || movingId === item.id}
+                compactCols={compactCols}
                 onEdit={() => setEditItem(item)}
                 t={t}
               />
@@ -395,11 +401,12 @@ export function Wishlist() {
 interface WishGridCardProps {
   item: CachedWishlistItem
   deleting: boolean
+  compactCols: 2 | 3 | 4 | 5
   onEdit: () => void
   t: (key: DictKey, vars?: Record<string, string | number>) => string
 }
 
-function WishGridCard({ item, deleting, onEdit }: WishGridCardProps) {
+function WishGridCard({ item, deleting, compactCols, onEdit }: WishGridCardProps) {
   const priorityDot: Record<string, string> = {
     high: 'bg-red-400',
     medium: 'bg-yellow-400',
@@ -435,8 +442,10 @@ function WishGridCard({ item, deleting, onEdit }: WishGridCardProps) {
         )}
       </div>
       {/* Title */}
-      <div className="px-2 py-1.5">
-        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-center">
+      <div className="px-1.5 py-1">
+        <p className={`font-medium text-gray-900 dark:text-gray-100 truncate leading-snug text-center ${
+          compactCols <= 3 ? 'text-xs' : 'text-[10px]'
+        }`}>
           {item.title}
         </p>
       </div>

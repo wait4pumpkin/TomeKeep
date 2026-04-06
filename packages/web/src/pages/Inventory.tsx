@@ -288,12 +288,12 @@ export function Inventory() {
             </div>
             <button
               onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm rounded-lg transition-colors"
+              title={t('add_book')}
+              className="flex items-center justify-center w-8 h-8 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              {t('add_book')}
             </button>
           </div>
 
@@ -322,11 +322,27 @@ export function Inventory() {
           <div className="flex items-center gap-1.5">
             {/* Status filter icon buttons */}
             {([
-              { key: 'all',     label: t('filter_all'),     icon: null },
-              { key: 'unread',  label: t('filter_unread'),  icon: '○' },
-              { key: 'reading', label: t('filter_reading'), icon: '◑' },
-              { key: 'read',    label: t('filter_read'),    icon: '●' },
-            ] as { key: FilterStatus; label: string; icon: string | null }[]).map(({ key: f, label, icon }) => (
+              { key: 'all' as FilterStatus,     label: t('filter_all'),     icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                </svg>
+              ) },
+              { key: 'unread' as FilterStatus,  label: t('filter_unread'),  icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+                </svg>
+              ) },
+              { key: 'reading' as FilterStatus, label: t('filter_reading'), icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+              ) },
+              { key: 'read' as FilterStatus,    label: t('filter_read'),    icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+                </svg>
+              ) },
+            ]).map(({ key: f, label, icon }) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -337,10 +353,7 @@ export function Inventory() {
                     : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
                 }`}
               >
-                {icon
-                  ? <span className="text-sm leading-none">{icon}</span>
-                  : <span className="text-xs font-semibold leading-none">{t('filter_all')}</span>
-                }
+                {icon}
               </button>
             ))}
 
@@ -421,6 +434,7 @@ export function Inventory() {
                 book={book}
                 status={statusForBook(book, stateMap)}
                 deleting={deletingId === book.id}
+                compactCols={compactCols}
                 onEdit={() => setEditBook(book)}
                 t={t}
               />
@@ -451,11 +465,12 @@ interface BookGridCardProps {
   book: CachedBook
   status: ReadingStatus
   deleting: boolean
+  compactCols: 2 | 3 | 4 | 5
   onEdit: () => void
   t: (key: DictKey, vars?: Record<string, string | number>) => string
 }
 
-function BookGridCard({ book, status, deleting, onEdit }: BookGridCardProps) {
+function BookGridCard({ book, status, deleting, compactCols, onEdit }: BookGridCardProps) {
   const statusDot: Record<ReadingStatus, string> = {
     unread: 'bg-gray-300 dark:bg-gray-600',
     reading: 'bg-yellow-400',
@@ -487,8 +502,10 @@ function BookGridCard({ book, status, deleting, onEdit }: BookGridCardProps) {
         <span className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-gray-800 ${statusDot[status]}`} />
       </div>
       {/* Title */}
-      <div className="px-2 py-1.5">
-        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-center">
+      <div className="px-1.5 py-1">
+        <p className={`font-medium text-gray-900 dark:text-gray-100 truncate leading-snug text-center ${
+          compactCols <= 3 ? 'text-xs' : 'text-[10px]'
+        }`}>
           {book.title}
         </p>
       </div>
