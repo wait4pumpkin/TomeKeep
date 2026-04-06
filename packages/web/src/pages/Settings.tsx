@@ -1,13 +1,13 @@
 // src/pages/Settings.tsx
 // Settings page: theme, language, profile management, logout.
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLang } from '../lib/i18n.tsx'
 import { getStoredUser, clearStoredUser } from '../lib/auth.ts'
 import { api } from '../lib/api.ts'
 import { clearCache } from '../lib/db-cache.ts'
-import { clearProfiles, getActiveProfile } from '../lib/profiles.ts'
+import { clearProfiles, getActiveProfile, renameProfile } from '../lib/profiles.ts'
 import { getStoredTheme, setStoredTheme, applyTheme, cycleTheme } from '@tomekeep/shared'
 import { ProfileSwitcher } from '../components/ProfileSwitcher.tsx'
 
@@ -16,7 +16,52 @@ export function Settings() {
   const navigate = useNavigate()
   const user = getStoredUser()
   const [themeKey, setThemeKey] = useState(() => getStoredTheme())
-  const activeProfile = getActiveProfile()
+
+  // Profile rename state
+  const [activeProfile, setActiveProfile] = useState(() => getActiveProfile())
+  const [renaming, setRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
+  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.focus()
+  }, [renaming])
+
+  // Keep activeProfile in sync when ProfileSwitcher changes it
+  useEffect(() => {
+    function onProfileChange() {
+      setActiveProfile(getActiveProfile())
+    }
+    window.addEventListener('tomekeep:profile', onProfileChange)
+    return () => window.removeEventListener('tomekeep:profile', onProfileChange)
+  }, [])
+
+  function startRename() {
+    setRenameValue(activeProfile?.name ?? '')
+    setRenaming(true)
+  }
+
+  async function commitRename() {
+    if (!activeProfile || !renameValue.trim() || renameBusy) {
+      setRenaming(false)
+      return
+    }
+    if (renameValue.trim() === activeProfile.name) {
+      setRenaming(false)
+      return
+    }
+    setRenameBusy(true)
+    try {
+      await renameProfile(activeProfile.id, renameValue.trim())
+      setActiveProfile(getActiveProfile())
+      // Notify other components that profile data changed
+      window.dispatchEvent(new CustomEvent('tomekeep:profile'))
+    } finally {
+      setRenameBusy(false)
+      setRenaming(false)
+    }
+  }
 
   function handleThemeCycle() {
     const next = cycleTheme(getStoredTheme())
@@ -65,28 +110,45 @@ export function Settings() {
             {t('profile_label')}
           </p>
           <div className="bg-white dark:bg-gray-800 rounded-xl divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700">
-            {/* Active profile display + switcher */}
-            <div className="flex items-center justify-between px-4 py-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-                </svg>
-                <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
-                  {activeProfile?.name ?? t('profile_label')}
-                </span>
-              </div>
-              <ProfileSwitcher />
-            </div>
 
-            {/* Logged-in user + logout */}
+            {/* Logged-in user + logout — first row */}
             <div className="flex items-center justify-between px-4 py-3">
               <span className="text-sm text-gray-500 dark:text-gray-400 truncate">{user.name}</span>
               <button
                 onClick={() => { void handleLogout() }}
-                className="text-sm text-red-500 hover:text-red-600 transition-colors flex-shrink-0"
+                className="text-sm text-red-500 hover:text-red-600 transition-colors flex-shrink-0 ml-3"
               >
                 {t('sync_logout')}
               </button>
+            </div>
+
+            {/* Active profile rename + switcher — second row */}
+            <div className="flex items-center justify-between px-4 py-3 gap-3">
+              {/* Inline rename */}
+              {renaming ? (
+                <input
+                  ref={renameInputRef}
+                  value={renameValue}
+                  onChange={e => setRenameValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') void commitRename()
+                    if (e.key === 'Escape') setRenaming(false)
+                  }}
+                  onBlur={() => { void commitRename() }}
+                  disabled={renameBusy}
+                  className="flex-1 min-w-0 text-sm px-2 py-0.5 rounded border border-blue-400 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                />
+              ) : (
+                <button
+                  onClick={startRename}
+                  title={t('profile_rename')}
+                  className="flex-1 min-w-0 text-left text-sm text-gray-700 dark:text-gray-300 truncate hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                >
+                  {activeProfile?.name ?? t('profile_label')}
+                </button>
+              )}
+              {/* Profile switcher dropdown */}
+              <ProfileSwitcher />
             </div>
           </div>
         </section>
