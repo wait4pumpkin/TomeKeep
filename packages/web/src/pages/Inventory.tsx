@@ -597,9 +597,9 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
   }
 
   return (
-    <div className={`flex gap-3 bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm border border-gray-100 dark:border-gray-700 transition-opacity ${deleting ? 'opacity-40 pointer-events-none' : ''}`}>
+    <div className={`flex gap-3 bg-white dark:bg-gray-800 rounded-xl p-2.5 shadow-sm border border-gray-100 dark:border-gray-700 transition-opacity ${deleting ? 'opacity-40 pointer-events-none' : ''}`}>
       {/* Cover */}
-      <div className="flex-shrink-0 w-12 h-16 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-700">
+      <div className="flex-shrink-0 w-14 h-20 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-700">
         {book.cover_key ? (
           <img
             src={`/api/covers/${book.cover_key}`}
@@ -617,7 +617,7 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
       </div>
 
       {/* Meta */}
-      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+      <div className="flex-1 min-w-0 flex flex-col justify-between py-0">
         <div className="min-w-0">
           <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
             {book.title}
@@ -628,9 +628,9 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
           </p>
         </div>
         {book.tags.length > 0 && (
-          <div className="flex gap-1 mt-1 flex-wrap">
-            {book.tags.slice(0, 3).map(tag => (
-              <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full ${tagColor(tag).badge}`}>
+          <div className="flex gap-1 mt-1 flex-nowrap overflow-hidden">
+            {book.tags.slice(0, 2).map(tag => (
+              <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
                 {tag}
               </span>
             ))}
