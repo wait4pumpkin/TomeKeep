@@ -164,41 +164,39 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
       <form onSubmit={e => { void handleSubmit(e) }} noValidate className="space-y-3">
         {/* Cover + basic fields row */}
         <div className="flex gap-3 items-stretch">
-          {/* Cover thumbnail + upload button — height matches the fields column */}
-          <div className="flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => coverInputRef.current?.click()}
-              disabled={uploadingCover}
-              className="h-full aspect-[2/3] min-h-[88px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
-              title={t('choose_cover')}
-            >
-              {coverKey ? (
-                <img
-                  src={`/api/covers/${coverKey}`}
-                  alt={title}
-                  className="w-full h-full object-cover"
-                />
-              ) : uploadingCover ? (
-                <svg className="w-5 h-5 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
-                </svg>
-              )}
-            </button>
-            <input
-              ref={coverInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handleCoverChange}
-            />
-          </div>
+          {/* Cover thumbnail — direct flex child so h-full works */}
+          <button
+            type="button"
+            onClick={() => coverInputRef.current?.click()}
+            disabled={uploadingCover}
+            className="flex-shrink-0 h-full aspect-[2/3] min-h-[88px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
+            title={t('choose_cover')}
+          >
+            {coverKey ? (
+              <img
+                src={`/api/covers/${coverKey}`}
+                alt={title}
+                className="w-full h-full object-cover"
+              />
+            ) : uploadingCover ? (
+              <svg className="w-5 h-5 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
+              </svg>
+            )}
+          </button>
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleCoverChange}
+          />
 
           {/* Fields */}
           <div className="flex-1 flex flex-col gap-1.5 justify-between">
