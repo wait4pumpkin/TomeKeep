@@ -277,7 +277,7 @@ export function Inventory() {
     <PullToRefresh onRefresh={handleRefresh}>
       <div className="min-h-full pb-6">
         {/* Header row */}
-        <div className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 space-y-2">
+        <div className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 px-4 py-3 space-y-2">
           {/* Title + add button */}
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2 min-w-0">
@@ -408,23 +408,25 @@ export function Inventory() {
             </div>
           </div>
 
-          {/* Reading progress bar — inside sticky header, always visible */}
-          {books.length > 0 && (
-            <div className="relative group -mx-4 -mb-3 mt-1">
-              <div className="h-0.5 bg-gray-100 dark:bg-gray-800 overflow-hidden">
+          {/* Reading progress bar — acts as header/list divider */}
+          <div className="relative group -mx-4 -mb-3 mt-1">
+            <div className="h-0.5 bg-gray-200 dark:bg-gray-700 overflow-hidden">
+              {books.length > 0 && (
                 <div
-                  className="h-full bg-green-500 dark:bg-green-400 transition-[width] duration-500 ease-in-out"
+                  className="h-full bg-green-500 dark:bg-green-400 animate-pulse transition-[width] duration-500 ease-in-out"
                   style={{ width: `${readPct * 100}%` }}
                 />
-              </div>
-              {/* Tooltip — appears on hover, centred above the bar */}
+              )}
+            </div>
+            {/* Tooltip — appears on hover, centred above the bar */}
+            {books.length > 0 && (
               <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap rounded px-2 py-0.5 text-xs bg-gray-800 dark:bg-gray-700 text-white tabular-nums shadow-sm">
                 {t('progress_read', { read: readCount, total: totalCount })}
                 {' · '}
                 {Math.round(readPct * 100)}%
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Add / Edit form */}
