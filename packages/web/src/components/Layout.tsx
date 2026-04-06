@@ -81,7 +81,9 @@ export function Layout() {
             height: 'calc(3rem + env(safe-area-inset-top, 0px))',
           }}
         >
-          <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">TomeKeep</span>
+          {settingsOpen && (
+            <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">TomeKeep</span>
+          )}
 
           {/* Sync indicator */}
           <div className="flex items-center gap-2">
