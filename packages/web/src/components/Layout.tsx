@@ -12,6 +12,7 @@ import { InstallPrompt } from './InstallPrompt.tsx'
 import { ProfileSwitcher } from './ProfileSwitcher.tsx'
 import { clearProfiles } from '../lib/profiles.ts'
 import { getStoredTheme, setStoredTheme, applyTheme, cycleTheme } from '@tomekeep/shared'
+import { syncProfiles, getActiveProfile } from '../lib/profiles.ts'
 
 export function Layout() {
   const { lang, t, setLang } = useLang()
@@ -35,7 +36,20 @@ export function Layout() {
 
   // Initial sync on mount
   useEffect(() => {
+    const profileBefore = getActiveProfile()?.id ?? null
     setSyncing(true)
+    // Sync profiles first so ProfileSwitcher and Inventory have the right active profile
+    syncProfiles()
+      .then(profiles => {
+        // If we now have a profile that wasn't set before, notify pages to reload
+        const profileAfter = profiles.length > 0
+          ? (profiles.find(p => p.id === profileBefore) ? profileBefore : profiles[0]?.id ?? null)
+          : null
+        if (profileAfter !== profileBefore) {
+          window.dispatchEvent(new CustomEvent('tomekeep:profile'))
+        }
+      })
+      .catch(() => { /* offline — use cached profiles */ })
     runSync()
       .then(updated => {
         setSyncing(false)
