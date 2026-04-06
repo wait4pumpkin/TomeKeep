@@ -285,9 +285,9 @@ export function Inventory() {
                 {t('page_library')}
               </h1>
               <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {filter === 'all' && !query
-                  ? books.length
-                  : t('progress_read', { read: readCount, total: totalCount })}
+                {totalCount < books.length
+                  ? <>{totalCount}<span className="opacity-50"> / {books.length}</span></>
+                  : books.length}
               </p>
             </div>
             <button
