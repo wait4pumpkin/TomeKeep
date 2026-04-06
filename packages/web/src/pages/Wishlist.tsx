@@ -318,8 +318,8 @@ export function Wishlist() {
                   title={t('detail_view')}
                   className={`p-1 transition-colors ${viewMode === 'detail' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
                 >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
                   </svg>
                 </button>
                 <button
@@ -357,7 +357,7 @@ export function Wishlist() {
         )}
 
         {/* Wishlist items */}
-        <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid gap-2' : 'space-y-2'}`}
+        <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid gap-1' : 'space-y-2'}`}
           style={viewMode === 'compact' ? { gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` } : undefined}
         >
           {loading && (
@@ -450,9 +450,9 @@ function WishGridCard({ item, deleting, compactCols, onEdit }: WishGridCardProps
         )}
       </div>
       {/* Title */}
-      <div className="px-1.5 py-1">
+      <div className="px-1 py-0.5">
         <p className={`font-medium text-gray-900 dark:text-gray-100 truncate leading-snug text-center ${
-          compactCols <= 3 ? 'text-xs' : compactCols <= 5 ? 'text-[10px]' : 'text-[9px]'
+          compactCols <= 3 ? 'text-[10px]' : compactCols <= 5 ? 'text-[9px]' : 'text-[8px]'
         }`}>
           {item.title}
         </p>
