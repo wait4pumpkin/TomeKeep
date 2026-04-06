@@ -4,9 +4,32 @@
 // Uses the native BarcodeDetector API where available (Chrome Android),
 // and falls back to the barcode-detector polyfill (ZXing-WASM) on iOS Safari.
 // The WASM binary is self-hosted at /zxing_reader.wasm to avoid CDN dependency.
+//
+// IMPORTANT: setZXingModuleOverrides is called at module scope with a stable
+// function reference so that:
+//   (a) The override is applied before any detect() call regardless of timing.
+//   (b) The same function reference is reused across modal open/close cycles so
+//       the ZXing equality check does not invalidate the already-warm WASM module.
 
 import { useEffect, useRef, useState } from 'react'
 import { useLang } from '../lib/i18n.tsx'
+
+// ---------------------------------------------------------------------------
+// Polyfill initialisation — module scope, runs once per page lifecycle.
+// Must happen before any BarcodeDetector construction or detect() call.
+// ---------------------------------------------------------------------------
+
+/** Stable locateFile reference — reused across modal open/close to prevent
+ *  ZXing from invalidating its cached WASM module instance. */
+const _wasmLocate = () => '/zxing_reader.wasm'
+
+// Apply override eagerly. The dynamic import is used so that the ~43 KB polyfill
+// chunk is only downloaded when this module is first loaded (lazy chunk split by
+// Vite), not at app startup. The returned promise is intentionally fire-and-forget
+// here; buildDetector() will await the same already-cached module when called.
+void import('barcode-detector/ponyfill').then(({ setZXingModuleOverrides }) => {
+  setZXingModuleOverrides({ locateFile: _wasmLocate })
+})
 
 // ---------------------------------------------------------------------------
 // Types (mirrored from the BarcodeDetector spec)
@@ -126,9 +149,9 @@ async function buildDetector(formats: BarcodeFormat[]): Promise<BarcodeDetectorI
     return new native({ formats })
   }
 
-  // Polyfill: barcode-detector (ZXing-WASM), point WASM at self-hosted binary
-  const { setZXingModuleOverrides } = await import('barcode-detector/ponyfill')
-  setZXingModuleOverrides({ locateFile: () => '/zxing_reader.wasm' })
+  // Polyfill: barcode-detector (ZXing-WASM).
+  // setZXingModuleOverrides was already called at module scope with the stable
+  // _wasmLocate reference, so we only need to construct the detector here.
   const { BarcodeDetector: Polyfill } = await import('barcode-detector/ponyfill')
   return new Polyfill({ formats })
 }
@@ -221,6 +244,14 @@ export function IsbnScanModal({ isOpen, onClose, onDetected, mode = 'single' }: 
 
         video.srcObject = stream
         await video.play()
+        // Wait until at least the first frame is decoded (readyState HAVE_CURRENT_DATA = 2).
+        // The ZXing polyfill throws InvalidStateError if detect() is called before this.
+        if (video.readyState < 2) {
+          await new Promise<void>(resolve => {
+            video.addEventListener('canplay', () => resolve(), { once: true })
+          })
+        }
+        if (cancelled) return
         setStatus({ state: 'running' })
 
         const tick = async () => {
@@ -243,8 +274,10 @@ export function IsbnScanModal({ isOpen, onClose, onDetected, mode = 'single' }: 
 
                 if (mode === 'single') {
                   setTimeout(() => {
-                    onDetected(first.rawValue)
-                    onClose()
+                    if (!cancelled) {
+                      onDetected(first.rawValue)
+                      onClose()
+                    }
                   }, 180)
                   return
                 } else {
@@ -334,6 +367,7 @@ export function IsbnScanModal({ isOpen, onClose, onDetected, mode = 'single' }: 
               style={isMirrored ? { transform: 'scaleX(-1)' } : undefined}
               muted
               playsInline
+              autoPlay
             />
             <canvas
               ref={canvasRef}

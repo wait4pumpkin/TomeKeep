@@ -32,8 +32,9 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // App shell: cache-first for static assets (exclude large WASM from precache)
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // App shell: cache-first for static assets, including WASM so it is
+        // available offline from the very first PWA use (before any detect() call).
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,wasm}'],
         runtimeCaching: [
           {
             // API data: network-first, fall back to cache

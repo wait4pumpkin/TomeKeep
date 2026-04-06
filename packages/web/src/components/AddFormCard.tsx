@@ -195,7 +195,6 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
             ref={coverInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             className="hidden"
             onChange={handleCoverChange}
           />
