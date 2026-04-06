@@ -24,6 +24,13 @@ export function Layout() {
   // Apply theme on mount
   useEffect(() => {
     applyTheme(getStoredTheme())
+    // Re-apply when the OS dark/light preference changes (only matters in auto mode)
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    function onSystemThemeChange() {
+      applyTheme(getStoredTheme())
+    }
+    mq.addEventListener('change', onSystemThemeChange)
+    return () => mq.removeEventListener('change', onSystemThemeChange)
   }, [])
 
   // Initial sync on mount
