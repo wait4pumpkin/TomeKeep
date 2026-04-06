@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Let Tailwind v4 scan shared package so tagColor palettes are included */
+@source "../../shared/src";
 
 /* iOS safe-area insets */
 :root {
