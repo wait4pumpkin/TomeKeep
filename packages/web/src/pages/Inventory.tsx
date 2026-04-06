@@ -538,9 +538,9 @@ interface BookGridCardProps {
 
 function BookGridCard({ book, status, deleting, compactCols, onEdit }: BookGridCardProps) {
   const statusDot: Record<ReadingStatus, string> = {
-    unread: 'bg-gray-300 dark:bg-gray-600',
-    reading: 'bg-yellow-400',
-    read: 'bg-blue-500',
+    unread:  'bg-gray-300 dark:bg-gray-600',
+    reading: 'bg-yellow-400 dark:bg-yellow-500',
+    read:    'bg-green-500 dark:bg-green-400',
   }
 
   return (
@@ -617,23 +617,25 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
       </div>
 
       {/* Meta */}
-      <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
-          {book.title}
-        </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-          {book.author}
-          {book.publisher && ` · ${book.publisher}`}
-        </p>
-        {book.tags.length > 0 && (
-          <div className="flex gap-1 mt-0.5 flex-nowrap overflow-hidden">
-            {book.tags.slice(0, 2).map(tag => (
+      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
+            {book.title}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+            {book.author}
+            {book.publisher && ` · ${book.publisher}`}
+          </p>
+        </div>
+        {book.tags.length > 0 ? (
+          <div className="flex gap-1 overflow-x-auto no-scrollbar">
+            {book.tags.map(tag => (
               <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
                 {tag}
               </span>
             ))}
           </div>
-        )}
+        ) : <div />}
       </div>
 
       {/* Actions */}

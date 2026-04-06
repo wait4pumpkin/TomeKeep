@@ -15,6 +15,13 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Hide scrollbar while keeping scroll functionality */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
 /* Tailwind v4 dark mode via class strategy */
 @custom-variant dark (&:where(.dark, .dark *));
 

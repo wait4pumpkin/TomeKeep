@@ -541,15 +541,17 @@ function WishCard({
       </div>
 
       {/* Meta */}
-      <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
-          {item.title}
-        </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-          {item.author}
-          {item.publisher && ` · ${item.publisher}`}
-        </p>
-        <div className="flex items-center gap-1 mt-0.5 flex-nowrap overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
+            {item.title}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+            {item.author}
+            {item.publisher && ` · ${item.publisher}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
           {/* Pending buy badge */}
           {item.pending_buy && (
             <span className="text-xs px-1.5 py-0.5 rounded-full shrink-0 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
@@ -557,11 +559,13 @@ function WishCard({
             </span>
           )}
           {/* Tags */}
-          {item.tags.slice(0, 2).map(tag => (
+          {item.tags.map(tag => (
             <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
               {tag}
             </span>
           ))}
+          {/* placeholder so justify-between works when no tags */}
+          {!item.pending_buy && item.tags.length === 0 && <div />}
         </div>
       </div>
 
