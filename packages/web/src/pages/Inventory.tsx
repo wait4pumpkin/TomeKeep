@@ -633,7 +633,7 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
       <div className="flex flex-1 min-w-0 flex-col">
         {/* Top: title + status */}
         <div className="flex items-start gap-1 min-w-0">
-          <p className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
+          <p className="flex-1 min-w-0 text-base font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
             {book.title}
           </p>
           <button
@@ -664,7 +664,7 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
         </div>
 
         {/* Middle: author */}
-        <p className="flex-1 text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+        <p className="flex-1 text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">
           {book.author}
           {book.publisher && ` · ${book.publisher}`}
         </p>
