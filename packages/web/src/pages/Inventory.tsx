@@ -128,6 +128,7 @@ export function Inventory() {
   // Collapsed header when scrolled away from top
   const [collapsed, setCollapsed] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const controlsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     // Walk up to the nearest scrollable ancestor (the <main> in Layout.tsx)
@@ -323,11 +324,14 @@ export function Inventory() {
 
           {/* Collapsible controls: search + sort + filter + view */}
           <div
-            className={`overflow-hidden transition-[max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
-              collapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-40 opacity-100'
-            }`}
+            className="overflow-hidden transition-[max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
+            style={{
+              maxHeight: collapsed ? '0px' : `${controlsRef.current?.scrollHeight ?? 200}px`,
+              opacity: collapsed ? 0 : 1,
+              pointerEvents: collapsed ? 'none' : undefined,
+            }}
           >
-            <div className="space-y-2 mt-2">
+            <div ref={controlsRef} className="space-y-2 mt-2">
               {/* Search + sort — same row */}
               <div className="flex items-center gap-2">
                 <input
