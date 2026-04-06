@@ -9,6 +9,10 @@
 //
 // The more-specific functions/api/[[route]].ts takes precedence over this file
 // for all /api/* requests, so there is no conflict.
+//
+// NOTE: Vite runs on HTTPS (self-signed cert via @vitejs/plugin-basic-ssl).
+// We must target https://localhost:5173 and set rejectUnauthorized: false so
+// workerd's local runtime accepts the self-signed certificate.
 
 export async function onRequest(context: { request: Request }): Promise<Response> {
   const url = new URL(context.request.url)
@@ -19,8 +23,9 @@ export async function onRequest(context: { request: Request }): Promise<Response
     return new Response('Not found', { status: 404 })
   }
 
-  // Forward to Vite dev server (port 5173).
+  // Forward to Vite dev server (HTTPS, port 5173).
   const target = new URL(context.request.url)
+  target.protocol = 'https:'
   target.port = '5173'
 
   return fetch(target.toString(), {
@@ -31,3 +36,4 @@ export async function onRequest(context: { request: Request }): Promise<Response
       : undefined,
   })
 }
+

@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx concurrently -n vite,wrangler -c blue,green \"vite dev --port 5173 --host 0.0.0.0\" \"wrangler pages dev --compatibility-date=2024-09-23 --proxy 5173 --ip 0.0.0.0 --port 8788\"",
-    "dev:http": "npx concurrently -n vite,wrangler -c blue,green \"vite dev --port 5173 --host 0.0.0.0\" \"wrangler pages dev --compatibility-date=2024-09-23 --proxy 5173 --ip 0.0.0.0 --port 8788\"",
+    "dev": "npx concurrently -n vite,wrangler -c blue,green \"vite dev --port 5173 --host 0.0.0.0\" \"CI=true wrangler pages dev --compatibility-date=2024-09-23 --ip 0.0.0.0 --port 8788\"",
+    "dev:http": "npx concurrently -n vite,wrangler -c blue,green \"vite dev --port 5173 --host 0.0.0.0\" \"CI=true wrangler pages dev --compatibility-date=2024-09-23 --ip 0.0.0.0 --port 8788\"",
     "dev:vite": "vite dev --port 5173 --host 0.0.0.0",
-    "dev:wrangler": "wrangler pages dev --compatibility-date=2024-09-23 --proxy 5173 --ip 0.0.0.0 --port 8788",
+    "dev:wrangler": "CI=true wrangler pages dev --compatibility-date=2024-09-23 --ip 0.0.0.0 --port 8788",
     "build": "vite build",
     "preview": "wrangler pages dev --compatibility-date=2024-09-23 dist",
     "typecheck": "tsc --noEmit",

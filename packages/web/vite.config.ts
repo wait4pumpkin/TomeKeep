@@ -10,6 +10,16 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: true,
     https: {},
+    // Proxy /api/* to wrangler Pages Functions (HTTP, port 8788).
+    // This lets the browser (and mobile devices) reach the API through the same
+    // HTTPS origin as the Vite dev server — no mixed-content issues.
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8788',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
   plugins: [
     react(),
