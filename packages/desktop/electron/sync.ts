@@ -533,8 +533,6 @@ async function migrateAll(
   const wishlist = db.data.wishlist
   const readingStates = db.data.readingStates
 
-  console.log(`[migrate] starting: books=${books.length} wishlist=${wishlist.length} readingStates=${readingStates.length}`)
-
   // Phase 1: upload missing covers for books
   onProgress({ phase: 'covers', current: 0, total: books.length + wishlist.length })
   let coversDone = 0

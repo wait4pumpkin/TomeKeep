@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @tomekeep/desktop dev",
-    "dev:web": "pnpm --filter @tomekeep/web dev:wrangler",
-    "dev:full": "npx concurrently -n desktop,web -c cyan,green \"pnpm --filter @tomekeep/desktop dev\" \"pnpm --filter @tomekeep/web dev:wrangler\"",
+    "dev:web": "pnpm --filter @tomekeep/web dev",
+    "dev:full": "npx concurrently -n desktop,web -c cyan,green \"pnpm --filter @tomekeep/desktop dev\" \"pnpm --filter @tomekeep/web dev\"",
     "build": "pnpm --filter @tomekeep/desktop build",
     "test": "pnpm --filter @tomekeep/desktop test && pnpm --filter @tomekeep/shared test",
     "lint": "pnpm -r lint",
