@@ -26,6 +26,9 @@ import { getActiveProfile } from '../lib/profiles.ts'
 type ReadingStatus = 'unread' | 'reading' | 'read'
 type SortKey = 'added' | 'title' | 'author'
 type FilterStatus = 'all' | ReadingStatus
+type ViewMode = 'detail' | 'compact'
+
+const VIEW_MODE_KEY = 'tk_inv_view'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,6 +95,10 @@ export function Inventory() {
 
   // Active profile — null means the account-level default
   const [activeProfileId, setActiveProfileId] = useState<string | null>(() => getActiveProfile()?.id ?? null)
+
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
+  )
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterStatus>('all')
@@ -284,7 +291,7 @@ export function Inventory() {
                   : t('filter_read')}
               </button>
             ))}
-            <div className="flex-shrink-0 ml-auto">
+            <div className="flex-shrink-0 ml-auto flex items-center gap-1.5">
               <select
                 value={sort}
                 onChange={e => setSort(e.target.value as SortKey)}
@@ -294,6 +301,27 @@ export function Inventory() {
                 <option value="title">{t('sort_title')}</option>
                 <option value="author">{t('sort_author')}</option>
               </select>
+              {/* View toggle */}
+              <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                <button
+                  onClick={() => { setViewMode('detail'); localStorage.setItem(VIEW_MODE_KEY, 'detail') }}
+                  title={t('detail_view')}
+                  className={`p-1 transition-colors ${viewMode === 'detail' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => { setViewMode('compact'); localStorage.setItem(VIEW_MODE_KEY, 'compact') }}
+                  title={t('compact_view')}
+                  className={`p-1 transition-colors ${viewMode === 'compact' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -311,29 +339,40 @@ export function Inventory() {
         )}
 
         {/* Book list */}
-        <div className="px-4 pt-3 space-y-2">
+        <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid grid-cols-2 gap-2' : 'space-y-2'}`}>
           {loading && (
-            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12">…</p>
+            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>…</p>
           )}
 
           {!loading && visible.length === 0 && (
-            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12">
+            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>
               {books.length === 0 ? t('empty_library') : t('empty_filter')}
             </p>
           )}
 
-          {visible.map(book => (
-            <BookCard
-              key={book.id}
-              book={book}
-              status={statusForBook(book, stateMap)}
-              deleting={deletingId === book.id}
-              onStatusCycle={() => { void handleStatusCycle(book) }}
-              onEdit={() => setEditBook(book)}
-              onDelete={() => { void handleDelete(book) }}
-              t={t}
-            />
-          ))}
+          {visible.map(book =>
+            viewMode === 'compact' ? (
+              <BookGridCard
+                key={book.id}
+                book={book}
+                status={statusForBook(book, stateMap)}
+                deleting={deletingId === book.id}
+                onEdit={() => setEditBook(book)}
+                t={t}
+              />
+            ) : (
+              <BookCard
+                key={book.id}
+                book={book}
+                status={statusForBook(book, stateMap)}
+                deleting={deletingId === book.id}
+                onStatusCycle={() => { void handleStatusCycle(book) }}
+                onEdit={() => setEditBook(book)}
+                onDelete={() => { void handleDelete(book) }}
+                t={t}
+              />
+            )
+          )}
         </div>
       </div>
     </PullToRefresh>
@@ -341,8 +380,57 @@ export function Inventory() {
 }
 
 // ---------------------------------------------------------------------------
-// BookCard
+// BookGridCard  (compact view)
 // ---------------------------------------------------------------------------
+
+interface BookGridCardProps {
+  book: CachedBook
+  status: ReadingStatus
+  deleting: boolean
+  onEdit: () => void
+  t: (key: DictKey, vars?: Record<string, string | number>) => string
+}
+
+function BookGridCard({ book, status, deleting, onEdit }: BookGridCardProps) {
+  const statusDot: Record<ReadingStatus, string> = {
+    unread: 'bg-gray-300 dark:bg-gray-600',
+    reading: 'bg-yellow-400',
+    read: 'bg-blue-500',
+  }
+
+  return (
+    <button
+      onClick={onEdit}
+      className={`flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 transition-opacity w-full text-left ${deleting ? 'opacity-40 pointer-events-none' : ''}`}
+    >
+      {/* Cover */}
+      <div className="w-full aspect-[2/3] bg-gray-100 dark:bg-gray-700 relative">
+        {book.cover_key ? (
+          <img
+            src={`/api/covers/${book.cover_key}`}
+            alt={book.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <svg className="w-8 h-8 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+            </svg>
+          </div>
+        )}
+        {/* Status dot */}
+        <span className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-gray-800 ${statusDot[status]}`} />
+      </div>
+      {/* Title */}
+      <div className="px-2 py-1.5">
+        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
+          {book.title}
+        </p>
+      </div>
+    </button>
+  )
+}
 
 interface BookCardProps {
   book: CachedBook

@@ -21,6 +21,9 @@ import { tagColor } from '@tomekeep/shared'
 
 type WishFilter = 'all' | 'pending'
 type WishSort = 'added' | 'priority' | 'title'
+type ViewMode = 'detail' | 'compact'
+
+const VIEW_MODE_KEY = 'tk_wl_view'
 
 const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 
@@ -68,6 +71,10 @@ export function Wishlist() {
 
   const [items, setItems] = useState<CachedWishlistItem[]>([])
   const [loading, setLoading] = useState(true)
+
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
+  )
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<WishFilter>('all')
@@ -255,7 +262,7 @@ export function Wishlist() {
                 {f === 'all' ? t('filter_all') : t('filter_pending')}
               </button>
             ))}
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1.5">
               <select
                 value={sort}
                 onChange={e => setSort(e.target.value as WishSort)}
@@ -265,6 +272,27 @@ export function Wishlist() {
                 <option value="priority">{t('sort_priority')}</option>
                 <option value="title">{t('sort_title')}</option>
               </select>
+              {/* View toggle */}
+              <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                <button
+                  onClick={() => { setViewMode('detail'); localStorage.setItem(VIEW_MODE_KEY, 'detail') }}
+                  title={t('detail_view')}
+                  className={`p-1 transition-colors ${viewMode === 'detail' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => { setViewMode('compact'); localStorage.setItem(VIEW_MODE_KEY, 'compact') }}
+                  title={t('compact_view')}
+                  className={`p-1 transition-colors ${viewMode === 'compact' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -282,31 +310,97 @@ export function Wishlist() {
         )}
 
         {/* Wishlist items */}
-        <div className="px-4 pt-3 space-y-2">
+        <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid grid-cols-2 gap-2' : 'space-y-2'}`}>
           {loading && (
-            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12">…</p>
+            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>…</p>
           )}
           {!loading && visible.length === 0 && (
-            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12">
+            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>
               {items.length === 0 ? t('empty_wishlist') : t('empty_filter')}
             </p>
           )}
-          {visible.map(item => (
-            <WishCard
-              key={item.id}
-              item={item}
-              deleting={deletingId === item.id}
-              moving={movingId === item.id}
-              onTogglePending={() => { void handleTogglePending(item) }}
-              onMoveToInventory={() => { void handleMoveToInventory(item) }}
-              onEdit={() => setEditItem(item)}
-              onDelete={() => { void handleDelete(item) }}
-              t={t}
-            />
-          ))}
+          {visible.map(item =>
+            viewMode === 'compact' ? (
+              <WishGridCard
+                key={item.id}
+                item={item}
+                deleting={deletingId === item.id || movingId === item.id}
+                onEdit={() => setEditItem(item)}
+                t={t}
+              />
+            ) : (
+              <WishCard
+                key={item.id}
+                item={item}
+                deleting={deletingId === item.id}
+                moving={movingId === item.id}
+                onTogglePending={() => { void handleTogglePending(item) }}
+                onMoveToInventory={() => { void handleMoveToInventory(item) }}
+                onEdit={() => setEditItem(item)}
+                onDelete={() => { void handleDelete(item) }}
+                t={t}
+              />
+            )
+          )}
         </div>
       </div>
     </PullToRefresh>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// WishGridCard  (compact view)
+// ---------------------------------------------------------------------------
+
+interface WishGridCardProps {
+  item: CachedWishlistItem
+  deleting: boolean
+  onEdit: () => void
+  t: (key: DictKey, vars?: Record<string, string | number>) => string
+}
+
+function WishGridCard({ item, deleting, onEdit }: WishGridCardProps) {
+  const priorityDot: Record<string, string> = {
+    high: 'bg-red-400',
+    medium: 'bg-yellow-400',
+    low: 'bg-gray-300 dark:bg-gray-600',
+  }
+
+  return (
+    <button
+      onClick={onEdit}
+      className={`flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 transition-opacity w-full text-left ${deleting ? 'opacity-40 pointer-events-none' : ''}`}
+    >
+      {/* Cover */}
+      <div className="w-full aspect-[2/3] bg-gray-100 dark:bg-gray-700 relative">
+        {item.cover_key ? (
+          <img
+            src={`/api/covers/${item.cover_key}`}
+            alt={item.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <svg className="w-8 h-8 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z" />
+            </svg>
+          </div>
+        )}
+        {/* Priority dot */}
+        <span className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-gray-800 ${priorityDot[item.priority] ?? priorityDot.low}`} />
+        {/* Pending buy indicator */}
+        {item.pending_buy && (
+          <span className="absolute top-1.5 left-1.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-gray-800 bg-blue-500" />
+        )}
+      </div>
+      {/* Title */}
+      <div className="px-2 py-1.5">
+        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
+          {item.title}
+        </p>
+      </div>
+    </button>
   )
 }
 
