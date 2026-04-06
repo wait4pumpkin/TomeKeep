@@ -2,7 +2,7 @@
 // PWA wishlist page.
 // Reads from IndexedDB cache; writes go through the API and refresh the cache.
 
-import { useState, useEffect, useCallback, useTransition, useRef } from 'react'
+import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
 import { api } from '../lib/api.ts'
 import {
@@ -49,10 +49,15 @@ function filterWishlist(
   items: CachedWishlistItem[],
   filter: WishFilter,
   query: string,
+  tagFilter: string[],
 ): CachedWishlistItem[] {
   const q = query.trim().toLowerCase()
   return items.filter(item => {
     if (filter === 'pending' && !item.pending_buy) return false
+    if (tagFilter.length > 0 && !tagFilter.every(t => {
+      if (t === '__untagged__') return item.tags.length === 0
+      return item.tags.includes(t)
+    })) return false
     if (q) {
       const haystack = [item.title, item.author, item.isbn ?? '', item.publisher ?? '']
         .join(' ')
@@ -84,6 +89,7 @@ export function Wishlist() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<WishFilter>('all')
   const [sort, setSort] = useState<WishSort>('added')
+  const [tagFilter, setTagFilter] = useState<string[]>([])
 
   const [showAdd, setShowAdd] = useState(false)
   const [editItem, setEditItem] = useState<CachedWishlistItem | null>(null)
@@ -226,7 +232,13 @@ export function Wishlist() {
   // ---------------------------------------------------------------------------
 
   const sorted = sortWishlist(items, sort)
-  const visible = filterWishlist(sorted, filter, query)
+  const visible = filterWishlist(sorted, filter, query, tagFilter)
+
+  const allTags = useMemo(() => {
+    const set = new Set<string>()
+    for (const item of items) for (const t of item.tags) set.add(t)
+    return [...set].sort((a, b) => a.localeCompare(b))
+  }, [items])
 
   // ---------------------------------------------------------------------------
   // Render
@@ -366,6 +378,63 @@ export function Wishlist() {
                   </div>
                 </div>
               </div>
+
+              {/* Tag filter pills */}
+              {allTags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setTagFilter(prev =>
+                      prev.includes('__untagged__')
+                        ? prev.filter(t => t !== '__untagged__')
+                        : ['__untagged__']
+                    )}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                      tagFilter.includes('__untagged__')
+                        ? 'bg-violet-500 border-violet-500 text-white'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400'
+                    }`}
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+                      <line x1="3" y1="3" x2="21" y2="21" strokeLinecap="round" />
+                    </svg>
+                    无标签
+                  </button>
+                  {allTags.map(tag => {
+                    const active = tagFilter.includes(tag)
+                    const palette = tagColor(tag)
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => setTagFilter(prev =>
+                          active
+                            ? prev.filter(t => t !== tag)
+                            : [...prev.filter(t => t !== '__untagged__'), tag]
+                        )}
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                          active
+                            ? palette.active
+                            : `bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 ${palette.hover}`
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    )
+                  })}
+                  {tagFilter.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTagFilter([])}
+                      className="px-2 py-0.5 rounded-full text-xs border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
