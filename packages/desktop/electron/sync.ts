@@ -222,9 +222,14 @@ function readingStateToApi(state: ReadingState): Partial<ApiReadingState> {
   }
 }
 
-function apiToReadingState(row: ApiReadingState, localUserId: string): Partial<ReadingState> & { userId: string; bookId: string } {
+// Map an API row back to a local ReadingState.
+// profile_id on the server equals the local user's id (they share the same UUID).
+// Rows with profile_id === null were written before multi-profile support and are
+// skipped here — they are handled separately as a legacy baseline if needed.
+function apiToReadingState(row: ApiReadingState): (Partial<ReadingState> & { userId: string; bookId: string }) | null {
+  if (!row.profile_id) return null   // null-profile rows have no local user to route to
   return {
-    userId: localUserId,
+    userId: row.profile_id,           // profile_id IS the local user id
     bookId: row.book_id,
     status: row.status as ReadingState['status'],
     completedAt: row.completed_at ?? undefined,
@@ -250,7 +255,6 @@ export async function pullAll(): Promise<{ updated: boolean; error?: string }> {
     const status = await apiRequest<SyncStatus>('GET', '/sync/status')
 
     let updated = false
-    const activeUserId = db.data.activeUserId
 
     // --- Books ---
     if (!cursors.books || (status.books && status.books > cursors.books)) {
@@ -338,14 +342,22 @@ export async function pullAll(): Promise<{ updated: boolean; error?: string }> {
     }
 
     // --- Reading states ---
-    if (activeUserId && (!cursors.readingStates || (status.readingStates && status.readingStates > cursors.readingStates))) {
+    // Fetch all reading states for this account (no profile_id filter).
+    // Route each row to the local user whose id matches row.profile_id.
+    // Rows with profile_id = null are legacy (pre-profile) and skipped — they
+    // have no unambiguous local owner.
+    if (!cursors.readingStates || (status.readingStates && status.readingStates > cursors.readingStates)) {
       const since = cursors.readingStates ? `?since=${encodeURIComponent(cursors.readingStates)}` : ''
       const rows = await apiRequest<ApiReadingState[]>('GET', `/reading-states${since}`)
+      // Build a set of local user ids for fast lookup
+      const localUserIds = new Set(db.data.users.map(u => u.id))
       for (const row of rows) {
+        const incoming = apiToReadingState(row)
+        // Skip rows that don't map to any known local user
+        if (!incoming || !localUserIds.has(incoming.userId)) continue
         const idx = db.data.readingStates.findIndex(
-          rs => rs.userId === activeUserId && rs.bookId === row.book_id,
+          rs => rs.userId === incoming.userId && rs.bookId === incoming.bookId,
         )
-        const incoming = apiToReadingState(row, activeUserId)
         if (idx === -1) {
           db.data.readingStates.push(incoming as ReadingState)
           updated = true
