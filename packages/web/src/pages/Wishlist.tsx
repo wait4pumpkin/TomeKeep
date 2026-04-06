@@ -2,7 +2,7 @@
 // PWA wishlist page.
 // Reads from IndexedDB cache; writes go through the API and refresh the cache.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
 import { api } from '../lib/api.ts'
 import {
@@ -24,6 +24,7 @@ type WishSort = 'added' | 'priority' | 'title'
 type ViewMode = 'detail' | 'compact'
 
 const VIEW_MODE_KEY = 'tk_wl_view'
+const COMPACT_COLS_KEY = 'tk_wl_cols'
 
 const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 
@@ -71,9 +72,13 @@ export function Wishlist() {
 
   const [items, setItems] = useState<CachedWishlistItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [, startTransition] = useTransition()
 
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
+  )
+  const [compactCols, setCompactCols] = useState<2 | 3>(
+    () => (Number(localStorage.getItem(COMPACT_COLS_KEY)) as 2 | 3) || 2
   )
 
   const [query, setQuery] = useState('')
@@ -90,10 +95,14 @@ export function Wishlist() {
   // Load from cache
   // ---------------------------------------------------------------------------
 
-  const loadFromCache = useCallback(async () => {
+  const loadFromCache = useCallback(async (background = false) => {
     const ws = await getCachedWishlist()
-    setItems(ws)
-  }, [])
+    if (background) {
+      startTransition(() => setItems(ws))
+    } else {
+      setItems(ws)
+    }
+  }, [startTransition])
 
   useEffect(() => {
     setLoading(true)
@@ -102,7 +111,7 @@ export function Wishlist() {
 
   // Reload from cache whenever a background sync writes new data
   useEffect(() => {
-    function onSync() { void loadFromCache() }
+    function onSync() { void loadFromCache(true) }
     window.addEventListener('tomekeep:sync', onSync)
     return () => window.removeEventListener('tomekeep:sync', onSync)
   }, [loadFromCache])
@@ -247,8 +256,8 @@ export function Wishlist() {
             className="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
 
-          {/* Filter + sort */}
-          <div className="flex items-center gap-2">
+          {/* Filter pills — scrollable */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none">
             {(['all', 'pending'] as WishFilter[]).map(f => (
               <button
                 key={f}
@@ -262,16 +271,34 @@ export function Wishlist() {
                 {f === 'all' ? t('filter_all') : t('filter_pending')}
               </button>
             ))}
+          </div>
+
+          {/* Sort + view controls — fixed row */}
+          <div className="flex items-center gap-2">
+            <select
+              value={sort}
+              onChange={e => setSort(e.target.value as WishSort)}
+              className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
+            >
+              <option value="added">{t('sort_added')}</option>
+              <option value="priority">{t('sort_priority')}</option>
+              <option value="title">{t('sort_title')}</option>
+            </select>
             <div className="ml-auto flex items-center gap-1.5">
-              <select
-                value={sort}
-                onChange={e => setSort(e.target.value as WishSort)}
-                className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
-              >
-                <option value="added">{t('sort_added')}</option>
-                <option value="priority">{t('sort_priority')}</option>
-                <option value="title">{t('sort_title')}</option>
-              </select>
+              {/* Column count — only in compact mode */}
+              {viewMode === 'compact' && (
+                <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                  {([2, 3] as const).map(n => (
+                    <button
+                      key={n}
+                      onClick={() => { setCompactCols(n); localStorage.setItem(COMPACT_COLS_KEY, String(n)) }}
+                      className={`px-2 py-1 text-xs transition-colors ${compactCols === n ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* View toggle */}
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                 <button
@@ -310,12 +337,18 @@ export function Wishlist() {
         )}
 
         {/* Wishlist items */}
-        <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid grid-cols-2 gap-2' : 'space-y-2'}`}>
+        <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid gap-2' : 'space-y-2'}`}
+          style={viewMode === 'compact' ? { gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` } : undefined}
+        >
           {loading && (
-            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>…</p>
+            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12"
+              style={viewMode === 'compact' ? { gridColumn: '1 / -1' } : undefined}
+            >…</p>
           )}
           {!loading && visible.length === 0 && (
-            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>
+            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12"
+              style={viewMode === 'compact' ? { gridColumn: '1 / -1' } : undefined}
+            >
               {items.length === 0 ? t('empty_wishlist') : t('empty_filter')}
             </p>
           )}
@@ -396,7 +429,7 @@ function WishGridCard({ item, deleting, onEdit }: WishGridCardProps) {
       </div>
       {/* Title */}
       <div className="px-2 py-1.5">
-        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
+        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-center">
           {item.title}
         </p>
       </div>

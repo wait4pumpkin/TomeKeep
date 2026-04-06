@@ -90,7 +90,7 @@ export async function createProfile(name: string): Promise<Profile> {
  * Rename a profile on the server and update localStorage.
  */
 export async function renameProfile(id: string, name: string): Promise<void> {
-  await api.put(`/profiles/${id}`, { name })
+  await api.patch(`/profiles/${id}`, { name })
   const profiles = getStoredProfiles().map(p => p.id === id ? { ...p, name } : p)
   setStoredProfiles(profiles)
 }

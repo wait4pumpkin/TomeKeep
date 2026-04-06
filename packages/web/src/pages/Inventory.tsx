@@ -2,7 +2,7 @@
 // PWA book library page.
 // Reads from IndexedDB cache; writes go through the API and refresh the cache.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
 import { api } from '../lib/api.ts'
 import {
@@ -29,6 +29,7 @@ type FilterStatus = 'all' | ReadingStatus
 type ViewMode = 'detail' | 'compact'
 
 const VIEW_MODE_KEY = 'tk_inv_view'
+const COMPACT_COLS_KEY = 'tk_inv_cols'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,12 +93,16 @@ export function Inventory() {
   const [books, setBooks] = useState<CachedBook[]>([])
   const [stateMap, setStateMap] = useState<Map<string, CachedReadingState>>(new Map())
   const [loading, setLoading] = useState(true)
+  const [, startTransition] = useTransition()
 
   // Active profile — null means the account-level default
   const [activeProfileId, setActiveProfileId] = useState<string | null>(() => getActiveProfile()?.id ?? null)
 
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
+  )
+  const [compactCols, setCompactCols] = useState<2 | 3>(
+    () => (Number(localStorage.getItem(COMPACT_COLS_KEY)) as 2 | 3) || 2
   )
 
   const [query, setQuery] = useState('')
@@ -114,14 +119,32 @@ export function Inventory() {
   // Load from cache
   // ---------------------------------------------------------------------------
 
-  const loadFromCache = useCallback(async () => {
+  const loadFromCache = useCallback(async (background = false) => {
     const profileId = getActiveProfile()?.id ?? null
-    const [bs, rs] = await Promise.all([getCachedBooks(), getCachedReadingStates(profileId)])
-    setBooks(bs)
+    const [bs, allStates] = await Promise.all([getCachedBooks(), getCachedReadingStates(undefined)])
     const map = new Map<string, CachedReadingState>()
-    for (const r of rs) map.set(r.book_id, r)
-    setStateMap(map)
-  }, [])
+    // First pass: load the null-profile (desktop-written) rows as a baseline
+    for (const r of allStates) {
+      if (r.profile_id === null) map.set(r.book_id, r)
+    }
+    // Second pass: profile-specific rows take precedence (overwrite the baseline)
+    if (profileId !== null) {
+      for (const r of allStates) {
+        if (r.profile_id === profileId) map.set(r.book_id, r)
+      }
+    }
+    // Batch both updates; wrap in startTransition for background reloads so React
+    // doesn't flash a loading state mid-render.
+    if (background) {
+      startTransition(() => {
+        setBooks(bs)
+        setStateMap(map)
+      })
+    } else {
+      setBooks(bs)
+      setStateMap(map)
+    }
+  }, [startTransition])
 
   useEffect(() => {
     setLoading(true)
@@ -130,7 +153,7 @@ export function Inventory() {
 
   // Reload from cache whenever a background sync writes new data
   useEffect(() => {
-    function onSync() { void loadFromCache() }
+    function onSync() { void loadFromCache(true) }
     window.addEventListener('tomekeep:sync', onSync)
     return () => window.removeEventListener('tomekeep:sync', onSync)
   }, [loadFromCache])
@@ -273,7 +296,7 @@ export function Inventory() {
             className="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
 
-          {/* Filter + sort */}
+          {/* Filter pills — scrollable */}
           <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none">
             {(['all', 'unread', 'reading', 'read'] as FilterStatus[]).map(f => (
               <button
@@ -291,16 +314,34 @@ export function Inventory() {
                   : t('filter_read')}
               </button>
             ))}
-            <div className="flex-shrink-0 ml-auto flex items-center gap-1.5">
-              <select
-                value={sort}
-                onChange={e => setSort(e.target.value as SortKey)}
-                className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
-              >
-                <option value="added">{t('sort_added')}</option>
-                <option value="title">{t('sort_title')}</option>
-                <option value="author">{t('sort_author')}</option>
-              </select>
+          </div>
+
+          {/* Sort + view controls — fixed row, never scrolls */}
+          <div className="flex items-center gap-2">
+            <select
+              value={sort}
+              onChange={e => setSort(e.target.value as SortKey)}
+              className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
+            >
+              <option value="added">{t('sort_added')}</option>
+              <option value="title">{t('sort_title')}</option>
+              <option value="author">{t('sort_author')}</option>
+            </select>
+            <div className="ml-auto flex items-center gap-1.5">
+              {/* Column count — only in compact mode */}
+              {viewMode === 'compact' && (
+                <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                  {([2, 3] as const).map(n => (
+                    <button
+                      key={n}
+                      onClick={() => { setCompactCols(n); localStorage.setItem(COMPACT_COLS_KEY, String(n)) }}
+                      className={`px-2 py-1 text-xs transition-colors ${compactCols === n ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* View toggle */}
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                 <button
@@ -339,13 +380,19 @@ export function Inventory() {
         )}
 
         {/* Book list */}
-        <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid grid-cols-2 gap-2' : 'space-y-2'}`}>
+        <div className={`px-4 pt-3 ${viewMode === 'compact' ? `grid gap-2` : 'space-y-2'}`}
+          style={viewMode === 'compact' ? { gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` } : undefined}
+        >
           {loading && (
-            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>…</p>
+            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12`}
+              style={viewMode === 'compact' ? { gridColumn: `1 / -1` } : undefined}
+            >…</p>
           )}
 
           {!loading && visible.length === 0 && (
-            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12 ${viewMode === 'compact' ? 'col-span-2' : ''}`}>
+            <p className={`text-sm text-gray-400 dark:text-gray-500 text-center py-12`}
+              style={viewMode === 'compact' ? { gridColumn: `1 / -1` } : undefined}
+            >
               {books.length === 0 ? t('empty_library') : t('empty_filter')}
             </p>
           )}
@@ -424,7 +471,7 @@ function BookGridCard({ book, status, deleting, onEdit }: BookGridCardProps) {
       </div>
       {/* Title */}
       <div className="px-2 py-1.5">
-        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">
+        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug text-center">
           {book.title}
         </p>
       </div>
