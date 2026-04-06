@@ -323,6 +323,7 @@ export async function setupDatabase() {
     }
     db.data.users.push(user)
     await db.write()
+    void import('./sync.ts').then(m => m.pushProfile(user)).catch(() => undefined)
     return user
   })
 
@@ -331,6 +332,7 @@ export async function setupDatabase() {
     if (!user) return null
     user.name = name.trim()
     await db.write()
+    void import('./sync.ts').then(m => m.pushProfile(user)).catch(() => undefined)
     return user
   })
 
@@ -344,6 +346,7 @@ export async function setupDatabase() {
       db.data.activeUserId = db.data.users[0]?.id ?? null
     }
     await db.write()
+    void import('./sync.ts').then(m => m.pushDeletedProfile(id)).catch(() => undefined)
     return true
   })
 

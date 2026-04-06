@@ -125,8 +125,17 @@ interface ApiWishlistItem {
 interface ApiReadingState {
   user_id: string
   book_id: string
+  profile_id: string | null
   status: string
   completed_at: string | null
+  updated_at: string
+}
+
+interface ApiProfile {
+  id: string
+  owner_id: string
+  name: string
+  created_at: string
   updated_at: string
 }
 
@@ -207,6 +216,7 @@ function apiToWishlistItem(row: ApiWishlistItem): Partial<WishlistItem> & { id: 
 function readingStateToApi(state: ReadingState): Partial<ApiReadingState> {
   return {
     book_id: state.bookId,
+    profile_id: state.userId,
     status: state.status,
     completed_at: state.completedAt ?? null,
   }
@@ -232,6 +242,8 @@ export async function pullAll(): Promise<{ updated: boolean; error?: string }> {
   if (!token) return { updated: false }
 
   try {
+    // Phase 0: ensure all local users exist as profiles in the cloud
+    await syncProfiles()
     const db = getDb()
     const cursors = db.data.syncCursors ?? { books: '', wishlist: '', readingStates: '' }
 
@@ -441,6 +453,43 @@ export async function pushDeletedWishlistItem(id: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Profile push helpers — keep cloud profiles in sync with local users
+// ---------------------------------------------------------------------------
+
+export async function pushProfile(user: import('./db.ts').UserProfile): Promise<void> {
+  try {
+    await apiRequest<ApiProfile>('POST', '/profiles', { id: user.id, name: user.name })
+  } catch (err) {
+    // profile_limit_reached (422) is non-fatal — log and continue
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg !== 'not_authenticated') {
+      console.error('[sync] pushProfile failed for', user.id, msg)
+    }
+  }
+}
+
+export async function pushDeletedProfile(id: string): Promise<void> {
+  try {
+    await apiRequest('DELETE', `/profiles/${id}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // not_found is fine — already gone on the server
+    if (msg !== 'not_found' && msg !== 'not_authenticated') {
+      console.error('[sync] pushDeletedProfile failed for', id, msg)
+    }
+  }
+}
+
+/** Upsert all local users to the cloud profiles table. Idempotent — safe to call repeatedly. */
+async function syncProfiles(): Promise<void> {
+  if (!getToken()) return
+  const db = getDb()
+  for (const user of db.data.users) {
+    await pushProfile(user)
+  }
+}
+
 // Upload a local cover file to R2 via the API. Returns the cover_key or null.
 export async function uploadCoverToCloud(bookId: string): Promise<string | null> {
   const coversDir = path.join(app.getPath('userData'), 'covers')
@@ -532,6 +581,9 @@ async function migrateAll(
   const books = db.data.books
   const wishlist = db.data.wishlist
   const readingStates = db.data.readingStates
+
+  // Phase 0: push all local users as cloud profiles (upsert, idempotent)
+  await syncProfiles()
 
   // Phase 1: upload missing covers for books
   onProgress({ phase: 'covers', current: 0, total: books.length + wishlist.length })
