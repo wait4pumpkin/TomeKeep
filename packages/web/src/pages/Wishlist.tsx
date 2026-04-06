@@ -32,16 +32,20 @@ const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 // Helpers
 // ---------------------------------------------------------------------------
 
-function sortWishlist(items: CachedWishlistItem[], key: WishSort): CachedWishlistItem[] {
+function sortWishlist(items: CachedWishlistItem[], key: WishSort, dir: 'asc' | 'desc'): CachedWishlistItem[] {
   return [...items].sort((a, b) => {
+    let cmp = 0
     if (key === 'priority') {
       const pa = priorityOrder[a.priority] ?? 99
       const pb = priorityOrder[b.priority] ?? 99
-      if (pa !== pb) return pa - pb
+      cmp = pa - pb
+    } else if (key === 'title') {
+      cmp = a.title.localeCompare(b.title)
+    } else {
+      // 'added'
+      cmp = a.added_at.localeCompare(b.added_at)
     }
-    if (key === 'title') return a.title.localeCompare(b.title)
-    // 'added' — newest first
-    return b.added_at.localeCompare(a.added_at)
+    return dir === 'asc' ? cmp : -cmp
   })
 }
 
@@ -87,8 +91,10 @@ export function Wishlist() {
   )
 
   const [query, setQuery] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
   const [filter, setFilter] = useState<WishFilter>('all')
   const [sort, setSort] = useState<WishSort>('added')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [tagFilter, setTagFilter] = useState<string[]>([])
 
   const [showAdd, setShowAdd] = useState(false)
@@ -231,7 +237,7 @@ export function Wishlist() {
   // Derived data
   // ---------------------------------------------------------------------------
 
-  const sorted = sortWishlist(items, sort)
+  const sorted = sortWishlist(items, sort, sortDir)
   const visible = filterWishlist(sorted, filter, query, tagFilter)
 
   const allTags = useMemo(() => {
@@ -249,9 +255,25 @@ export function Wishlist() {
       <div ref={scrollRef} className="min-h-full pb-6">
         {/* Header */}
         <div className={`sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 px-4 transition-[padding] duration-300 ${collapsed ? 'pt-2 pb-0' : 'pt-3 pb-3'}`}>
-          {/* Title + add */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-baseline gap-2 min-w-0">
+          {/* Title row: search icon + title/count + add button */}
+          <div className="flex items-center gap-2">
+            {/* Search toggle */}
+            <button
+              onClick={() => setShowSearch(s => !s)}
+              title={t('search_placeholder')}
+              className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+                showSearch || query
+                  ? 'bg-blue-600 border-blue-600 text-white'
+                  : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              </svg>
+            </button>
+
+            {/* Title + count */}
+            <div className="flex items-baseline gap-2 min-w-0 flex-1">
               <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
                 {t('page_wishlist')}
               </h1>
@@ -263,10 +285,12 @@ export function Wishlist() {
                 </span>
               )}
             </div>
+
+            {/* Add button */}
             <button
               onClick={() => setShowAdd(true)}
               title={t('add_to_wishlist')}
-              className="flex items-center justify-center w-6 h-6 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
+              className="flex-shrink-0 flex items-center justify-center w-7 h-7 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -285,28 +309,38 @@ export function Wishlist() {
           >
             <div className="overflow-hidden">
               <div className="space-y-2 mt-2">
-                {/* Search + sort — same row */}
-                <div className="flex items-center gap-2">
-                  <input
-                    type="search"
-                    value={query}
-                    onChange={e => setQuery(e.target.value)}
-                    placeholder={t('search_placeholder')}
-                    className="flex-1 min-w-0 h-8 px-2 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <select
-                    value={sort}
-                    onChange={e => setSort(e.target.value as WishSort)}
-                    className="flex-shrink-0 h-8 text-base px-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
-                  >
-                    <option value="added">{t('sort_added')}</option>
-                    <option value="priority">{t('sort_priority')}</option>
-                    <option value="title">{t('sort_title')}</option>
-                  </select>
-                </div>
 
-                {/* Filter icons + view toggle + col count — same row */}
+                {/* Search box — shown when toggled or query non-empty */}
+                {(showSearch || query) && (
+                  <div className="relative">
+                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                    </svg>
+                    <input
+                      type="search"
+                      value={query}
+                      onChange={e => setQuery(e.target.value)}
+                      placeholder={t('search_placeholder')}
+                      autoFocus
+                      className="w-full h-9 pl-8 pr-8 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {query && (
+                      <button
+                        type="button"
+                        onClick={() => setQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Filter + sort + view — single row */}
                 <div className="flex items-center gap-1.5">
+                  {/* Wishlist filter buttons */}
                   {([
                     { key: 'all' as WishFilter, label: t('filter_all'), icon: (
                       <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -323,7 +357,7 @@ export function Wishlist() {
                       key={f}
                       onClick={() => setFilter(f)}
                       title={label}
-                      className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-lg border transition-colors ${
+                      className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
                         filter === f
                           ? 'bg-blue-600 border-blue-600 text-white'
                           : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
@@ -333,7 +367,57 @@ export function Wishlist() {
                     </button>
                   ))}
 
+                  {/* Sort icon buttons + view toggle */}
                   <div className="ml-auto flex items-center gap-1.5">
+                    <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-visible">
+                      {([
+                        { key: 'added' as WishSort,    label: t('sort_added'),    defaultDir: 'desc' as const, icon: (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+                          </svg>
+                        ) },
+                        { key: 'priority' as WishSort, label: t('sort_priority'), defaultDir: 'asc' as const, icon: (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0-3.75-3.75M17.25 21 21 17.25" />
+                          </svg>
+                        ) },
+                        { key: 'title' as WishSort,    label: t('sort_title'),    defaultDir: 'asc' as const, icon: (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
+                          </svg>
+                        ) },
+                      ] as const).map(({ key: sk, label, defaultDir, icon }, i, arr) => {
+                        const active = sort === sk
+                        return (
+                          <button
+                            key={sk}
+                            title={label + (active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '')}
+                            onClick={() => {
+                              if (active) {
+                                setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                              } else {
+                                setSort(sk)
+                                setSortDir(defaultDir)
+                              }
+                            }}
+                            className={`relative p-1.5 transition-colors ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${
+                              active
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            {icon}
+                            {active && (
+                              <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-blue-700 border-2 border-gray-50 dark:border-gray-900 flex items-center justify-center text-white z-10" style={{ fontSize: 7 }}>
+                                {sortDir === 'asc' ? '↑' : '↓'}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Column count — only in compact mode */}
                     {viewMode === 'compact' && (
                       <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                         {([2, 3, 4, 5, 6] as const).map(n => (
@@ -347,11 +431,13 @@ export function Wishlist() {
                         ))}
                       </div>
                     )}
+
+                    {/* View toggle */}
                     <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                       <button
                         onClick={() => { setViewMode('detail'); localStorage.setItem(VIEW_MODE_KEY, 'detail') }}
                         title={t('detail_view')}
-                        className={`p-1 transition-colors ${viewMode === 'detail' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                        className={`p-1.5 transition-colors ${viewMode === 'detail' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
@@ -360,7 +446,7 @@ export function Wishlist() {
                       <button
                         onClick={() => { setViewMode('compact'); localStorage.setItem(VIEW_MODE_KEY, 'compact') }}
                         title={t('compact_view')}
-                        className={`p-1 transition-colors ${viewMode === 'compact' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                        className={`p-1.5 transition-colors ${viewMode === 'compact' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <rect x="3" y="3" width="5" height="5" rx="0.75" />
@@ -377,64 +463,64 @@ export function Wishlist() {
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Tag filter pills */}
-              {allTags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => setTagFilter(prev =>
-                      prev.includes('__untagged__')
-                        ? prev.filter(t => t !== '__untagged__')
-                        : ['__untagged__']
-                    )}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
-                      tagFilter.includes('__untagged__')
-                        ? 'bg-violet-500 border-violet-500 text-white'
-                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400'
-                    }`}
-                  >
-                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
-                      <line x1="3" y1="3" x2="21" y2="21" strokeLinecap="round" />
-                    </svg>
-                    无标签
-                  </button>
-                  {allTags.map(tag => {
-                    const active = tagFilter.includes(tag)
-                    const palette = tagColor(tag)
-                    return (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => setTagFilter(prev =>
-                          active
-                            ? prev.filter(t => t !== tag)
-                            : [...prev.filter(t => t !== '__untagged__'), tag]
-                        )}
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
-                          active
-                            ? palette.active
-                            : `bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 ${palette.hover}`
-                        }`}
-                      >
-                        {tag}
-                      </button>
-                    )
-                  })}
-                  {tagFilter.length > 0 && (
+                {/* Tag filter pills */}
+                {allTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setTagFilter([])}
-                      className="px-2 py-0.5 rounded-full text-xs border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors"
+                      onClick={() => setTagFilter(prev =>
+                        prev.includes('__untagged__')
+                          ? prev.filter(t => t !== '__untagged__')
+                          : ['__untagged__']
+                      )}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                        tagFilter.includes('__untagged__')
+                          ? 'bg-violet-500 border-violet-500 text-white'
+                          : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-violet-400'
+                      }`}
                     >
-                      清除
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+                        <line x1="3" y1="3" x2="21" y2="21" strokeLinecap="round" />
+                      </svg>
+                      无标签
                     </button>
-                  )}
-                </div>
-              )}
+                    {allTags.map(tag => {
+                      const active = tagFilter.includes(tag)
+                      const palette = tagColor(tag)
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => setTagFilter(prev =>
+                            active
+                              ? prev.filter(t => t !== tag)
+                              : [...prev.filter(t => t !== '__untagged__'), tag]
+                          )}
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                            active
+                              ? palette.active
+                              : `bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 ${palette.hover}`
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      )
+                    })}
+                    {tagFilter.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTagFilter([])}
+                        className="px-2 py-0.5 rounded-full text-xs border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        清除
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
