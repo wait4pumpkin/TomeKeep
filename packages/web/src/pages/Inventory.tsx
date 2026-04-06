@@ -617,18 +617,16 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
       </div>
 
       {/* Meta */}
-      <div className="flex-1 min-w-0 flex flex-col justify-between py-0">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
-            {book.title}
-          </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-            {book.author}
-            {book.publisher && ` · ${book.publisher}`}
-          </p>
-        </div>
+      <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
+          {book.title}
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+          {book.author}
+          {book.publisher && ` · ${book.publisher}`}
+        </p>
         {book.tags.length > 0 && (
-          <div className="flex gap-1 mt-1 flex-nowrap overflow-hidden">
+          <div className="flex gap-1 mt-0.5 flex-nowrap overflow-hidden">
             {book.tags.slice(0, 2).map(tag => (
               <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
                 {tag}
