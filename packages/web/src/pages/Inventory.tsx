@@ -127,8 +127,19 @@ export function Inventory() {
 
   // Collapsed header when scrolled away from top
   const [collapsed, setCollapsed] = useState(false)
+  const [controlsHeight, setControlsHeight] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
+
+  // Measure controls height once mounted and keep it updated via ResizeObserver
+  useEffect(() => {
+    const el = controlsRef.current
+    if (!el) return
+    setControlsHeight(el.scrollHeight)
+    const ro = new ResizeObserver(() => setControlsHeight(el.scrollHeight))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     // Walk up to the nearest scrollable ancestor (the <main> in Layout.tsx)
@@ -326,7 +337,7 @@ export function Inventory() {
           <div
             className="overflow-hidden transition-[max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
             style={{
-              maxHeight: collapsed ? '0px' : `${controlsRef.current?.scrollHeight ?? 200}px`,
+              maxHeight: collapsed ? '0px' : `${controlsHeight || 200}px`,
               opacity: collapsed ? 0 : 1,
               pointerEvents: collapsed ? 'none' : undefined,
             }}
