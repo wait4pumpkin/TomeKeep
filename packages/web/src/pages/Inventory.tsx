@@ -127,19 +127,7 @@ export function Inventory() {
 
   // Collapsed header when scrolled away from top
   const [collapsed, setCollapsed] = useState(false)
-  const [controlsHeight, setControlsHeight] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const controlsRef = useRef<HTMLDivElement>(null)
-
-  // Measure controls height once mounted and keep it updated via ResizeObserver
-  useEffect(() => {
-    const el = controlsRef.current
-    if (!el) return
-    setControlsHeight(el.scrollHeight)
-    const ro = new ResizeObserver(() => setControlsHeight(el.scrollHeight))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
 
   useEffect(() => {
     // Walk up to the nearest scrollable ancestor (the <main> in Layout.tsx)
@@ -335,14 +323,15 @@ export function Inventory() {
 
           {/* Collapsible controls: search + sort + filter + view */}
           <div
-            className="overflow-hidden transition-[max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
+            className="grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
             style={{
-              maxHeight: collapsed ? '0px' : `${controlsHeight || 200}px`,
+              gridTemplateRows: collapsed ? '0fr' : '1fr',
               opacity: collapsed ? 0 : 1,
               pointerEvents: collapsed ? 'none' : undefined,
             }}
           >
-            <div ref={controlsRef} className="space-y-2 mt-2">
+            <div className="overflow-hidden">
+            <div className="space-y-2 mt-2">
               {/* Search + sort — same row */}
               <div className="flex items-center gap-2">
                 <input
@@ -449,6 +438,7 @@ export function Inventory() {
                   </div>
                 </div>
               </div>
+            </div>
             </div>
           </div>
 
