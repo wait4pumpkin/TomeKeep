@@ -297,7 +297,7 @@ export function Inventory() {
         className="min-h-full pb-6"
       >
         {/* Header row */}
-        <div className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 px-4 py-3 space-y-2">
+        <div className={`sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 px-4 transition-[padding] duration-300 ${collapsed ? 'pt-2 pb-0' : 'pt-3 pb-3'}`}>
           {/* Title + add button — always visible */}
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2 min-w-0">
@@ -323,11 +323,11 @@ export function Inventory() {
 
           {/* Collapsible controls: search + sort + filter + view */}
           <div
-            className={`overflow-hidden transition-all duration-200 ease-in-out ${
+            className={`overflow-hidden transition-[max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
               collapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-40 opacity-100'
             }`}
           >
-            <div className="space-y-2">
+            <div className="space-y-2 mt-2">
               {/* Search + sort — same row */}
               <div className="flex items-center gap-2">
                 <input
@@ -438,7 +438,7 @@ export function Inventory() {
           </div>
 
           {/* Reading progress bar — acts as header/list divider */}
-          <div className="relative group -mx-4 -mb-3 mt-1">
+          <div className={`relative group -mx-4 transition-[margin] duration-300 ${collapsed ? 'mt-2' : 'mt-3'}`}>
             <div className="h-0.5 bg-gray-200 dark:bg-gray-700 overflow-hidden">
               {books.length > 0 && (
                 <div
@@ -585,20 +585,10 @@ interface BookCardProps {
 }
 
 function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }: BookCardProps) {
-  const statusIcon: Record<ReadingStatus, string> = {
-    unread: '○',
-    reading: '◑',
-    read: '●',
-  }
   const statusTip: Record<ReadingStatus, string> = {
     unread: t('status_unread_tip'),
     reading: t('status_reading_tip'),
     read: t('status_read_tip'),
-  }
-  const statusColor: Record<ReadingStatus, string> = {
-    unread: 'text-gray-400',
-    reading: 'text-yellow-500',
-    read: 'text-blue-500',
   }
 
   return (
@@ -645,13 +635,31 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
 
       {/* Actions */}
       <div className="flex flex-col items-center justify-between flex-shrink-0 gap-1">
-        {/* Status toggle */}
+        {/* Status toggle — matches desktop icon + badge style */}
         <button
           onClick={onStatusCycle}
           title={statusTip[status]}
-          className={`text-lg leading-none ${statusColor[status]}`}
+          className={`flex-shrink-0 p-0.5 rounded-full mt-0.5 hover:opacity-70 transition-opacity ${
+            status === 'read'    ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400' :
+            status === 'reading' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400' :
+                                   'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+          }`}
         >
-          {statusIcon[status]}
+          {status === 'read' && (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+            </svg>
+          )}
+          {status === 'reading' && (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+            </svg>
+          )}
+          {status === 'unread' && (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+            </svg>
+          )}
         </button>
 
         {/* Edit */}
