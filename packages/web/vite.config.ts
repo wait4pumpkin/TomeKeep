@@ -29,7 +29,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // App shell: cache-first for static assets
+        // App shell: cache-first for static assets (exclude large WASM from precache)
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
@@ -49,6 +49,15 @@ export default defineConfig({
             options: {
               cacheName: 'covers-cache',
               expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 },
+            },
+          },
+          {
+            // ZXing WASM binary: cache-first, long TTL (content never changes for a given version)
+            urlPattern: /\/zxing_reader\.wasm$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'wasm-cache',
+              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 },
             },
           },
         ],

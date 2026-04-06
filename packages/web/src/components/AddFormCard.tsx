@@ -17,6 +17,7 @@ import { useLang } from '../lib/i18n.tsx'
 import { api } from '../lib/api.ts'
 import { type CachedBook, type CachedWishlistItem } from '../lib/db-cache.ts'
 import { tagColor } from '@tomekeep/shared'
+import { IsbnScanModal } from './IsbnScanModal.tsx'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,6 +69,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [uploadingCover, setUploadingCover] = useState(false)
+  const [showScanner, setShowScanner] = useState(false)
 
   const coverInputRef = useRef<HTMLInputElement>(null)
 
@@ -225,15 +227,28 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           </div>
         </div>
 
-        {/* ISBN */}
-        <input
-          type="text"
-          value={isbn}
-          onChange={e => setIsbn(e.target.value)}
-          placeholder="ISBN"
-          inputMode="numeric"
-          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+        {/* ISBN + scan button */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={isbn}
+            onChange={e => setIsbn(e.target.value)}
+            placeholder="ISBN"
+            inputMode="numeric"
+            className="flex-1 px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={() => setShowScanner(true)}
+            title={t('scan_isbn')}
+            className="flex-shrink-0 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 18.75h.75v.75h-.75v-.75ZM18.75 13.5h.75v.75h-.75v-.75ZM18.75 18.75h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
+            </svg>
+          </button>
+        </div>
 
         {/* Detail URL */}
         <input
@@ -309,6 +324,14 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           </button>
         </div>
       </form>
+
+      {/* ISBN barcode scanner modal */}
+      <IsbnScanModal
+        isOpen={showScanner}
+        onClose={() => setShowScanner(false)}
+        onDetected={raw => setIsbn(raw)}
+        mode="single"
+      />
     </div>
   )
 }
