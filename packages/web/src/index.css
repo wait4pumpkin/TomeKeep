@@ -10,6 +10,11 @@
   --sal: env(safe-area-inset-left);
 }
 
+/* Utility for bottom tab bar — use env() directly, not via CSS var */
+@utility pb-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* Tailwind v4 dark mode via class strategy */
 @custom-variant dark (&:where(.dark, .dark *));
 

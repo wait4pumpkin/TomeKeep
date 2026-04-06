@@ -351,7 +351,7 @@ export function Inventory() {
                 key={f}
                 onClick={() => setFilter(f)}
                 title={label}
-                className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+                className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-lg border transition-colors ${
                   filter === f
                     ? 'bg-blue-600 border-blue-600 text-white'
                     : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
