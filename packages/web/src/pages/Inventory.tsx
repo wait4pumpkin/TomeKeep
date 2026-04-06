@@ -124,7 +124,7 @@ export function Inventory() {
   )
 
   const [query, setQuery] = useState('')
-  const [showSearch, setShowSearch] = useState(false)
+  const [showSearchModal, setShowSearchModal] = useState(false)
   const [filter, setFilter] = useState<FilterStatus>('all')
   const [sort, setSort] = useState<SortKey>('added')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -315,23 +315,8 @@ export function Inventory() {
       >
         {/* Header row */}
         <div className={`sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 px-4 transition-[padding] duration-300 ${collapsed ? 'pt-2 pb-0' : 'pt-3 pb-3'}`}>
-          {/* Title row: search icon + title/count + add button — always visible */}
+          {/* Title row: title/count + search button + add button — always visible */}
           <div className="flex items-center gap-2">
-            {/* Search toggle */}
-            <button
-              onClick={() => setShowSearch(s => !s)}
-              title={t('search_placeholder')}
-              className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
-                showSearch || query
-                  ? 'bg-blue-600 border-blue-600 text-white'
-                  : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-              </svg>
-            </button>
-
             {/* Title + count */}
             <div className="flex items-baseline gap-2 min-w-0 flex-1">
               <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
@@ -343,6 +328,21 @@ export function Inventory() {
                   : books.length}
               </p>
             </div>
+
+            {/* Search button */}
+            <button
+              onClick={() => setShowSearchModal(true)}
+              title={t('search_placeholder')}
+              className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+                query
+                  ? 'bg-blue-600 border-blue-600 text-white'
+                  : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              </svg>
+            </button>
 
             {/* Add button */}
             <button
@@ -367,34 +367,6 @@ export function Inventory() {
           >
             <div className="overflow-hidden">
               <div className="space-y-2 mt-2">
-
-                {/* Search box — shown when toggled or query non-empty */}
-                {(showSearch || query) && (
-                  <div className="relative">
-                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                    </svg>
-                    <input
-                      type="search"
-                      value={query}
-                      onChange={e => setQuery(e.target.value)}
-                      placeholder={t('search_placeholder')}
-                      autoFocus
-                      className="w-full h-9 pl-8 pr-8 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {query && (
-                      <button
-                        type="button"
-                        onClick={() => setQuery('')}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                )}
 
                 {/* Status filter + sort + view — single row */}
                 <div className="flex items-center gap-1.5">
@@ -674,6 +646,68 @@ export function Inventory() {
           )}
         </div>
       </div>
+
+      {/* Search modal */}
+      {showSearchModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 bg-black/40 backdrop-blur-sm"
+          onClick={e => { if (e.target === e.currentTarget) setShowSearchModal(false) }}
+        >
+          <div className="w-full max-w-sm bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden">
+            <div className="relative p-3">
+              <svg className="absolute left-5.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              </svg>
+              <input
+                type="search"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={t('search_placeholder')}
+                autoFocus
+                className="w-full h-10 pl-9 pr-9 text-base rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="absolute right-5.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowSearchModal(false)}
+                  className="absolute right-5.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {/* Confirm / close */}
+            <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setQuery(''); setShowSearchModal(false) }}
+                className="px-3 py-1.5 text-sm rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSearchModal(false)}
+                className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+              >
+                {t('done')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PullToRefresh>
   )
 }
