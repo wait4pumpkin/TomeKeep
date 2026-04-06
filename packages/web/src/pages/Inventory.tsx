@@ -407,25 +407,25 @@ export function Inventory() {
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Reading progress bar — full width, below the sticky header */}
-        {books.length > 0 && (
-          <div className="relative group px-4 -mt-px pt-1 pb-2">
-            <div className="h-0.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-green-500 dark:bg-green-400 transition-[width] duration-500 ease-in-out"
-                style={{ width: `${readPct * 100}%` }}
-              />
+          {/* Reading progress bar — inside sticky header, always visible */}
+          {books.length > 0 && (
+            <div className="relative group -mx-4 -mb-3 mt-1">
+              <div className="h-0.5 bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                <div
+                  className="h-full bg-green-500 dark:bg-green-400 transition-[width] duration-500 ease-in-out"
+                  style={{ width: `${readPct * 100}%` }}
+                />
+              </div>
+              {/* Tooltip — appears on hover, centred above the bar */}
+              <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap rounded px-2 py-0.5 text-xs bg-gray-800 dark:bg-gray-700 text-white tabular-nums shadow-sm">
+                {t('progress_read', { read: readCount, total: totalCount })}
+                {' · '}
+                {Math.round(readPct * 100)}%
+              </div>
             </div>
-            {/* Tooltip — appears on hover, centred above the bar */}
-            <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap rounded px-2 py-0.5 text-xs bg-gray-800 dark:bg-gray-700 text-white tabular-nums shadow-sm">
-              {t('progress_read', { read: readCount, total: totalCount })}
-              {' · '}
-              {Math.round(readPct * 100)}%
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Add / Edit form */}
         {(showAdd || editBook) && (
