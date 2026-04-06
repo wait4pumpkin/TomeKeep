@@ -113,3 +113,37 @@ export function clearProfiles(): void {
   localStorage.removeItem(PROFILES_KEY)
   localStorage.removeItem(ACTIVE_PROFILE_KEY)
 }
+
+/**
+ * Ensure the account has at least one profile.
+ * - Fetches profiles from the server.
+ * - If none exist, creates a default profile named '匿名' and sets it as active.
+ * - If profiles exist but no active profile is set, sets the first one as active.
+ * Safe to call multiple times — idempotent.
+ */
+export async function ensureDefaultProfile(): Promise<void> {
+  let profiles: Profile[]
+  try {
+    profiles = await syncProfiles()
+  } catch {
+    // Offline — fall back to cached profiles
+    profiles = getStoredProfiles()
+  }
+
+  if (profiles.length === 0) {
+    // Create the default profile
+    try {
+      const created = await createProfile('匿名')
+      setActiveProfileId(created.id)
+    } catch {
+      // Best-effort — don't block login
+    }
+    return
+  }
+
+  // Ensure an active profile is selected
+  const activeId = getActiveProfileId()
+  if (!activeId || !profiles.find(p => p.id === activeId)) {
+    setActiveProfileId(profiles[0].id)
+  }
+}

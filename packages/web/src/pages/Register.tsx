@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api.ts'
 import { setStoredUser, type AuthUser } from '../lib/auth.ts'
+import { ensureDefaultProfile } from '../lib/profiles.ts'
 
 export function Register() {
   const navigate = useNavigate()
@@ -31,6 +32,7 @@ export function Register() {
       // Cookie is now set by the register endpoint — fetch profile and go straight to app
       const me = await api.get<AuthUser>('/auth/me')
       setStoredUser(me)
+      await ensureDefaultProfile()
       navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

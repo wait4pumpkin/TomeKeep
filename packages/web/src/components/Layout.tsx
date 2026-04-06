@@ -6,7 +6,7 @@ import { useEffect, useCallback, useState } from 'react'
 import { runSync, setupVisibilitySyncListener } from '../lib/sync.ts'
 import { InstallPrompt } from './InstallPrompt.tsx'
 import { getStoredTheme, applyTheme } from '@tomekeep/shared'
-import { syncProfiles, getActiveProfile } from '../lib/profiles.ts'
+import { syncProfiles, getActiveProfile, ensureDefaultProfile } from '../lib/profiles.ts'
 import { getSyncCursors, setSyncCursors } from '../lib/db-cache.ts'
 
 export function Layout() {
@@ -26,19 +26,22 @@ export function Layout() {
   useEffect(() => {
     setSyncing(true)
     void (async () => {
-      try {
-        const profileBefore = getActiveProfile()?.id ?? null
-        let profileChanged = false
         try {
-          const profiles = await syncProfiles()
-          const profileAfter = profiles.length > 0
-            ? (profiles.find(p => p.id === profileBefore) ? profileBefore : profiles[0]?.id ?? null)
-            : null
-          const cursors = await getSyncCursors()
-          cursors.readingStates = null
-          await setSyncCursors(cursors)
-          profileChanged = profileAfter !== profileBefore
-        } catch { /* offline — use cached profiles */ }
+          const profileBefore = getActiveProfile()?.id ?? null
+          let profileChanged = false
+          try {
+            const profiles = await syncProfiles()
+            const profileAfter = profiles.length > 0
+              ? (profiles.find(p => p.id === profileBefore) ? profileBefore : profiles[0]?.id ?? null)
+              : null
+            const cursors = await getSyncCursors()
+            cursors.readingStates = null
+            await setSyncCursors(cursors)
+            profileChanged = profileAfter !== profileBefore
+          } catch { /* offline — use cached profiles */ }
+
+          // Ensure at least one profile exists (handles old accounts without profiles)
+          await ensureDefaultProfile().catch(() => { /* best-effort */ })
 
         const updated = await runSync()
         setSyncing(false)
