@@ -184,7 +184,7 @@ export function Layout() {
       {/* Bottom tab bar */}
       <nav
         className="flex-shrink-0 flex border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
-        style={{ paddingBottom: 'var(--sab, 0)' }}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <NavLink
           to="/"
