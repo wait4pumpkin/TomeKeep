@@ -107,8 +107,12 @@ export function Layout() {
   return (
     <div className="flex flex-col h-dvh bg-gray-50 dark:bg-gray-900">
       {/* Top bar */}
-      <header className="flex-shrink-0 flex items-center justify-between px-4 h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
-        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      <header
+        className="flex-shrink-0 flex items-end justify-between px-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+        style={{
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          height: 'calc(3rem + env(safe-area-inset-top, 0px))',
+        }}
       >
         <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">TomeKeep</span>
 
@@ -183,7 +187,11 @@ export function Layout() {
 
       {/* Bottom tab bar */}
       <nav
-        className="flex-shrink-0 flex border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 pb-safe-bottom"
+        className="flex-shrink-0 flex items-center border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+        style={{
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          height: 'calc(2.75rem + env(safe-area-inset-bottom, 0px))',
+        }}
       >
         <NavLink
           to="/"
