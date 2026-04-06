@@ -227,7 +227,6 @@ export function Wishlist() {
 
   const sorted = sortWishlist(items, sort)
   const visible = filterWishlist(sorted, filter, query)
-  const pendingCount = items.filter(w => w.pending_buy).length
 
   // ---------------------------------------------------------------------------
   // Render
@@ -244,10 +243,12 @@ export function Wishlist() {
               <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
                 {t('page_wishlist')}
               </h1>
-              {pendingCount > 0 && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                  {t('filter_pending')}: {pendingCount}
-                </p>
+              {items.length > 0 && (
+                <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                  {visible.length < items.length
+                    ? <>{visible.length}<span className="opacity-50"> / {items.length}</span></>
+                    : items.length}
+                </span>
               )}
             </div>
             <button
@@ -542,8 +543,8 @@ function WishCard({
 
       {/* Right side: meta + actions */}
       <div className="flex flex-1 min-w-0 gap-1.5">
-        {/* Meta: 3 rows */}
-        <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+        {/* Meta: 3 rows, compact */}
+        <div className="flex-1 min-w-0 flex flex-col gap-1">
           {/* Row 1: title */}
           <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
             {item.title}
@@ -554,17 +555,19 @@ function WishCard({
             {item.publisher && ` · ${item.publisher}`}
           </p>
           {/* Row 3: tags only (horizontal scroll) */}
-          <div className="flex gap-1 overflow-x-auto no-scrollbar">
-            {item.tags.map(tag => (
-              <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
-                {tag}
-              </span>
-            ))}
-          </div>
+          {item.tags.length > 0 && (
+            <div className="flex gap-1 overflow-x-auto no-scrollbar">
+              {item.tags.map(tag => (
+                <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Actions: pending-buy top-right, move+edit+delete bottom-right */}
-        <div className="flex flex-col items-end justify-between flex-shrink-0 py-0.5">
+        <div className="flex flex-col items-end justify-between flex-shrink-0">
           {/* Pending buy toggle — top */}
           <button
             onClick={onTogglePending}

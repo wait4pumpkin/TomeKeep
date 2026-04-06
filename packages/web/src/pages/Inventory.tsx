@@ -618,8 +618,8 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
 
       {/* Right side: meta + actions */}
       <div className="flex flex-1 min-w-0 gap-1.5">
-        {/* Meta: 3 rows */}
-        <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+        {/* Meta: 3 rows, compact */}
+        <div className="flex-1 min-w-0 flex flex-col gap-1">
           {/* Row 1: title */}
           <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate leading-snug">
             {book.title}
@@ -630,17 +630,19 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
             {book.publisher && ` · ${book.publisher}`}
           </p>
           {/* Row 3: tags (horizontal scroll) */}
-          <div className="flex gap-1 overflow-x-auto no-scrollbar">
-            {book.tags.map(tag => (
-              <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
-                {tag}
-              </span>
-            ))}
-          </div>
+          {book.tags.length > 0 && (
+            <div className="flex gap-1 overflow-x-auto no-scrollbar">
+              {book.tags.map(tag => (
+                <span key={tag} className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${tagColor(tag).badge}`}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Actions: status top-right, edit+delete bottom-right */}
-        <div className="flex flex-col items-end justify-between flex-shrink-0 py-0.5">
+        <div className="flex flex-col items-end justify-between flex-shrink-0">
           {/* Status toggle — top */}
           <button
             onClick={onStatusCycle}
