@@ -163,13 +163,13 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-100 dark:border-gray-700 p-4">
       <form onSubmit={e => { void handleSubmit(e) }} noValidate className="space-y-3">
         {/* Cover + basic fields row */}
-        <div className="flex gap-3 items-stretch">
-          {/* Cover thumbnail — direct flex child so h-full works */}
+        <div className="flex gap-3 items-start">
+          {/* Cover thumbnail — fixed height, width derived from aspect ratio */}
           <button
             type="button"
             onClick={() => coverInputRef.current?.click()}
             disabled={uploadingCover}
-            className="flex-shrink-0 h-full aspect-[2/3] min-h-[88px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
+            className="flex-shrink-0 h-28 aspect-[2/3] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
             title={t('choose_cover')}
           >
             {coverKey ? (
@@ -199,7 +199,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           />
 
           {/* Fields */}
-          <div className="flex-1 flex flex-col gap-1.5 justify-between">
+          <div className="flex-1 flex flex-col gap-1.5">
             <input
               type="text"
               value={title}
