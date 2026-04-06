@@ -265,7 +265,7 @@ export function Settings() {
                             }}
                             onBlur={() => { void handleRename(p.id) }}
                             disabled={renameBusy}
-                            className="flex-1 text-sm px-2 py-0.5 rounded border border-blue-400 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                            className="flex-1 text-base leading-tight px-2 py-0.5 rounded border border-blue-400 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                           />
                         ) : (
                           /* Switch button */
@@ -326,7 +326,7 @@ export function Settings() {
                               if (e.key === 'Enter') void handleCreate()
                               if (e.key === 'Escape') { setShowNew(false); setNewName(''); setCreateError(null) }
                             }}
-                            className="flex-1 text-sm px-2 py-0.5 rounded border border-blue-400 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                            className="flex-1 text-base leading-tight px-2 py-0.5 rounded border border-blue-400 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                           />
                           <button
                             onClick={() => { void handleCreate() }}
