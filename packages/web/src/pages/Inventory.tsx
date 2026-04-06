@@ -24,7 +24,7 @@ import { getActiveProfile } from '../lib/profiles.ts'
 // ---------------------------------------------------------------------------
 
 type ReadingStatus = 'unread' | 'reading' | 'read'
-type SortKey = 'added' | 'title' | 'author'
+type SortKey = 'added' | 'finished' | 'title' | 'author'
 type FilterStatus = 'all' | ReadingStatus
 type ViewMode = 'detail' | 'compact'
 
@@ -45,10 +45,20 @@ function statusForBook(
 function sortBooks(
   books: CachedBook[],
   key: SortKey,
+  stateMap: Map<string, CachedReadingState>,
 ): CachedBook[] {
   return [...books].sort((a, b) => {
     if (key === 'title') return a.title.localeCompare(b.title)
     if (key === 'author') return a.author.localeCompare(b.author)
+    if (key === 'finished') {
+      const ca = stateMap.get(a.id)?.completed_at ?? ''
+      const cb = stateMap.get(b.id)?.completed_at ?? ''
+      // Books without a completed_at go to the end
+      if (!ca && !cb) return 0
+      if (!ca) return 1
+      if (!cb) return -1
+      return cb.localeCompare(ca) // newest first
+    }
     // 'added' — newest first
     return b.added_at.localeCompare(a.added_at)
   })
@@ -101,8 +111,8 @@ export function Inventory() {
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
   )
-  const [compactCols, setCompactCols] = useState<2 | 3>(
-    () => (Number(localStorage.getItem(COMPACT_COLS_KEY)) as 2 | 3) || 2
+  const [compactCols, setCompactCols] = useState<2 | 3 | 4 | 5>(
+    () => (Number(localStorage.getItem(COMPACT_COLS_KEY)) as 2 | 3 | 4 | 5) || 2
   )
 
   const [query, setQuery] = useState('')
@@ -252,7 +262,7 @@ export function Inventory() {
   // Derived data
   // ---------------------------------------------------------------------------
 
-  const sorted = sortBooks(books, sort)
+  const sorted = sortBooks(books, sort, stateMap)
   const visible = filterBooks(sorted, filter, stateMap, query)
 
   const readCount = books.filter(b => statusForBook(b, stateMap) === 'read').length
@@ -287,55 +297,62 @@ export function Inventory() {
             </button>
           </div>
 
-          {/* Search */}
-          <input
-            type="search"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder={t('search_placeholder')}
-            className="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-
-          {/* Filter pills — scrollable */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none">
-            {(['all', 'unread', 'reading', 'read'] as FilterStatus[]).map(f => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`flex-shrink-0 px-3 py-1 text-xs rounded-full border transition-colors ${
-                  filter === f
-                    ? 'bg-blue-600 border-blue-600 text-white'
-                    : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'
-                }`}
-              >
-                {f === 'all' ? t('filter_all')
-                  : f === 'unread' ? t('filter_unread')
-                  : f === 'reading' ? t('filter_reading')
-                  : t('filter_read')}
-              </button>
-            ))}
-          </div>
-
-          {/* Sort + view controls — fixed row, never scrolls */}
+          {/* Search + sort — same row */}
           <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={t('search_placeholder')}
+              className="flex-1 min-w-0 px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
             <select
               value={sort}
               onChange={e => setSort(e.target.value as SortKey)}
-              className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
+              className="flex-shrink-0 text-xs px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none"
             >
               <option value="added">{t('sort_added')}</option>
+              <option value="finished">{t('sort_finished')}</option>
               <option value="title">{t('sort_title')}</option>
               <option value="author">{t('sort_author')}</option>
             </select>
+          </div>
+
+          {/* Filter icons + view toggle + col count — same row */}
+          <div className="flex items-center gap-1.5">
+            {/* Status filter icon buttons */}
+            {([
+              { key: 'all',     label: t('filter_all'),     icon: null },
+              { key: 'unread',  label: t('filter_unread'),  icon: '○' },
+              { key: 'reading', label: t('filter_reading'), icon: '◑' },
+              { key: 'read',    label: t('filter_read'),    icon: '●' },
+            ] as { key: FilterStatus; label: string; icon: string | null }[]).map(({ key: f, label, icon }) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                title={label}
+                className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+                  filter === f
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'
+                }`}
+              >
+                {icon
+                  ? <span className="text-sm leading-none">{icon}</span>
+                  : <span className="text-xs font-semibold leading-none">{t('filter_all')}</span>
+                }
+              </button>
+            ))}
+
             <div className="ml-auto flex items-center gap-1.5">
               {/* Column count — only in compact mode */}
               {viewMode === 'compact' && (
                 <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                  {([2, 3] as const).map(n => (
+                  {([2, 3, 4, 5] as const).map(n => (
                     <button
                       key={n}
                       onClick={() => { setCompactCols(n); localStorage.setItem(COMPACT_COLS_KEY, String(n)) }}
-                      className={`px-2 py-1 text-xs transition-colors ${compactCols === n ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                      className={`px-1.5 py-1 text-xs transition-colors ${compactCols === n ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
                     >
                       {n}
                     </button>
