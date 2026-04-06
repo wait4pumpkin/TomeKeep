@@ -186,6 +186,7 @@ const dict = {
   scan_close:        { zh: '关闭', en: 'Close' },
   scan_cancel:       { zh: '取消', en: 'Cancel' },
   scan_starting:     { zh: '正在启动摄像头…', en: 'Starting camera…' },
+  scan_requires_https:       { zh: '摄像头需要 HTTPS 连接，请通过 https:// 访问应用。', en: 'Camera requires a secure HTTPS connection. Please access the app via https://.' },
   scan_unsupported_camera:   { zh: '当前环境不支持摄像头访问。', en: 'Camera not supported in this environment.' },
   scan_unsupported_barcode:  { zh: '当前环境不支持条码识别（BarcodeDetector）。', en: 'Barcode detection (BarcodeDetector) not supported.' },
   scan_permission_denied:    { zh: '摄像头权限被拒绝，请在系统设置中开启后重试。', en: 'Camera permission denied — enable it in System Settings and try again.' },

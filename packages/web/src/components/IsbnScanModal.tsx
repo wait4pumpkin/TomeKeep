@@ -170,6 +170,11 @@ export function IsbnScanModal({ isOpen, onClose, onDetected, mode = 'single' }: 
     async function start() {
       setStatus({ state: 'starting' })
 
+      if (!window.isSecureContext) {
+        setStatus({ state: 'unsupported', message: t('scan_requires_https') })
+        return
+      }
+
       if (!navigator.mediaDevices?.getUserMedia) {
         setStatus({ state: 'unsupported', message: t('scan_unsupported_camera') })
         return
