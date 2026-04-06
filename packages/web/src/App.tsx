@@ -17,6 +17,7 @@ import { AdminLogin } from './pages/AdminLogin.tsx'
 import { Register } from './pages/Register.tsx'
 import { Inventory } from './pages/Inventory.tsx'
 import { Wishlist } from './pages/Wishlist.tsx'
+import { Settings } from './pages/Settings.tsx'
 import { Admin } from './pages/Admin.tsx'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -63,6 +64,7 @@ export default function App() {
           >
             <Route index element={<Inventory />} />
             <Route path="wishlist" element={<Wishlist />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
 
           {/* Catch-all */}
