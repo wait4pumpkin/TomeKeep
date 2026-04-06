@@ -281,9 +281,9 @@ export function Settings() {
                           </button>
                         )}
 
-                        {/* Rename + delete icons — always visible on touch, hover on pointer */}
+                        {/* Rename + delete icons */}
                         {renamingId !== p.id && (
-                          <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex gap-0.5">
                             <button
                               onClick={e => { e.stopPropagation(); setRenamingId(p.id); setRenameValue(p.name) }}
                               title={t('profile_rename')}
