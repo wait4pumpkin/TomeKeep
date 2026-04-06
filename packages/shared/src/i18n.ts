@@ -313,6 +313,7 @@ const dict = {
   profile_delete_confirm:     { zh: '确认删除画像"{name}"？其阅读记录将一并删除。', en: 'Delete profile "{name}"? Its reading history will also be deleted.' },
   profile_name_placeholder:   { zh: '画像名称（如：爸爸）',  en: 'Profile name (e.g. Dad)' },
   profile_saving:             { zh: '保存中…',             en: 'Saving…' },
+  profile_limit_reached:      { zh: '每个账号最多创建 5 个画像', en: 'Each account can have at most 5 profiles' },
 } as const
 
 export type DictKey = keyof typeof dict

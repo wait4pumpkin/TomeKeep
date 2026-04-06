@@ -30,6 +30,8 @@ profiles.get('/', async (c) => {
   return c.json(rows)
 })
 
+const MAX_PROFILES_PER_ACCOUNT = 5
+
 // POST /api/profiles  — { id, name }
 profiles.post('/', async (c) => {
   const { sub } = c.var.user
@@ -39,6 +41,16 @@ profiles.post('/', async (c) => {
   // Verify this id doesn't already belong to a different user
   const existing = await dbFirst<ProfileRow>(c.env.DB, 'SELECT * FROM profiles WHERE id = ?', body.id)
   if (existing && existing.owner_id !== sub) return c.json({ error: 'id_conflict' }, 409)
+
+  // Enforce per-account limit (skip check if this is an upsert of an existing own profile)
+  if (!existing) {
+    const count = await dbFirst<{ n: number }>(
+      c.env.DB, 'SELECT COUNT(*) AS n FROM profiles WHERE owner_id = ?', sub,
+    )
+    if ((count?.n ?? 0) >= MAX_PROFILES_PER_ACCOUNT) {
+      return c.json({ error: 'profile_limit_reached' }, 422)
+    }
+  }
 
   await dbRun(
     c.env.DB,

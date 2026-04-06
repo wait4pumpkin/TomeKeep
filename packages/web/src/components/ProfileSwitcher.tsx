@@ -29,6 +29,7 @@ export function ProfileSwitcher() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [busy, setBusy] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const newInputRef = useRef<HTMLInputElement>(null)
@@ -87,6 +88,7 @@ export function ProfileSwitcher() {
   async function handleCreate() {
     if (!newName.trim() || busy) return
     setBusy(true)
+    setCreateError(null)
     try {
       const created = await createProfile(newName.trim())
       const updated = getStoredProfiles()
@@ -97,6 +99,9 @@ export function ProfileSwitcher() {
       setActiveProfileId(created.id)
       setActive(created)
       dispatchProfileChange()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      setCreateError(msg === 'profile_limit_reached' ? t('profile_limit_reached') : msg)
     } finally {
       setBusy(false)
     }
@@ -216,32 +221,41 @@ export function ProfileSwitcher() {
           {/* Divider */}
           {profiles.length > 0 && <div className="border-t border-gray-100 dark:border-gray-700" />}
 
-          {/* New profile */}
+          {/* New profile — hidden once the limit is reached */}
           <div className="px-2 py-1.5">
-            {showNew ? (
-              <div className="flex items-center gap-1">
-                <input
-                  ref={newInputRef}
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                  placeholder={t('profile_name_placeholder')}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') void handleCreate()
-                    if (e.key === 'Escape') { setShowNew(false); setNewName('') }
-                  }}
-                  className="flex-1 text-xs px-1.5 py-0.5 rounded border border-blue-400 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                />
-                <button
-                  onClick={() => { void handleCreate() }}
-                  disabled={busy || !newName.trim()}
-                  className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50"
-                >
-                  {busy ? t('profile_saving') : '✓'}
-                </button>
-              </div>
+            {profiles.length >= 5 ? (
+              <p className="text-xs text-gray-400 dark:text-gray-500 px-1.5 py-0.5">
+                {t('profile_limit_reached')}
+              </p>
+            ) : showNew ? (
+              <>
+                <div className="flex items-center gap-1">
+                  <input
+                    ref={newInputRef}
+                    value={newName}
+                    onChange={e => { setNewName(e.target.value); setCreateError(null) }}
+                    placeholder={t('profile_name_placeholder')}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') void handleCreate()
+                      if (e.key === 'Escape') { setShowNew(false); setNewName(''); setCreateError(null) }
+                    }}
+                    className="flex-1 text-xs px-1.5 py-0.5 rounded border border-blue-400 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  />
+                  <button
+                    onClick={() => { void handleCreate() }}
+                    disabled={busy || !newName.trim()}
+                    className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50"
+                  >
+                    {busy ? t('profile_saving') : '✓'}
+                  </button>
+                </div>
+                {createError && (
+                  <p className="text-xs text-red-500 mt-1 px-1.5">{createError}</p>
+                )}
+              </>
             ) : (
               <button
-                onClick={() => setShowNew(true)}
+                onClick={() => { setShowNew(true); setCreateError(null) }}
                 className="w-full text-left text-xs text-blue-500 hover:text-blue-700 dark:hover:text-blue-400 px-1.5 py-0.5 flex items-center gap-1"
               >
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
