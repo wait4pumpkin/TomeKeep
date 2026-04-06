@@ -111,8 +111,8 @@ export function Inventory() {
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
   )
-  const [compactCols, setCompactCols] = useState<2 | 3 | 4 | 5>(
-    () => (Number(localStorage.getItem(COMPACT_COLS_KEY)) as 2 | 3 | 4 | 5) || 2
+  const [compactCols, setCompactCols] = useState<2 | 3 | 4 | 5 | 6>(
+    () => (Number(localStorage.getItem(COMPACT_COLS_KEY)) as 2 | 3 | 4 | 5 | 6) || 2
   )
 
   const [query, setQuery] = useState('')
@@ -289,7 +289,7 @@ export function Inventory() {
             <button
               onClick={() => setShowAdd(true)}
               title={t('add_book')}
-              className="flex items-center justify-center w-8 h-8 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
+              className="flex items-center justify-center w-7 h-7 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -324,7 +324,7 @@ export function Inventory() {
             {([
               { key: 'all' as FilterStatus,     label: t('filter_all'),     icon: (
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
                 </svg>
               ) },
               { key: 'unread' as FilterStatus,  label: t('filter_unread'),  icon: (
@@ -361,7 +361,7 @@ export function Inventory() {
               {/* Column count — only in compact mode */}
               {viewMode === 'compact' && (
                 <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                  {([2, 3, 4, 5] as const).map(n => (
+                  {([2, 3, 4, 5, 6] as const).map(n => (
                     <button
                       key={n}
                       onClick={() => { setCompactCols(n); localStorage.setItem(COMPACT_COLS_KEY, String(n)) }}
@@ -388,8 +388,16 @@ export function Inventory() {
                   title={t('compact_view')}
                   className={`p-1 transition-colors ${viewMode === 'compact' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
                 >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z" />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <rect x="3" y="3" width="5" height="5" rx="0.75" />
+                    <rect x="9.5" y="3" width="5" height="5" rx="0.75" />
+                    <rect x="16" y="3" width="5" height="5" rx="0.75" />
+                    <rect x="3" y="9.5" width="5" height="5" rx="0.75" />
+                    <rect x="9.5" y="9.5" width="5" height="5" rx="0.75" />
+                    <rect x="16" y="9.5" width="5" height="5" rx="0.75" />
+                    <rect x="3" y="16" width="5" height="5" rx="0.75" />
+                    <rect x="9.5" y="16" width="5" height="5" rx="0.75" />
+                    <rect x="16" y="16" width="5" height="5" rx="0.75" />
                   </svg>
                 </button>
               </div>
@@ -465,7 +473,7 @@ interface BookGridCardProps {
   book: CachedBook
   status: ReadingStatus
   deleting: boolean
-  compactCols: 2 | 3 | 4 | 5
+  compactCols: 2 | 3 | 4 | 5 | 6
   onEdit: () => void
   t: (key: DictKey, vars?: Record<string, string | number>) => string
 }
@@ -504,7 +512,7 @@ function BookGridCard({ book, status, deleting, compactCols, onEdit }: BookGridC
       {/* Title */}
       <div className="px-1.5 py-1">
         <p className={`font-medium text-gray-900 dark:text-gray-100 truncate leading-snug text-center ${
-          compactCols <= 3 ? 'text-xs' : 'text-[10px]'
+          compactCols <= 3 ? 'text-xs' : compactCols <= 5 ? 'text-[10px]' : 'text-[9px]'
         }`}>
           {book.title}
         </p>
