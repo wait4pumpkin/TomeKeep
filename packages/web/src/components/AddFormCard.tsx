@@ -8,11 +8,9 @@
 //   onCancel: called when the user cancels
 //
 // Features:
-//   - Title, author, publisher, ISBN fields
-//   - Douban URL field → fetch metadata via POST /api/metadata/douban
+//   - Title, author, publisher, ISBN, detail URL fields
 //   - Cover upload via POST /api/covers/upload (multipart)
-//   - Priority selector (wishlist only)
-//   - Tag management
+//   - Tag management (edit mode only)
 
 import { useState, useRef } from 'react'
 import { useLang } from '../lib/i18n.tsx'
@@ -34,14 +32,6 @@ interface BookPayload {
   cover_key: string
   detail_url: string
   tags: string[]
-}
-
-interface MetadataResponse {
-  title?: string
-  author?: string
-  publisher?: string
-  isbn?: string
-  cover_key?: string
 }
 
 interface CoverUploadResponse {
@@ -77,35 +67,9 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
   // Status
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [fetchingMeta, setFetchingMeta] = useState(false)
-  const [metaMsg, setMetaMsg] = useState('')
   const [uploadingCover, setUploadingCover] = useState(false)
 
   const coverInputRef = useRef<HTMLInputElement>(null)
-
-  // ---------------------------------------------------------------------------
-  // Douban metadata fetch
-  // ---------------------------------------------------------------------------
-
-  async function handleFetchMeta() {
-    const url = detailUrl.trim()
-    if (!url) return
-    setFetchingMeta(true)
-    setMetaMsg(t('douban_loading'))
-    try {
-      const meta = await api.post<MetadataResponse>('/metadata/douban', { url })
-      if (meta.title) setTitle(meta.title)
-      if (meta.author) setAuthor(meta.author)
-      if (meta.publisher) setPublisher(meta.publisher)
-      if (meta.isbn) setIsbn(meta.isbn)
-      if (meta.cover_key) setCoverKey(meta.cover_key)
-      setMetaMsg(t('filled_douban_dot'))
-    } catch {
-      setMetaMsg(t('douban_parse_fail'))
-    } finally {
-      setFetchingMeta(false)
-    }
-  }
 
   // ---------------------------------------------------------------------------
   // Cover upload
@@ -199,14 +163,14 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-100 dark:border-gray-700 p-4">
       <form onSubmit={e => { void handleSubmit(e) }} noValidate className="space-y-3">
         {/* Cover + basic fields row */}
-        <div className="flex gap-3">
-          {/* Cover thumbnail + upload button */}
-          <div className="flex-shrink-0 flex flex-col items-center gap-1">
+        <div className="flex gap-3 items-stretch">
+          {/* Cover thumbnail + upload button — height matches the fields column */}
+          <div className="flex-shrink-0">
             <button
               type="button"
               onClick={() => coverInputRef.current?.click()}
               disabled={uploadingCover}
-              className="w-14 h-20 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
+              className="h-full aspect-[2/3] min-h-[88px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
               title={t('choose_cover')}
             >
               {coverKey ? (
@@ -237,7 +201,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           </div>
 
           {/* Fields */}
-          <div className="flex-1 flex flex-col gap-1.5 justify-between" style={{ height: '80px' }}>
+          <div className="flex-1 flex flex-col gap-1.5 justify-between">
             <input
               type="text"
               value={title}
@@ -273,29 +237,17 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
-        {/* Douban URL + fetch */}
-        <div className="flex gap-2">
-          <input
-            type="url"
-            value={detailUrl}
-            onChange={e => setDetailUrl(e.target.value)}
-            placeholder={t('field_detail_url')}
-            className="flex-1 px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <button
-            type="button"
-            onClick={() => { void handleFetchMeta() }}
-            disabled={!detailUrl.trim() || fetchingMeta}
-            className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors whitespace-nowrap"
-          >
-            {fetchingMeta ? '…' : t('filled_douban_dot').slice(0, 2)}
-          </button>
-        </div>
-        {metaMsg && (
-          <p className="text-xs text-blue-500 dark:text-blue-400">{metaMsg}</p>
-        )}
+        {/* Detail URL */}
+        <input
+          type="url"
+          value={detailUrl}
+          onChange={e => setDetailUrl(e.target.value)}
+          placeholder={t('field_detail_url')}
+          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
 
-        {/* Tags */}
+        {/* Tags — only shown when editing an existing item */}
+        {isEdit && (
         <div className="space-y-1.5">
           <div className="flex gap-1 flex-wrap">
             {tags.map(tag => (
@@ -334,6 +286,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
             </button>
           </div>
         </div>
+        )}
 
         {/* Error */}
         {error && (
