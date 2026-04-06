@@ -1,5 +1,6 @@
 import { app, BrowserWindow, nativeImage, protocol, net } from 'electron'
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { setupDatabase } from './db'
 import { setupCovers } from './covers'
@@ -13,8 +14,17 @@ import { setupSync, pullAll } from './sync'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Ensure userData is always stored under "TomeKeep" regardless of the npm
-// package name (@tomekeep/desktop). Must be called before app.getPath('userData').
+// package name (@tomekeep/desktop). app.setName() alone is not reliable in dev
+// mode on macOS — explicitly override the userData path instead.
 app.setName('TomeKeep')
+{
+  const userDataPath = process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'TomeKeep')
+    : process.platform === 'win32'
+      ? path.join(process.env['APPDATA'] ?? os.homedir(), 'TomeKeep')
+      : path.join(os.homedir(), '.config', 'TomeKeep')
+  app.setPath('userData', userDataPath)
+}
 
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(__dirname, '../public')

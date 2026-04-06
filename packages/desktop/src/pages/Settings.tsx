@@ -95,10 +95,12 @@ export function Settings() {
       disposeProgressRef.current = null
 
       if (result.ok) {
+        const skippedStr = result.skipped > 0 ? ` · ${result.skipped} 失败` : ''
         setMigrateStatus(t('sync_migrate_done', {
           books: result.books,
           wishlist: result.wishlist,
           covers: result.covers,
+          skipped: skippedStr,
         }))
       } else {
         setMigrateError(t('sync_migrate_error', { error: result.error ?? 'unknown' }))

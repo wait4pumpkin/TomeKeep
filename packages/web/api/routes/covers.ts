@@ -74,10 +74,23 @@ covers.get('/:key{.+}', async (c) => {
     }
   }
 
+  // Try signed URL redirect first (production Cloudflare R2).
+  // Falls back to direct streaming when createPresignedUrl is unavailable
+  // (miniflare local dev environment).
   const signedUrl = await r2SignedUrl(c.env.COVERS, key)
-  if (!signedUrl) return c.json({ error: 'not_found' }, 404)
+  if (signedUrl) return c.redirect(signedUrl, 302)
 
-  return c.redirect(signedUrl, 302)
+  // Fallback: stream the object directly from R2
+  const obj = await c.env.COVERS.get(key)
+  if (!obj) return c.json({ error: 'not_found' }, 404)
+
+  const contentType = obj.httpMetadata?.contentType ?? 'image/jpeg'
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'private, max-age=3600',
+    },
+  })
 })
 
 export default covers

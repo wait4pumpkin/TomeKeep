@@ -57,6 +57,7 @@ books.get('/', async (c) => {
 books.post('/', async (c) => {
   const { sub } = c.var.user
   const body = await c.req.json<{
+    id?: string
     title?: string
     author?: string
     isbn?: string
@@ -64,19 +65,24 @@ books.post('/', async (c) => {
     cover_key?: string
     detail_url?: string
     tags?: string[]
+    added_at?: string
   }>()
 
   if (!body.title) return c.json({ error: 'title_required' }, 400)
 
-  const id = crypto.randomUUID()
+  // Accept a caller-supplied id (e.g. from desktop migration) so the local
+  // and cloud records share the same identifier. Fall back to a new UUID when
+  // no id is provided (e.g. from the PWA).
+  const id = body.id ?? crypto.randomUUID()
   const tags = JSON.stringify(body.tags ?? [])
 
   await dbRun(
     c.env.DB,
-    `INSERT INTO books (id, owner_id, title, author, isbn, publisher, cover_key, detail_url, tags)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO books (id, owner_id, title, author, isbn, publisher, cover_key, detail_url, tags, added_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
     id, sub, body.title, body.author ?? '', body.isbn ?? null,
     body.publisher ?? null, body.cover_key ?? null, body.detail_url ?? null, tags,
+    body.added_at ?? null,
   )
 
   const created = await dbFirst<BookRow>(c.env.DB, 'SELECT * FROM books WHERE id = ?', id)

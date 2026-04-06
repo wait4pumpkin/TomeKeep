@@ -386,9 +386,24 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | sync:migrate | renderer→main | one-shot migration: upload covers then upsert all books/wishlist/reading-states; reports per-phase progress via `sync:migrate-progress` |
 | sync:migrate-progress | main→renderer | pushed during `sync:migrate`; payload: `{ phase: 'covers' \| 'books' \| 'wishlist' \| 'readingStates' \| 'done', current: number, total: number }` |
 
----
+### Web/PWA API endpoints (books)
 
-## Web / PWA API (Hono on Cloudflare Pages Functions)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET`  | `/api/books?since=<ISO>` | Logged in | Return all books (or books updated after `since`). |
+| `POST` | `/api/books` | Logged in | Create a book. Body fields: `id?` (caller-supplied UUID; falls back to server-generated UUID — pass the local desktop id during migration to keep ids in sync), `title` (required), `author?`, `isbn?`, `publisher?`, `cover_key?`, `detail_url?`, `tags?`, `added_at?` (ISO 8601; falls back to `datetime('now')`). Returns 201 with the created book row. |
+| `PUT`  | `/api/books/:id` | Logged in | Update an existing book. Returns 404 `{ error: 'not_found' }` if no book with that id exists. Returns 403 if the book belongs to another user. |
+| `DELETE` | `/api/books/:id` | Logged in | Soft-delete a book (sets `deleted_at`). Returns 404/403 as above. |
+
+### Web/PWA API endpoints (wishlist)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET`  | `/api/wishlist?since=<ISO>` | Logged in | Return all wishlist items (or items updated after `since`). |
+| `POST` | `/api/wishlist` | Logged in | Create a wishlist item. Body fields: `id?` (caller-supplied UUID; falls back to server-generated UUID — pass the local desktop id during migration to keep ids in sync), `title` (required), `author?`, `isbn?`, `publisher?`, `cover_key?`, `detail_url?`, `tags?`, `priority?`, `pending_buy?`, `added_at?` (ISO 8601; falls back to `datetime('now')`). Returns 201 with the created item row. |
+| `PUT`  | `/api/wishlist/:id` | Logged in | Update an existing wishlist item. Returns 404/403 as above. |
+| `DELETE` | `/api/wishlist/:id` | Logged in | Soft-delete a wishlist item. |
+| `POST` | `/api/wishlist/:id/move-to-inventory` | Logged in | Atomically delete a wishlist item and create a new book from it. Returns 201 `{ bookId, title }`. |
 
 All routes are prefixed `/api`. Routes outside `/api/auth/*` require a valid JWT (via httpOnly cookie for PWA, or `Authorization: Bearer <token>` for Electron).
 

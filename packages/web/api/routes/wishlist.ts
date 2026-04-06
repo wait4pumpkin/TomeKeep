@@ -60,6 +60,7 @@ wishlist.get('/', async (c) => {
 wishlist.post('/', async (c) => {
   const { sub } = c.var.user
   const body = await c.req.json<{
+    id?: string
     title?: string
     author?: string
     isbn?: string
@@ -69,22 +70,26 @@ wishlist.post('/', async (c) => {
     tags?: string[]
     priority?: string
     pending_buy?: boolean
+    added_at?: string
   }>()
 
   if (!body.title) return c.json({ error: 'title_required' }, 400)
 
-  const id = crypto.randomUUID()
+  // Accept a caller-supplied id (e.g. from desktop migration) so the local
+  // and cloud records share the same identifier. Fall back to a new UUID when
+  // no id is provided (e.g. from the PWA).
+  const id = body.id ?? crypto.randomUUID()
   const tags = JSON.stringify(body.tags ?? [])
   const priority = body.priority ?? 'medium'
   const pending_buy = body.pending_buy ? 1 : 0
 
   await dbRun(
     c.env.DB,
-    `INSERT INTO wishlist (id, owner_id, title, author, isbn, publisher, cover_key, detail_url, tags, priority, pending_buy)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO wishlist (id, owner_id, title, author, isbn, publisher, cover_key, detail_url, tags, priority, pending_buy, added_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
     id, sub, body.title, body.author ?? '', body.isbn ?? null,
     body.publisher ?? null, body.cover_key ?? null, body.detail_url ?? null,
-    tags, priority, pending_buy,
+    tags, priority, pending_buy, body.added_at ?? null,
   )
 
   const created = await dbFirst<WishlistRow>(c.env.DB, 'SELECT * FROM wishlist WHERE id = ?', id)

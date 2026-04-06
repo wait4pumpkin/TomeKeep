@@ -520,12 +520,20 @@ export interface MigrateResult {
 async function migrateAll(
   onProgress: (p: MigrateProgress) => void,
 ): Promise<MigrateResult> {
+  // Fail fast if not logged in — avoids silently skipping every item.
+  if (!getToken()) throw new Error('not_authenticated')
+
   const db = getDb()
+  // Re-read from disk to make sure in-memory data is up to date before migrating.
+  await db.read()
+
   const result: MigrateResult = { ok: true, books: 0, wishlist: 0, readingStates: 0, covers: 0, skipped: 0 }
 
   const books = db.data.books
   const wishlist = db.data.wishlist
   const readingStates = db.data.readingStates
+
+  console.log(`[migrate] starting: books=${books.length} wishlist=${wishlist.length} readingStates=${readingStates.length}`)
 
   // Phase 1: upload missing covers for books
   onProgress({ phase: 'covers', current: 0, total: books.length + wishlist.length })
@@ -576,7 +584,11 @@ async function migrateAll(
       db.data.books[i]!.syncStatus = 'synced'
       result.books++
     } catch (err) {
-      console.error('[migrate] book failed', book.id, err)
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[migrate] book failed', book.id, msg)
+      // Auth or network failures are fatal — abort rather than loop 300+ times.
+      if (msg === 'not_authenticated' || msg === 'http_401') throw new Error(msg)
+      result.skipped++
     }
     onProgress({ phase: 'books', current: i + 1, total: books.length })
   }
@@ -598,7 +610,10 @@ async function migrateAll(
       db.data.wishlist[i]!.syncStatus = 'synced'
       result.wishlist++
     } catch (err) {
-      console.error('[migrate] wishlist failed', item.id, err)
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[migrate] wishlist failed', item.id, msg)
+      if (msg === 'not_authenticated' || msg === 'http_401') throw new Error(msg)
+      result.skipped++
     }
     onProgress({ phase: 'wishlist', current: i + 1, total: wishlist.length })
   }
@@ -613,7 +628,10 @@ async function migrateAll(
       db.data.readingStates[i]!.syncStatus = 'synced'
       result.readingStates++
     } catch (err) {
-      console.error('[migrate] readingState failed', state.bookId, err)
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[migrate] readingState failed', state.bookId, msg)
+      if (msg === 'not_authenticated' || msg === 'http_401') throw new Error(msg)
+      result.skipped++
     }
     onProgress({ phase: 'readingStates', current: i + 1, total: readingStates.length })
   }
