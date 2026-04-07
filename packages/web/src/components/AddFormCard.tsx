@@ -171,7 +171,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
             type="button"
             onClick={() => coverInputRef.current?.click()}
             disabled={uploadingCover}
-            className="flex-shrink-0 w-[60px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
+            className="flex-shrink-0 w-[80px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 transition-colors"
             title={t('choose_cover')}
           >
             {coverKey ? (
