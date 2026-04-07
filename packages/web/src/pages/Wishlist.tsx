@@ -776,7 +776,7 @@ function WishCard({
               <div className="flex items-center gap-0.5 flex-1">
                 <button onClick={() => { closeActions(); onMoveToInventory() }} className="px-1 py-0.5 rounded text-gray-400 dark:text-gray-500 hover:text-green-500 transition-colors" title={t('move_to_library')}>
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                   </svg>
                 </button>
                 <button onClick={() => { closeActions(); onEdit() }} className="px-1 py-0.5 rounded text-gray-400 dark:text-gray-500 hover:text-blue-500 transition-colors" title={t('edit')}>
