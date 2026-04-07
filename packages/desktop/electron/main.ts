@@ -99,7 +99,12 @@ app.whenReady().then(async () => {
   // without bypassing Electron's content security policy.
   protocol.handle('app', request => {
     const url = new URL(request.url)
-    const filePath = path.join(app.getPath('userData'), url.host, url.pathname)
+    const base = app.getPath('userData')
+    const filePath = path.join(base, url.host, url.pathname)
+    // Guard against path traversal: resolved path must remain inside userData
+    if (!filePath.startsWith(path.join(base, path.sep)) && filePath !== base) {
+      return new Response('Forbidden', { status: 403 })
+    }
     return net.fetch(`file://${filePath}`)
   })
 

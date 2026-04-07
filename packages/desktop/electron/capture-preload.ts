@@ -228,35 +228,70 @@ function injectOverlay(channel: CaptureChannel, url: string, prefilledPrice: num
 
   const channelLabel: Record<CaptureChannel, string> = { jd: '京东', dangdang: '当当', bookschina: '中图网' }
 
-  overlay.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <span style="font-weight:600;font-size:15px;">保存到 TomeKeep</span>
-      <button id="tk-close" style="background:none;border:none;cursor:pointer;font-size:18px;color:#999;line-height:1;padding:0 0 0 8px;">×</button>
-    </div>
-    <div style="margin-bottom:8px;">
-      <span style="display:inline-block;padding:2px 8px;border-radius:4px;background:#fff1f0;color:#c0392b;font-size:12px;font-weight:500;">${channelLabel[channel]}</span>
-    </div>
-    <div style="margin-bottom:10px;">
-      <label style="display:block;font-size:12px;color:#666;margin-bottom:4px;">价格（元）</label>
-      <input id="tk-price" type="number" step="0.01" min="0.01"
-        value="${prefilledPrice !== null ? prefilledPrice.toFixed(2) : ''}"
-        placeholder="请输入价格"
-        style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;outline:none;"
-      />
-      ${prefilledPrice !== null ? '<div style="font-size:11px;color:#52c41a;margin-top:3px;">已自动识别价格</div>' : '<div style="font-size:11px;color:#faad14;margin-top:3px;">未能自动识别，请手动输入</div>'}
-    </div>
-    <div style="display:flex;gap:8px;">
-      <button id="tk-confirm"
-        style="flex:1;padding:8px 0;background:#c0392b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;">
-        确认保存
-      </button>
-      <button id="tk-cancel"
-        style="flex:1;padding:8px 0;background:#f5f5f5;color:#555;border:none;border-radius:6px;cursor:pointer;font-size:14px;">
-        取消
-      </button>
-    </div>
-    <div id="tk-error" style="margin-top:8px;font-size:12px;color:#e74c3c;display:none;"></div>
-  `
+  // Build overlay UI via DOM API (avoids innerHTML / XSS risk)
+  const header = document.createElement('div')
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;'
+  const headerTitle = document.createElement('span')
+  headerTitle.style.cssText = 'font-weight:600;font-size:15px;'
+  headerTitle.textContent = '保存到 TomeKeep'
+  const closeBtn = document.createElement('button')
+  closeBtn.id = 'tk-close'
+  closeBtn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:18px;color:#999;line-height:1;padding:0 0 0 8px;'
+  closeBtn.textContent = '×'
+  header.appendChild(headerTitle)
+  header.appendChild(closeBtn)
+
+  const channelRow = document.createElement('div')
+  channelRow.style.cssText = 'margin-bottom:8px;'
+  const channelBadge = document.createElement('span')
+  channelBadge.style.cssText = 'display:inline-block;padding:2px 8px;border-radius:4px;background:#fff1f0;color:#c0392b;font-size:12px;font-weight:500;'
+  channelBadge.textContent = channelLabel[channel]
+  channelRow.appendChild(channelBadge)
+
+  const priceRow = document.createElement('div')
+  priceRow.style.cssText = 'margin-bottom:10px;'
+  const priceLabel = document.createElement('label')
+  priceLabel.style.cssText = 'display:block;font-size:12px;color:#666;margin-bottom:4px;'
+  priceLabel.textContent = '价格（元）'
+  const priceInput = document.createElement('input')
+  priceInput.id = 'tk-price'
+  priceInput.type = 'number'
+  priceInput.step = '0.01'
+  priceInput.min = '0.01'
+  priceInput.value = prefilledPrice !== null ? prefilledPrice.toFixed(2) : ''
+  priceInput.placeholder = '请输入价格'
+  priceInput.style.cssText = 'width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;outline:none;'
+  const priceHint = document.createElement('div')
+  priceHint.style.cssText = prefilledPrice !== null
+    ? 'font-size:11px;color:#52c41a;margin-top:3px;'
+    : 'font-size:11px;color:#faad14;margin-top:3px;'
+  priceHint.textContent = prefilledPrice !== null ? '已自动识别价格' : '未能自动识别，请手动输入'
+  priceRow.appendChild(priceLabel)
+  priceRow.appendChild(priceInput)
+  priceRow.appendChild(priceHint)
+
+  const btnRow = document.createElement('div')
+  btnRow.style.cssText = 'display:flex;gap:8px;'
+  const confirmBtn = document.createElement('button')
+  confirmBtn.id = 'tk-confirm'
+  confirmBtn.style.cssText = 'flex:1;padding:8px 0;background:#c0392b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;'
+  confirmBtn.textContent = '确认保存'
+  const cancelBtn = document.createElement('button')
+  cancelBtn.id = 'tk-cancel'
+  cancelBtn.style.cssText = 'flex:1;padding:8px 0;background:#f5f5f5;color:#555;border:none;border-radius:6px;cursor:pointer;font-size:14px;'
+  cancelBtn.textContent = '取消'
+  btnRow.appendChild(confirmBtn)
+  btnRow.appendChild(cancelBtn)
+
+  const errorDiv = document.createElement('div')
+  errorDiv.id = 'tk-error'
+  errorDiv.style.cssText = 'margin-top:8px;font-size:12px;color:#e74c3c;display:none;'
+
+  overlay.appendChild(header)
+  overlay.appendChild(channelRow)
+  overlay.appendChild(priceRow)
+  overlay.appendChild(btnRow)
+  overlay.appendChild(errorDiv)
 
   // Defensive guard: body should always exist here (we wait for it via
   // whenDomReady), but guard anyway to avoid a silent crash.
@@ -264,27 +299,25 @@ function injectOverlay(channel: CaptureChannel, url: string, prefilledPrice: num
   document.body.appendChild(overlay)
 
   // Focus price input if no prefilled price
-  const priceInput = document.getElementById('tk-price') as HTMLInputElement | null
   if (priceInput && prefilledPrice === null) priceInput.focus()
 
   function showError(msg: string) {
-    const el = document.getElementById('tk-error')
-    if (el) { el.textContent = msg; el.style.display = 'block' }
+    errorDiv.textContent = msg
+    errorDiv.style.display = 'block'
   }
 
-  document.getElementById('tk-close')?.addEventListener('click', () => {
+  closeBtn.addEventListener('click', () => {
     removeOverlay()
     cancelCapture()
   })
 
-  document.getElementById('tk-cancel')?.addEventListener('click', () => {
+  cancelBtn.addEventListener('click', () => {
     removeOverlay()
     cancelCapture()
   })
 
-  document.getElementById('tk-confirm')?.addEventListener('click', () => {
-    const input = document.getElementById('tk-price') as HTMLInputElement | null
-    const raw = input?.value.trim() ?? ''
+  confirmBtn.addEventListener('click', () => {
+    const raw = priceInput.value.trim()
     const price = parseFloat(raw)
     if (!isFinite(price) || price <= 0) {
       showError('请输入有效的价格（大于 0）')

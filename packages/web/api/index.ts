@@ -2,6 +2,7 @@
 // Hono application — registers all route modules
 
 import { Hono } from 'hono'
+import { secureHeaders } from 'hono/secure-headers'
 import type { HonoEnv } from './lib/types.ts'
 
 import authRoutes from './routes/auth.ts'
@@ -15,6 +16,11 @@ import priceRoutes from './routes/prices.ts'
 import syncRoutes from './routes/sync.ts'
 
 const app = new Hono<HonoEnv>().basePath('/api')
+
+// Apply security headers to all responses:
+// X-Content-Type-Options, X-Frame-Options, X-XSS-Protection,
+// Referrer-Policy, Strict-Transport-Security, etc.
+app.use('*', secureHeaders())
 
 app.route('/auth', authRoutes)
 app.route('/books', bookRoutes)

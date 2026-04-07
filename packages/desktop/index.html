@@ -5,6 +5,30 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TomeKeep</title>
+    <!--
+      Content Security Policy for Electron renderer:
+      - default-src 'self': only load resources from app origin
+      - script-src 'self' 'unsafe-inline': allow inline scripts (theme init above)
+      - style-src 'self' 'unsafe-inline': allow inline styles (Tailwind / CSS-in-JS)
+      - img-src 'self' app: data: blob: https:
+          app:    — local covers served via custom app:// protocol
+          data:   — base64 embedded images
+          blob:   — cover crop canvas output
+          https:  — remote cover thumbnails during metadata fetch
+      - connect-src 'self' https: — API calls and metadata/cover fetches
+      - font-src 'self' data: — embedded fonts
+      - object-src 'none': block <object>/<embed>
+      - base-uri 'self': prevent base tag injection
+    -->
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self' 'unsafe-inline';
+               style-src 'self' 'unsafe-inline';
+               img-src 'self' app: data: blob: https:;
+               connect-src 'self' https:;
+               font-src 'self' data:;
+               object-src 'none';
+               base-uri 'self';" />
     <!-- Inline theme init: apply dark class before first paint to avoid FOUC -->
     <script>
       ;(function () {

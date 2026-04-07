@@ -72,6 +72,11 @@ typings/
 # dotenv environment variables file
 .env
 .env.test
+# Cloudflare Workers local dev secrets and build cache
+.dev.vars
+.wrangler/
+# SQLite databases (local dev state)
+*.sqlite
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

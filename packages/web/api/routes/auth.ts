@@ -1,7 +1,7 @@
 // api/routes/auth.ts
 // Authentication routes: register, login, logout, me, invite, admin-setup
 
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import type { HonoEnv } from '../lib/types.ts'
 import { hashPassword, verifyPassword } from '../lib/password.ts'
 import { signJwt } from '../lib/jwt.ts'
@@ -9,6 +9,43 @@ import { authMiddleware } from '../middleware/auth.ts'
 import { dbFirst, dbRun, dbAll } from '../lib/db.ts'
 
 const auth = new Hono<HonoEnv>()
+
+// ---------------------------------------------------------------------------
+// In-memory sliding-window rate limiter
+// Cloudflare Workers are single-threaded per isolate, so a Map is safe here.
+// Note: state resets on Worker restart/cold start — this is intentional and
+// acceptable. For persistent rate limiting, use Cloudflare Rate Limiting rules
+// at the WAF layer (recommended for production deployments).
+// ---------------------------------------------------------------------------
+interface RateWindow { count: number; windowStart: number }
+const rateLimitStore = new Map<string, RateWindow>()
+
+/**
+ * Returns true if the request should be blocked.
+ * @param key      Identifier (e.g. IP + route)
+ * @param limit    Max requests allowed per window
+ * @param windowMs Window size in milliseconds
+ */
+function isRateLimited(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now()
+  const entry = rateLimitStore.get(key)
+  if (!entry || now - entry.windowStart >= windowMs) {
+    rateLimitStore.set(key, { count: 1, windowStart: now })
+    return false
+  }
+  entry.count++
+  if (entry.count > limit) return true
+  return false
+}
+
+/** Get the best available client IP from Cloudflare headers */
+function getClientIp(c: Context<HonoEnv>): string {
+  return (
+    c.req.header('CF-Connecting-IP') ??
+    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+    'unknown'
+  )
+}
 
 /** Build a Set-Cookie string for the JWT token.
  *  Omits the `Secure` flag on local dev (no CF_PAGES env var) so that
@@ -20,6 +57,12 @@ function loginCookie(token: string, isProduction: boolean, maxAge = 86400): stri
 
 // POST /api/auth/register
 auth.post('/register', async (c) => {
+  // Rate limit: max 5 registration attempts per IP per 15 minutes
+  const ip = getClientIp(c)
+  if (isRateLimited(`register:${ip}`, 5, 15 * 60 * 1000)) {
+    return c.json({ error: 'too_many_requests' }, 429)
+  }
+
   const body = await c.req.json<{ username?: string; password?: string; name?: string; inviteCode?: string }>()
   const { username, password, name, inviteCode } = body
 
@@ -70,6 +113,12 @@ auth.post('/register', async (c) => {
 
 // POST /api/auth/login
 auth.post('/login', async (c) => {
+  // Rate limit: max 10 login attempts per IP per 15 minutes
+  const ip = getClientIp(c)
+  if (isRateLimited(`login:${ip}`, 10, 15 * 60 * 1000)) {
+    return c.json({ error: 'too_many_requests' }, 429)
+  }
+
   const body = await c.req.json<{ username?: string; password?: string }>()
   const { username, password } = body
 

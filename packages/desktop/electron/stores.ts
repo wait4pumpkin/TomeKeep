@@ -10,6 +10,9 @@ export function setupStores() {
       height: 850,
       webPreferences: {
         partition: getStoresPartition(),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
       },
     })
     await win.loadURL(url)
@@ -39,6 +42,9 @@ export function setupStores() {
       height: 850,
       webPreferences: {
         partition: getStoresPartition(),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
       },
     })
     await win.loadURL(url)
