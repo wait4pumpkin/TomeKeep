@@ -265,7 +265,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
             {tags.map(tag => (
               <span
                 key={tag}
-                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${tagColor(tag).badge}`}
+                className={`inline-flex items-center gap-1 text-sm px-2.5 py-1 rounded-full border ${tagColor(tag).badge}`}
               >
                 {tag}
                 <button
