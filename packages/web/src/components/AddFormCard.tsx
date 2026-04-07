@@ -261,6 +261,25 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
         {/* Tags — only shown when editing an existing item */}
         {isEdit && (
         <div className="space-y-1.5">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={tagInput}
+              onChange={e => setTagInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
+              placeholder={t('tag_input_placeholder')}
+              className="flex-1 px-2.5 py-1.5 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="button"
+              onClick={addTag}
+              disabled={!tagInput.trim()}
+              className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            >
+              {t('add_tag')}
+            </button>
+          </div>
+          {tags.length > 0 && (
           <div className="flex gap-1 flex-wrap">
             {tags.map(tag => (
               <span
@@ -279,24 +298,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
               </span>
             ))}
           </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={tagInput}
-              onChange={e => setTagInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
-              placeholder={t('tag_input_placeholder')}
-            className="flex-1 px-2.5 py-1.5 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              type="button"
-              onClick={addTag}
-              disabled={!tagInput.trim()}
-              className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-            >
-              {t('add_tag')}
-            </button>
-          </div>
+          )}
         </div>
         )}
 
