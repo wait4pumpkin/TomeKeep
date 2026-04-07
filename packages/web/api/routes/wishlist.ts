@@ -188,10 +188,17 @@ wishlist.post('/:id/move-to-inventory', async (c) => {
     ).bind(wishId),
   ])
 
-  const book = await dbFirst<{ id: string; title: string }>(
-    c.env.DB, 'SELECT id, title FROM books WHERE id = ?', bookId,
+  const book = await dbFirst<{
+    id: string; owner_id: string; title: string; author: string;
+    isbn: string | null; publisher: string | null; cover_key: string | null;
+    detail_url: string | null; tags: string; added_at: string; updated_at: string; deleted_at: string | null
+  }>(
+    c.env.DB, 'SELECT * FROM books WHERE id = ?', bookId,
   )
-  return c.json({ bookId: book!.id, title: book!.title }, 201)
+  return c.json({
+    ...book!,
+    tags: JSON.parse(book!.tags as string) as string[],
+  }, 201)
 })
 
 export default wishlist

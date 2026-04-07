@@ -8,7 +8,9 @@ import { api } from '../lib/api.ts'
 import {
   getCachedWishlist,
   upsertCachedWishlist,
+  upsertCachedBooks,
   type CachedWishlistItem,
+  type CachedBook,
 } from '../lib/db-cache.ts'
 import { AddFormCard } from '../components/AddFormCard.tsx'
 import { PullToRefresh } from '../components/PullToRefresh.tsx'
@@ -183,8 +185,10 @@ export function Wishlist() {
   async function handleMoveToInventory(item: CachedWishlistItem) {
     setMovingId(item.id)
     try {
-      await api.post(`/wishlist/${item.id}/move-to-inventory`, {})
-      // Mark soft-deleted in cache
+      const book = await api.post<CachedBook>(`/wishlist/${item.id}/move-to-inventory`, {})
+      // Write the new book into the inventory cache immediately
+      await upsertCachedBooks([book])
+      // Mark wishlist item as soft-deleted in the wishlist cache
       const tombstone: CachedWishlistItem = {
         ...item,
         deleted_at: new Date().toISOString(),
