@@ -27,6 +27,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      devOptions: { enabled: true },
       includeAssets: ['icons/*.png', 'splash/*.png', 'favicon.svg'],
       manifest: {
         name: 'TomeKeep',
