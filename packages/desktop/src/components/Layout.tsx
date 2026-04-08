@@ -94,7 +94,7 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 function LogoBadge() {
   return (
     <Tip label="TomeKeep">
-      <div className="relative w-12 h-12 flex items-center justify-center select-none rounded-xl bg-[#1A1A1E]">
+      <div className="relative w-12 h-12 flex items-center justify-center select-none">
         <DynamicBrandIcon size={48} />
       </div>
     </Tip>
@@ -368,12 +368,14 @@ export function Layout() {
   return (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
       {/* Narrow icon-only sidebar */}
-      <aside className="w-16 bg-white dark:bg-gray-800 shadow-md flex flex-col items-center py-4 gap-1 border-r border-gray-100 dark:border-gray-700 flex-shrink-0">
+      <aside className="w-16 bg-white dark:bg-gray-800 shadow-md flex flex-col items-center gap-1 border-r border-gray-100 dark:border-gray-700 flex-shrink-0">
 
-        {/* Combined logo */}
-        <LogoBadge />
+        {/* Combined logo — full-width dark header, matches dark mode sidebar color */}
+        <div className="w-full flex items-center justify-center py-4 bg-gray-800">
+          <LogoBadge />
+        </div>
 
-        <div className="my-2 w-8 border-t border-gray-100 dark:border-gray-700" />
+        <div className="mt-2 mb-0 w-8 border-t border-gray-100 dark:border-gray-700" />
 
         {/* Nav links */}
         <nav className="flex flex-col items-center gap-2 flex-1">
