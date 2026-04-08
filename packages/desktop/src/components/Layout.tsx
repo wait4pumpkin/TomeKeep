@@ -94,8 +94,8 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 function LogoBadge() {
   return (
     <Tip label="TomeKeep">
-      <div className="relative w-10 h-10 flex items-center justify-center select-none">
-        <DynamicBrandIcon size={40} />
+      <div className="relative w-12 h-12 flex items-center justify-center select-none">
+        <DynamicBrandIcon size={48} />
       </div>
     </Tip>
   )
