@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { DynamicBrandIcon } from './DynamicBrandIcon'
 import { applyTheme, cycleTheme, getStoredTheme, setStoredTheme } from '../lib/theme'
 import type { ThemeMode } from '../lib/theme'
 import { fetchWeather } from '../lib/weather'
@@ -84,20 +83,6 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
         {label}
       </span>
     </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Combined logo: book-stack SVG + animated weather badge at bottom-right
-// ---------------------------------------------------------------------------
-
-function LogoBadge() {
-  return (
-    <Tip label="TomeKeep">
-      <div className="relative w-16 h-16 flex items-center justify-center select-none">
-        <DynamicBrandIcon size={64} />
-      </div>
-    </Tip>
   )
 }
 
@@ -368,12 +353,7 @@ export function Layout() {
   return (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
       {/* Narrow icon-only sidebar */}
-      <aside className="w-16 bg-white dark:bg-gray-800 shadow-md flex flex-col items-center gap-1 border-r border-gray-100 dark:border-gray-700 flex-shrink-0">
-
-        {/* Combined logo — square dark block, full sidebar width */}
-        <div className="w-16 h-16 flex items-center justify-center bg-gray-800 flex-shrink-0">
-          <LogoBadge />
-        </div>
+      <aside className="w-16 bg-white dark:bg-gray-800 shadow-md flex flex-col items-center py-4 gap-1 border-r border-gray-100 dark:border-gray-700 flex-shrink-0">
 
         <div className="mt-2 mb-0 w-8 border-t border-gray-100 dark:border-gray-700" />
 
