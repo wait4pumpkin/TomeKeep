@@ -1,15 +1,15 @@
-name = "tomekeep-web"
+name = "tomekeep"
 compatibility_date = "2024-09-23"
 pages_build_output_dir = "dist"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "tomekeep-db"
-database_id = "REPLACE_WITH_ACTUAL_DATABASE_ID"
+database_name = "books"
+database_id = "f504dc1e-eaf4-4f8b-a028-3e1404ce14a1"
 
 [[r2_buckets]]
 binding = "COVERS"
-bucket_name = "tomekeep-covers"
+bucket_name = "covers"
 
 [vars]
 # Non-secret runtime variables (secrets go in wrangler secret put)

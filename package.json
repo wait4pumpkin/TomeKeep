@@ -10,6 +10,10 @@
     "build": "pnpm --filter @tomekeep/desktop build",
     "test": "pnpm --filter @tomekeep/desktop test && pnpm --filter @tomekeep/shared test",
     "lint": "pnpm -r lint",
-    "electron:build": "pnpm --filter @tomekeep/desktop electron:build"
+    "electron:build": "pnpm --filter @tomekeep/desktop electron:build",
+    "migrate:cloud": "tsx scripts/migrate-local-to-cloud.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
   }
 }
