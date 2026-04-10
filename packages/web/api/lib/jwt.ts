@@ -28,7 +28,7 @@ async function importKey(secret: string): Promise<CryptoKey> {
   )
 }
 
-export async function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, secret: string, expiresIn = 86400): Promise<string> {
+export async function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, secret: string, expiresIn = 60 * 60 * 24 * 90): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   const full: JwtPayload = { ...payload, iat: now, exp: now + expiresIn }
   const header = b64url(new TextEncoder().encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })) as unknown as ArrayBuffer)

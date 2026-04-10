@@ -82,6 +82,10 @@ async function apiRequest<T>(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: `http_${res.status}` })) as ApiError
+    // Clear the stored token on 401 so the stale credential is not retried
+    // indefinitely on every subsequent startup. The user will be prompted to
+    // log in again from the Settings page.
+    if (res.status === 401) clearToken()
     throw new Error(err.error ?? `http_${res.status}`)
   }
 
