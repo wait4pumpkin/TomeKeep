@@ -305,6 +305,17 @@ const dict = {
   sync_migrate_phase_wishlist: { zh: '同步心愿单 {current}/{total}…', en: 'Syncing wishlist {current}/{total}…' },
   sync_migrate_phase_states:  { zh: '同步阅读状态 {current}/{total}…', en: 'Syncing reading states {current}/{total}…' },
 
+  // ── Login page ──────────────────────────────────────────────────────────
+  login_username:       { zh: '用户名',       en: 'Username' },
+  login_password:       { zh: '密码',         en: 'Password' },
+  login_submit:         { zh: '登录',         en: 'Sign in' },
+  login_submitting:     { zh: '登录中…',      en: 'Signing in…' },
+  login_no_account:     { zh: '没有账号？',   en: 'No account?' },
+  login_register:       { zh: '注册',         en: 'Register' },
+  invalid_credentials:  { zh: '用户名或密码错误', en: 'Incorrect username or password' },
+  login_github:         { zh: '开源代码',     en: 'Source code' },
+  login_download_mac:   { zh: '下载 Mac 版',  en: 'Download for Mac' },
+
   // Profiles
   profile_label:              { zh: '画像',               en: 'Profile' },
   profile_switch:             { zh: '切换画像',            en: 'Switch profile' },
