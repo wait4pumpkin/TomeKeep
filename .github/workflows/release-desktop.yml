@@ -26,6 +26,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Set version from tag
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          npm pkg set version="$VERSION" --prefix packages/desktop
+
       - name: Build Mac app (unsigned)
         run: pnpm --filter @tomekeep/desktop electron:build
         env:
