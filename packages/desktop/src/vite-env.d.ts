@@ -162,5 +162,7 @@ interface Window {
     >
     /** Subscribe to migration progress events. Returns a dispose function. */
     onMigrateProgress: (cb: (p: import('../electron/sync').MigrateProgress) => void) => () => void
+    /** Subscribe to token-cleared events (fired when main process clears an expired token on 401). Returns a dispose function. */
+    onTokenCleared: (cb: () => void) => () => void
   }
 }

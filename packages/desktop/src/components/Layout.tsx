@@ -27,11 +27,10 @@ function StarIcon() {
   )
 }
 
-function SettingsIcon() {
+function CloudIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
     </svg>
   )
 }
@@ -290,10 +289,32 @@ export function Layout() {
   const [watermarkName, setWatermarkName] = useState<string | null>(null)
   const [doubanLoggedIn, setDoubanLoggedIn] = useState(false)
   const [doubanLoggingIn, setDoubanLoggingIn] = useState(false)
+  const [syncLoggedIn, setSyncLoggedIn] = useState(false)
 
   useEffect(() => {
     // Check Douban session status on mount
     void window.meta.doubanStatus().then(s => setDoubanLoggedIn(s.loggedIn))
+  }, [])
+
+  useEffect(() => {
+    // Check cloud sync status on mount
+    void window.sync.getStatus().then(s => setSyncLoggedIn(s.loggedIn))
+
+    // Token cleared by main process (expired token → 401)
+    const disposeTokenCleared = window.sync.onTokenCleared(() => {
+      setSyncLoggedIn(false)
+    })
+
+    // Settings page dispatches this after login or logout
+    function handleSyncStatusChanged() {
+      void window.sync.getStatus().then(s => setSyncLoggedIn(s.loggedIn))
+    }
+    window.addEventListener('sync-status-changed', handleSyncStatusChanged)
+
+    return () => {
+      disposeTokenCleared()
+      window.removeEventListener('sync-status-changed', handleSyncStatusChanged)
+    }
   }, [])
 
   useEffect(() => {
@@ -369,9 +390,20 @@ export function Layout() {
               <StarIcon />
             </NavLink>
           </Tip>
-          <Tip label={t('nav_settings')}>
-            <NavLink to="/settings" className={navLinkClass}>
-              <SettingsIcon />
+          <Tip label={syncLoggedIn ? t('sync_status_connected') : t('sync_status_disconnected')}>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                `flex items-center justify-center w-10 h-10 rounded-xl transition-colors ${
+                  isActive
+                    ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'
+                    : syncLoggedIn
+                      ? 'text-green-500 dark:text-green-400 hover:bg-gray-100 dark:hover:bg-gray-700/50'
+                      : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700/50'
+                }`
+              }
+            >
+              <CloudIcon />
             </NavLink>
           </Tip>
         </nav>
@@ -384,7 +416,7 @@ export function Layout() {
           <button
             type="button"
             onClick={() => void setLang(lang === 'zh' ? 'en' : 'zh')}
-            className="flex items-center justify-center w-10 h-10 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700/50 transition-colors text-xs font-semibold"
+            className="flex items-center justify-center w-10 h-10 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700/50 transition-colors text-sm font-semibold"
           >
             {lang === 'zh' ? 'EN' : '中'}
           </button>
@@ -403,13 +435,12 @@ export function Layout() {
               setDoubanLoggedIn(status.loggedIn)
               setDoubanLoggingIn(false)
             }}
-            className={`relative flex items-center justify-center w-10 h-10 rounded-xl transition-colors text-xs font-bold
+            className={`relative flex items-center justify-center w-10 h-10 rounded-xl transition-colors text-sm font-bold
               ${doubanLoggingIn ? 'opacity-50 cursor-wait' : 'hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'}
               ${doubanLoggedIn ? 'text-green-500 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}
             `}
           >
             豆
-            <span className={`absolute bottom-1.5 right-1.5 w-1.5 h-1.5 rounded-full ${doubanLoggedIn ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
           </button>
         </Tip>
 

@@ -169,4 +169,9 @@ contextBridge.exposeInMainWorld('sync', {
     ipcRenderer.on('sync:migrate-progress', listener)
     return () => ipcRenderer.off('sync:migrate-progress', listener)
   },
+  onTokenCleared: (cb: () => void): (() => void) => {
+    const listener = () => cb()
+    ipcRenderer.on('sync:token-cleared', listener)
+    return () => ipcRenderer.off('sync:token-cleared', listener)
+  },
 })

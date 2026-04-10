@@ -276,6 +276,10 @@ const dict = {
   admin_invite_deleting:     { zh: '删除中…',      en: 'Deleting…' },
   admin_invite_delete_used:  { zh: '已使用，无法删除', en: 'Cannot delete — already used' },
 
+  // Sidebar sync status tooltip
+  sync_status_connected:    { zh: '云同步：已连接',  en: 'Cloud sync: connected' },
+  sync_status_disconnected: { zh: '云同步：未登录',  en: 'Cloud sync: not logged in' },
+
   // ── Settings / Cloud Sync ─────────────────────────────────────────────────
   settings_title:             { zh: '设置',              en: 'Settings' },
   nav_settings:               { zh: '设置',              en: 'Settings' },

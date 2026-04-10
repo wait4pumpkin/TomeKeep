@@ -9,7 +9,7 @@
 //   - Replay pending queue for offline writes
 //   - IPC handlers: sync:login, sync:logout, sync:status, sync:pull, sync:push-pending
 
-import { ipcMain, safeStorage, app } from 'electron'
+import { ipcMain, safeStorage, app, BrowserWindow } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { getDb } from './db.ts'
@@ -85,7 +85,10 @@ async function apiRequest<T>(
     // Clear the stored token on 401 so the stale credential is not retried
     // indefinitely on every subsequent startup. The user will be prompted to
     // log in again from the Settings page.
-    if (res.status === 401) clearToken()
+    if (res.status === 401) {
+      clearToken()
+      BrowserWindow.getAllWindows()[0]?.webContents.send('sync:token-cleared')
+    }
     throw new Error(err.error ?? `http_${res.status}`)
   }
 

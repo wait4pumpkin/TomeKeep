@@ -44,6 +44,7 @@ export function Settings() {
         setUsername('')
         setPassword('')
         await loadStatus()
+        window.dispatchEvent(new CustomEvent('sync-status-changed'))
       } else {
         setLoginError(result.error ?? 'unknown_error')
       }
@@ -55,6 +56,7 @@ export function Settings() {
   async function handleLogout() {
     await window.sync.logout()
     await loadStatus()
+    window.dispatchEvent(new CustomEvent('sync-status-changed'))
   }
 
   async function handlePull() {
