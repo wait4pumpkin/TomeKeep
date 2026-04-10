@@ -1,9 +1,13 @@
 // api/lib/r2.ts
-// R2 upload helper and signed URL generation
+// R2 upload/delete helpers.
 // R2Bucket is globally ambient via tsconfig "types": ["@cloudflare/workers-types"]
+
+/** 7-day public cache TTL for cover images (in seconds). */
+const COVER_CACHE_TTL = 60 * 60 * 24 * 7 // 604800
 
 /**
  * Upload raw bytes to R2 under the given key.
+ * Sets Cache-Control so Cloudflare CDN and browsers cache the object for 7 days.
  */
 export async function r2Put(
   bucket: R2Bucket,
@@ -11,31 +15,25 @@ export async function r2Put(
   data: ArrayBuffer | Uint8Array,
   contentType: string,
 ): Promise<void> {
-  await bucket.put(key, data, { httpMetadata: { contentType } })
+  await bucket.put(key, data, {
+    httpMetadata: {
+      contentType,
+      cacheControl: `public, max-age=${COVER_CACHE_TTL}`,
+    },
+  })
 }
 
 /**
- * Generate a temporary signed URL for a private R2 object.
- * Cloudflare R2 presigned URLs are created via the R2Object.writeHttpMetadata /
- * createPresignedUrl approach — available in Workers bindings as
- * bucket.createPresignedUrl().
- *
- * Valid for 1 hour (3600 seconds).
+ * Upload raw bytes to R2 under a temporary key (no cache headers).
+ * Used during image compression: write original → transform → delete.
  */
-export async function r2SignedUrl(bucket: R2Bucket, key: string): Promise<string | null> {
-  // @ts-expect-error — createPresignedUrl is a Workers runtime method
-  if (typeof bucket.createPresignedUrl === 'function') {
-    // @ts-expect-error
-    return (bucket.createPresignedUrl(key, { expiresIn: 3600 })) as Promise<string>
-  }
-
-  // Fallback for older Workers binding API: check object exists, return null if missing.
-  const obj = await bucket.head(key)
-  if (!obj) return null
-
-  // Without createPresignedUrl support we can't generate a signed URL at runtime.
-  // This path should not be reached in production Cloudflare Workers.
-  return null
+export async function r2PutTmp(
+  bucket: R2Bucket,
+  key: string,
+  data: ArrayBuffer | Uint8Array,
+  contentType: string,
+): Promise<void> {
+  await bucket.put(key, data, { httpMetadata: { contentType } })
 }
 
 export async function r2Delete(bucket: R2Bucket, key: string): Promise<void> {

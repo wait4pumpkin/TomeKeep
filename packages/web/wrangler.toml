@@ -15,3 +15,4 @@ bucket_name = "covers"
 # Non-secret runtime variables (secrets go in wrangler secret put)
 # JWT_SECRET is set via: wrangler secret put JWT_SECRET
 # ADMIN_SETUP_TOKEN is set via: wrangler secret put ADMIN_SETUP_TOKEN
+COVERS_PUBLIC_URL = "https://covers.cbbnews.top"

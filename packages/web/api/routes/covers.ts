@@ -1,18 +1,20 @@
 // api/routes/covers.ts
-// Cover image upload (compress → R2) and authenticated serve (signed URL redirect)
+// Cover image upload (compress → R2) and CDN redirect for serving.
 
 import { Hono } from 'hono'
 import type { HonoEnv } from '../lib/types.ts'
 import { authMiddleware } from '../middleware/auth.ts'
 import { dbFirst } from '../lib/db.ts'
-import { r2Put, r2SignedUrl } from '../lib/r2.ts'
+import { r2Put, r2PutTmp, r2Delete } from '../lib/r2.ts'
 import { compressToWebP, MAX_BYTES } from '../lib/image.ts'
 
 const covers = new Hono<HonoEnv>()
 covers.use('*', authMiddleware)
 
 // POST /api/covers/upload
-// Accepts multipart/form-data with field "file"
+// Accepts multipart/form-data with field "file".
+// Pipeline: write original to tmp R2 key → compress via Image Resizing → store
+// final WebP → delete tmp key → return { coverKey }.
 covers.post('/upload', async (c) => {
   const { sub } = c.var.user
 
@@ -28,37 +30,54 @@ covers.post('/upload', async (c) => {
     return c.json({ error: 'file_too_large', maxBytes: MAX_BYTES }, 413)
   }
 
-  const originalMimeType = blob.type || 'image/jpeg'
-  const rawBuffer = await blob.arrayBuffer()
+  const originalMime = blob.type || 'image/jpeg'
+  const originalData = await blob.arrayBuffer()
 
-  let data: ArrayBuffer
-  let mimeType: string
+  // 1. Write original to a temporary key so Image Resizing can fetch it.
+  const tmpUuid = crypto.randomUUID()
+  const ext = originalMime.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg'
+  const tmpKey = `tmp/${sub}/${tmpUuid}.${ext}`
+  await r2PutTmp(c.env.COVERS, tmpKey, originalData, originalMime)
+
+  // 2. Compress via Cloudflare Image Resizing using the public CDN URL.
+  const tmpPublicUrl = `${c.env.COVERS_PUBLIC_URL}/${tmpKey}`
+  let compressedData: ArrayBuffer
+  let finalMime: string
   try {
-    ;({ data, mimeType } = await compressToWebP(rawBuffer, originalMimeType))
-  } catch (err) {
-    return c.json({ error: 'image_processing_failed', detail: String(err) }, 422)
+    ;({ data: compressedData, mimeType: finalMime } = await compressToWebP(
+      tmpPublicUrl,
+      originalData,
+      originalMime,
+    ))
+  } finally {
+    // Always clean up the temporary object, even if compression failed.
+    await r2Delete(c.env.COVERS, tmpKey).catch(() => undefined)
   }
 
-  const ext = mimeType === 'image/webp' ? 'webp' : mimeType.split('/')[1] ?? 'jpg'
+  // 3. Store the final (compressed) image under the permanent key.
+  const finalExt = finalMime === 'image/webp' ? 'webp' : finalMime.split('/')[1] ?? 'jpg'
   const uuid = crypto.randomUUID()
-  const coverKey = `covers/${sub}/${uuid}.${ext}`
-
-  await r2Put(c.env.COVERS, coverKey, data, mimeType)
+  const coverKey = `covers/${sub}/${uuid}.${finalExt}`
+  await r2Put(c.env.COVERS, coverKey, compressedData, finalMime)
 
   return c.json({ coverKey })
 })
 
 // GET /api/covers/:key
-// key is URL-encoded, e.g. covers%2F<uid>%2F<uuid>.webp
+// Verifies ownership then issues a permanent 302 redirect to the public CDN URL.
+// The CDN URL is publicly readable but uses an unguessable UUID — cover images
+// are not sensitive data (same approach as Douban / Amazon cover URLs).
 covers.get('/:key{.+}', async (c) => {
   const { sub } = c.var.user
   const key = decodeURIComponent(c.req.param('key'))
 
-  // Security: verify the cover belongs to the authenticated user
+  // Security: verify the cover belongs to the authenticated user.
   // Key format: covers/<owner_id>/<uuid>.<ext>
   const parts = key.split('/')
-  if (parts.length !== 3 || parts[0] !== 'covers' || parts[1] !== sub) {
-    // Could be on a book/wishlist record — check both tables
+  const ownerFromKey = parts.length === 3 && parts[0] === 'covers' ? parts[1] : null
+
+  if (ownerFromKey !== sub) {
+    // Key doesn't encode the caller's id — check DB ownership.
     const bookMatch = await dbFirst<{ id: string }>(
       c.env.DB,
       'SELECT id FROM books WHERE cover_key = ? AND owner_id = ? LIMIT 1',
@@ -74,23 +93,9 @@ covers.get('/:key{.+}', async (c) => {
     }
   }
 
-  // Try signed URL redirect first (production Cloudflare R2).
-  // Falls back to direct streaming when createPresignedUrl is unavailable
-  // (miniflare local dev environment).
-  const signedUrl = await r2SignedUrl(c.env.COVERS, key)
-  if (signedUrl) return c.redirect(signedUrl, 302)
-
-  // Fallback: stream the object directly from R2
-  const obj = await c.env.COVERS.get(key)
-  if (!obj) return c.json({ error: 'not_found' }, 404)
-
-  const contentType = obj.httpMetadata?.contentType ?? 'image/jpeg'
-  return new Response(obj.body, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'private, max-age=3600',
-    },
-  })
+  // Redirect to the public CDN URL — Cloudflare CDN and the browser will
+  // cache the image for 7 days (set by Cache-Control on the R2 object).
+  return c.redirect(`${c.env.COVERS_PUBLIC_URL}/${key}`, 302)
 })
 
 export default covers

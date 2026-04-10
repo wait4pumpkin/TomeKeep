@@ -48,6 +48,19 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,wasm}'],
         runtimeCaching: [
           {
+            // Cover images served from the public R2 CDN domain.
+            // Must be listed BEFORE the generic /api/ rule so Workbox matches it first.
+            // CacheFirst: covers are immutable (new upload = new UUID key), 7-day TTL.
+            urlPattern: ({ url }) =>
+              url.hostname === 'covers.cbbnews.top' ||
+              url.pathname.startsWith('/api/covers/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'covers-cache',
+              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 7 },
+            },
+          },
+          {
             // API data: network-first, fall back to cache
             urlPattern: /^\/api\//,
             handler: 'NetworkFirst',
@@ -55,15 +68,6 @@ export default defineConfig({
               cacheName: 'api-cache',
               networkTimeoutSeconds: 5,
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
-          {
-            // Cover images: cache-first (R2 signed URLs)
-            urlPattern: /^\/api\/covers\//,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'covers-cache',
-              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 },
             },
           },
           {
