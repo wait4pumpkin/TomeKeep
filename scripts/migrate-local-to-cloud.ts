@@ -218,20 +218,8 @@ async function main() {
   if (fs.existsSync(COVERS_DIR)) {
     const coverFiles = fs.readdirSync(COVERS_DIR).filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f))
 
-    // Collect all book/wishlist ids that have a local cover (app:// URL)
-    const localCoverIds = new Set<string>()
-    for (const book of books) {
-      if (book.coverUrl?.startsWith('app://')) {
-        localCoverIds.add(book.id)
-      }
-    }
-    for (const item of wishlist) {
-      if (item.coverUrl?.startsWith('app://')) {
-        localCoverIds.add(item.id)
-      }
-    }
-
-    // Also check if we have existing coverKeys from a previous partial migration
+    // Pre-populate coverKeyMap from existing coverKey fields in db.json
+    // (set by a previous partial migration run).
     for (const book of books) {
       if (book.coverKey) coverKeyMap.set(book.id, book.coverKey)
     }
@@ -239,9 +227,13 @@ async function main() {
       if (item.coverKey) coverKeyMap.set(item.id, item.coverKey)
     }
 
+    // Upload any cover file that exists on disk and doesn't already have a
+    // coverKey.  We intentionally do NOT filter by coverUrl startsWith('app://')
+    // — books whose cover was fetched from a remote URL still have a local file
+    // saved by Electron, and we want to migrate those too.
     const toUpload = coverFiles.filter(f => {
       const id = path.parse(f).name
-      return localCoverIds.has(id) && !coverKeyMap.has(id)
+      return !coverKeyMap.has(id)
     })
 
     let uploaded = 0
@@ -302,8 +294,20 @@ async function main() {
     if (res.ok) {
       booksCreated++
     } else if (res.status === 409) {
-      // Already exists — safe to skip
-      booksSkipped++
+      // Already exists — patch cover_key if we now have one and the book
+      // was previously migrated without a cover (common on first run).
+      const coverKey = coverKeyMap.get(book.id)
+      if (coverKey) {
+        const patchRes = await apiFetch('PUT', `/api/books/${book.id}`, { cover_key: coverKey })
+        if (patchRes.ok) {
+          booksSkipped++ // patched counts as "already existed"
+        } else {
+          console.error(`\n    FAILED patching cover for book "${book.title}" (${patchRes.status}):`, patchRes.data)
+          booksSkipped++
+        }
+      } else {
+        booksSkipped++
+      }
     } else {
       booksFailed++
       console.error(`\n    FAILED book "${book.title}" (${res.status}):`, res.data)
@@ -344,7 +348,19 @@ async function main() {
     if (res.ok) {
       wishCreated++
     } else if (res.status === 409) {
-      wishSkipped++
+      // Already exists — patch cover_key if we now have one.
+      const coverKey = coverKeyMap.get(item.id)
+      if (coverKey) {
+        const patchRes = await apiFetch('PUT', `/api/wishlist/${item.id}`, { cover_key: coverKey })
+        if (patchRes.ok) {
+          wishSkipped++
+        } else {
+          console.error(`\n    FAILED patching cover for wishlist "${item.title}" (${patchRes.status}):`, patchRes.data)
+          wishSkipped++
+        }
+      } else {
+        wishSkipped++
+      }
     } else {
       wishFailed++
       console.error(`\n    FAILED wishlist "${item.title}" (${res.status}):`, res.data)
