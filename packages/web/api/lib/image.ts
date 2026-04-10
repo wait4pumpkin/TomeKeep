@@ -11,12 +11,29 @@
 //   4. We return the compressed WebP bytes for the caller to write to the
 //      final R2 key (and delete the temporary key).
 //
-// If Image Resizing is unavailable (e.g. local dev / miniflare), we fall back
-// to storing the original so dev still works.
+// Error policy:
+//   - In production: any failure (non-2xx response or thrown error that is
+//     NOT a "cf unsupported" dev-environment TypeError) is re-thrown so the
+//     upload handler returns 422. We never silently store an oversized original.
+//   - In local dev (miniflare): cf.image is not supported and throws a
+//     TypeError whose message contains "cf" or similar. We detect this and
+//     fall back to storing the original so dev still works.
 
 export const TARGET_WIDTH = 400
 export const QUALITY = 85
 export const MAX_BYTES = 2 * 1024 * 1024 // 2 MB hard limit on upload
+
+/**
+ * Returns true when the error looks like miniflare / local-dev rejecting the
+ * `cf` fetch option. In production this option is silently supported by the
+ * Workers runtime, so any error there is a genuine failure.
+ */
+function isLocalDevUnsupported(err: unknown): boolean {
+  const msg = String(err).toLowerCase()
+  // miniflare throws: "TypeError: 'cf' is not a standard property of Request init"
+  // or variations depending on the version.
+  return msg.includes("'cf'") || msg.includes('"cf"') || msg.includes('not a standard')
+}
 
 /**
  * Compress an image to WebP using Cloudflare Image Resizing.
@@ -25,10 +42,12 @@ export const MAX_BYTES = 2 * 1024 * 1024 // 2 MB hard limit on upload
  *                      (e.g. https://covers.cbbnews.top/tmp/<uuid>.jpg).
  *                      Must be served from a Cloudflare-proxied zone for
  *                      Image Resizing to activate.
- * @param originalData  Raw bytes of the original — used as fallback when
- *                      Image Resizing is not available (local dev).
+ * @param originalData  Raw bytes of the original — used as fallback only in
+ *                      local dev when cf.image is not supported.
  * @param originalMime  MIME type of the original (e.g. "image/jpeg").
  * @returns             Compressed bytes + final MIME type.
+ * @throws              In production if Image Resizing returns a non-2xx
+ *                      response or the fetch itself fails.
  */
 export async function compressToWebP(
   tmpPublicUrl: string,
@@ -48,17 +67,20 @@ export async function compressToWebP(
     })
 
     if (!res.ok) {
-      // Image Resizing returned an error — fall back to original
-      console.warn(`[image] resize fetch failed (${res.status}), storing original`)
-      return { data: originalData, mimeType: originalMime }
+      // Production Image Resizing failure — reject the upload.
+      throw new Error(`Image Resizing failed with HTTP ${res.status}`)
     }
 
     const mimeType = res.headers.get('Content-Type') ?? 'image/webp'
     const data = await res.arrayBuffer()
     return { data, mimeType }
   } catch (err) {
-    // cf.image not available in local dev (miniflare) — fall back silently
-    console.warn('[image] Image Resizing unavailable, storing original:', err)
-    return { data: originalData, mimeType: originalMime }
+    if (isLocalDevUnsupported(err)) {
+      // Local dev (miniflare): cf.image not supported — fall back silently.
+      console.warn('[image] cf.image not available in local dev, storing original')
+      return { data: originalData, mimeType: originalMime }
+    }
+    // Production failure — re-throw so the upload handler returns 422.
+    throw err
   }
 }
