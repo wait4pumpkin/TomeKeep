@@ -1,5 +1,6 @@
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs'
 import { JSONFilePreset } from 'lowdb/node'
 
 export interface Book {
@@ -143,6 +144,28 @@ export function getDb() {
   return dbInstance
 }
 
+// ---------------------------------------------------------------------------
+// Local cover file helpers
+// ---------------------------------------------------------------------------
+
+/** Returns the local cover file path for a given record id, or null if not found. */
+function findLocalCoverPath(id: string): string | null {
+  const coversDir = path.join(app.getPath('userData'), 'covers')
+  for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+    const p = path.join(coversDir, `${id}.${ext}`)
+    if (fs.existsSync(p)) return p
+  }
+  return null
+}
+
+/** Deletes the local cover file for a given record id. No-op if the file doesn't exist. */
+function deleteLocalCover(id: string): void {
+  const p = findLocalCoverPath(id)
+  if (p) {
+    try { fs.unlinkSync(p) } catch { /* already gone */ }
+  }
+}
+
 export async function setupDatabase() {
   const userDataPath = app.getPath('userData')
   const dbPath = path.join(userDataPath, 'db.json')
@@ -241,6 +264,15 @@ export async function setupDatabase() {
   ipcMain.handle('db:update-book', async (_, updatedBook: Book) => {
     const index = db.data.books.findIndex(b => b.id === updatedBook.id)
     if (index !== -1) {
+      const existing = db.data.books[index]!
+      // If the cover has been replaced, delete the old local file so it doesn't
+      // become an orphan that gets re-uploaded on the next migrate:cloud run.
+      if (
+        updatedBook.coverKey !== existing.coverKey ||
+        updatedBook.coverUrl !== existing.coverUrl
+      ) {
+        deleteLocalCover(existing.id)
+      }
       const stamped: Book = { ...updatedBook, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
       db.data.books[index] = stamped
       await db.write()
@@ -257,6 +289,7 @@ export async function setupDatabase() {
       // Clean up readingStates for this book across all users
       db.data.readingStates = db.data.readingStates.filter(rs => rs.bookId !== id)
       await db.write()
+      deleteLocalCover(id)
       void import('./sync.ts').then(m => m.pushDeletedBook(id)).catch(() => undefined)
       return true
     }
@@ -281,6 +314,7 @@ export async function setupDatabase() {
     if (index !== -1) {
       db.data.wishlist.splice(index, 1)
       await db.write()
+      deleteLocalCover(id)
       void import('./sync.ts').then(m => m.pushDeletedWishlistItem(id)).catch(() => undefined)
       return true
     }
@@ -290,6 +324,14 @@ export async function setupDatabase() {
   ipcMain.handle('db:update-wishlist-item', async (_, updatedItem: WishlistItem) => {
     const index = db.data.wishlist.findIndex(w => w.id === updatedItem.id)
     if (index !== -1) {
+      const existing = db.data.wishlist[index]!
+      // If the cover has been replaced, delete the old local file.
+      if (
+        updatedItem.coverKey !== existing.coverKey ||
+        updatedItem.coverUrl !== existing.coverUrl
+      ) {
+        deleteLocalCover(existing.id)
+      }
       const stamped: WishlistItem = { ...updatedItem, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
       db.data.wishlist[index] = stamped
       await db.write()
