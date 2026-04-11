@@ -36,7 +36,7 @@ interface BookPayload {
 }
 
 interface CoverUploadResponse {
-  key: string
+  coverKey: string
 }
 
 export interface AddFormCardProps {
@@ -85,7 +85,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
       const fd = new FormData()
       fd.append('file', file)
       const res = await api.upload<CoverUploadResponse>('/covers/upload', fd)
-      setCoverKey(res.key)
+      setCoverKey(res.coverKey)
     } catch {
       // ignore upload errors silently
     } finally {
