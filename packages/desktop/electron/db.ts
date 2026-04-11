@@ -247,6 +247,31 @@ export async function setupDatabase() {
   }
 
   // ---------------------------------------------------------------------------
+  // Migration: rename legacy doubanUrl → detailUrl for books and wishlist items.
+  // Early versions of the app stored the detail page URL under the key doubanUrl.
+  // The field was later renamed to detailUrl. Records written before the rename
+  // still carry doubanUrl and have no detailUrl, so the cover-fetch and external-
+  // link features silently fail for those records. This migration is idempotent:
+  // it only copies when doubanUrl is present and detailUrl is absent.
+  // ---------------------------------------------------------------------------
+  {
+    let dirty = false
+    for (const record of [...db.data.books, ...db.data.wishlist]) {
+      const r = record as unknown as Record<string, unknown>
+      if (r['doubanUrl'] && !r['detailUrl']) {
+        r['detailUrl'] = r['doubanUrl']
+        delete r['doubanUrl']
+        // Mark as pending so the next sync pushes detail_url to the cloud.
+        // Without this the cloud D1 record keeps detail_url = NULL because
+        // the field was never sent (it was stored under the wrong key).
+        record.syncStatus = 'pending'
+        dirty = true
+      }
+    }
+    if (dirty) await db.write()
+  }
+
+  // ---------------------------------------------------------------------------
   // Book IPC handlers
   // ---------------------------------------------------------------------------
   ipcMain.handle('db:get-books', () => db.data.books)
@@ -265,12 +290,12 @@ export async function setupDatabase() {
     const index = db.data.books.findIndex(b => b.id === updatedBook.id)
     if (index !== -1) {
       const existing = db.data.books[index]!
-      // If the cover has been replaced, delete the old local file so it doesn't
-      // become an orphan that gets re-uploaded on the next migrate:cloud run.
-      if (
-        updatedBook.coverKey !== existing.coverKey ||
-        updatedBook.coverUrl !== existing.coverUrl
-      ) {
+      // If the cover URL has changed from a previous value, delete the old local
+      // file so it doesn't become an orphan. We only delete when existing.coverUrl
+      // is already set — this guards against the race where saveCover writes the
+      // new file first and then updateBook is called with the new coverUrl, which
+      // would otherwise cause deleteLocalCover to remove the freshly-saved image.
+      if (existing.coverUrl && existing.coverUrl !== updatedBook.coverUrl) {
         deleteLocalCover(existing.id)
       }
       const stamped: Book = { ...updatedBook, updatedAt: new Date().toISOString(), syncStatus: 'pending' }
@@ -325,11 +350,12 @@ export async function setupDatabase() {
     const index = db.data.wishlist.findIndex(w => w.id === updatedItem.id)
     if (index !== -1) {
       const existing = db.data.wishlist[index]!
-      // If the cover has been replaced, delete the old local file.
-      if (
-        updatedItem.coverKey !== existing.coverKey ||
-        updatedItem.coverUrl !== existing.coverUrl
-      ) {
+      // If the cover URL has changed from a previous value, delete the old local
+      // file so it doesn't become an orphan. We only delete when existing.coverUrl
+      // is already set — this guards against the race where saveCover writes the
+      // new file first and then updateWishlistItem is called with the new coverUrl,
+      // which would otherwise cause deleteLocalCover to remove the freshly-saved image.
+      if (existing.coverUrl && existing.coverUrl !== updatedItem.coverUrl) {
         deleteLocalCover(existing.id)
       }
       const stamped: WishlistItem = { ...updatedItem, updatedAt: new Date().toISOString(), syncStatus: 'pending' }

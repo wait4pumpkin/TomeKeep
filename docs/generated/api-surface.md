@@ -16,7 +16,8 @@ interface Book {
   coverUrl?: string    // app:// local path (new records) or remote URL (legacy records)
   status?: 'unread' | 'reading' | 'read'  // legacy field; per-user status now stored in ReadingState
   tags?: string[]      // free-form labels, e.g. ["科幻", "经典"]; undefined = no tags
-  doubanUrl?: string   // optional custom Douban URL override; if absent, derived from isbn or title
+  detailUrl?: string   // optional book detail page URL (e.g. Douban subject URL); used for cover fetching and external links
+                       // legacy records may carry this as doubanUrl — migrated to detailUrl on desktop startup
   addedAt: string      // ISO 8601
 }
 ```

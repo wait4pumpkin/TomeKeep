@@ -101,26 +101,30 @@ function downloadCover(id: string, remoteUrl: string): Promise<string | undefine
           // Reject placeholder images:
           // 1. GIF files — isbndb CDN used to return a GIF placeholder with HTTP 200
           // 2. Known placeholder JPEGs identified by MD5 (isbndb "not available" image)
+          let buf: Buffer
           try {
-            const buf = fs.readFileSync(destPath)
-            if (buf.slice(0, 3).toString('ascii') === 'GIF') {
-              console.error('[covers] GIF placeholder detected, rejecting cover for %s', id)
-              fs.unlink(destPath, () => undefined)
-              resolve(undefined)
-              return
-            }
-            const md5 = crypto.createHash('md5').update(buf).digest('hex')
-            if (PLACEHOLDER_MD5S.has(md5)) {
-              console.error('[covers] known placeholder image (md5=%s), rejecting cover for %s', md5, id)
-              fs.unlink(destPath, () => undefined)
-              resolve(undefined)
-              return
-            }
-          } catch {
-            // If we can't read the file, still try to use it
+            buf = fs.readFileSync(destPath)
+          } catch (e) {
+            // File disappeared between finish and read (e.g. deleted by a
+            // concurrent updateBook call). Treat as a failed download.
+            console.error('[covers] file missing after finish for %s: %s', id, e)
+            resolve(undefined)
+            return
           }
-          const stat = fs.statSync(destPath)
-          console.log('[covers] saved %s (%d bytes) → app://covers/%s.jpg', destPath, stat.size, id)
+          if (buf.slice(0, 3).toString('ascii') === 'GIF') {
+            console.error('[covers] GIF placeholder detected, rejecting cover for %s', id)
+            fs.unlink(destPath, () => undefined)
+            resolve(undefined)
+            return
+          }
+          const md5 = crypto.createHash('md5').update(buf).digest('hex')
+          if (PLACEHOLDER_MD5S.has(md5)) {
+            console.error('[covers] known placeholder image (md5=%s), rejecting cover for %s', md5, id)
+            fs.unlink(destPath, () => undefined)
+            resolve(undefined)
+            return
+          }
+          console.log('[covers] saved %s (%d bytes) → app://covers/%s.jpg', destPath, buf.byteLength, id)
           resolve(`app://covers/${id}.jpg`)
         })
         file.on('error', (e) => {
