@@ -6,7 +6,7 @@ import { useEffect, useCallback, useState } from 'react'
 import { runSync, setupVisibilitySyncListener } from '../lib/sync.ts'
 import { InstallPrompt } from './InstallPrompt.tsx'
 import { getStoredTheme, applyTheme } from '@tomekeep/shared'
-import { syncProfiles, getActiveProfile, ensureDefaultProfile } from '../lib/profiles.ts'
+import { syncProfiles, getActiveProfile, syncAndActivateProfile } from '../lib/profiles.ts'
 import { getSyncCursors, setSyncCursors } from '../lib/db-cache.ts'
 
 export function Layout() {
@@ -40,8 +40,8 @@ export function Layout() {
             profileChanged = profileAfter !== profileBefore
           } catch { /* offline — use cached profiles */ }
 
-          // Ensure at least one profile exists (handles old accounts without profiles)
-          await ensureDefaultProfile().catch(() => { /* best-effort */ })
+          // Ensure an active profile is set (handles accounts without profiles on load)
+          await syncAndActivateProfile().catch(() => { /* best-effort */ })
 
         const updated = await runSync()
         setSyncing(false)

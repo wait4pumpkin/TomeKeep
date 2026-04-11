@@ -5,7 +5,7 @@ import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { api } from '../lib/api.ts'
 import { setStoredUser, type AuthUser } from '../lib/auth.ts'
 import { useLang } from '../lib/i18n.tsx'
-import { ensureDefaultProfile } from '../lib/profiles.ts'
+import { syncAndActivateProfile } from '../lib/profiles.ts'
 
 const GITHUB_URL = 'https://github.com/wait4pumpkin/TomeKeep'
 const RELEASES_URL = 'https://github.com/wait4pumpkin/TomeKeep/releases/latest'
@@ -36,7 +36,7 @@ export function Login() {
         return
       }
       setStoredUser(me)
-      await ensureDefaultProfile()
+      await syncAndActivateProfile()
       navigate('/', { replace: true })
     } catch (err) {
       setError(t('invalid_credentials'))

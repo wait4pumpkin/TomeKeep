@@ -120,6 +120,11 @@ export function clearProfiles(): void {
  * - If none exist, creates a default profile named '匿名' and sets it as active.
  * - If profiles exist but no active profile is set, sets the first one as active.
  * Safe to call multiple times — idempotent.
+ *
+ * Only call this on REGISTER. On login the account already exists and may have
+ * profiles that haven't synced yet (e.g. from the desktop app); calling this
+ * on login would incorrectly create a spurious '匿名' profile if the server
+ * hasn't received the desktop's push yet. Use syncAndActivateProfile() instead.
  */
 export async function ensureDefaultProfile(): Promise<void> {
   let profiles: Profile[]
@@ -142,6 +147,27 @@ export async function ensureDefaultProfile(): Promise<void> {
   }
 
   // Ensure an active profile is selected
+  const activeId = getActiveProfileId()
+  if (!activeId || !profiles.find(p => p.id === activeId)) {
+    setActiveProfileId(profiles[0].id)
+  }
+}
+
+/**
+ * Sync profiles from the server and activate the first one if none is active.
+ * Unlike ensureDefaultProfile(), this never creates a new profile — safe to
+ * call on login and on app mount where the account is known to already exist.
+ */
+export async function syncAndActivateProfile(): Promise<void> {
+  let profiles: Profile[]
+  try {
+    profiles = await syncProfiles()
+  } catch {
+    profiles = getStoredProfiles()
+  }
+
+  if (profiles.length === 0) return
+
   const activeId = getActiveProfileId()
   if (!activeId || !profiles.find(p => p.id === activeId)) {
     setActiveProfileId(profiles[0].id)
