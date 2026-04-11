@@ -18,10 +18,19 @@
 //   - In local dev (miniflare): cf.image is not supported and throws a
 //     TypeError whose message contains "cf" or similar. We detect this and
 //     fall back to storing the original so dev still works.
+//
+// Retry policy:
+//   - Image Resizing fetches the temporary R2 object via the CDN. Cloudflare's
+//     R2 custom-domain CDN can return 404 for a newly-written object for a
+//     brief window (propagation delay). We retry up to RESIZE_RETRIES times
+//     with an exponential back-off before giving up.
 
 export const TARGET_WIDTH = 400
 export const QUALITY = 85
 export const MAX_BYTES = 2 * 1024 * 1024 // 2 MB hard limit on upload
+
+const RESIZE_RETRIES = 4          // total attempts: 1 initial + 3 retries
+const RESIZE_RETRY_BASE_MS = 300  // 300 ms, 600 ms, 1200 ms, 2400 ms
 
 /**
  * Returns true when the error looks like miniflare / local-dev rejecting the
@@ -33,6 +42,11 @@ function isLocalDevUnsupported(err: unknown): boolean {
   // miniflare throws: "TypeError: 'cf' is not a standard property of Request init"
   // or variations depending on the version.
   return msg.includes("'cf'") || msg.includes('"cf"') || msg.includes('not a standard')
+}
+
+/** Resolves after `ms` milliseconds (uses a setTimeout-compatible scheduler). */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 /**
@@ -47,40 +61,61 @@ function isLocalDevUnsupported(err: unknown): boolean {
  * @param originalMime  MIME type of the original (e.g. "image/jpeg").
  * @returns             Compressed bytes + final MIME type.
  * @throws              In production if Image Resizing returns a non-2xx
- *                      response or the fetch itself fails.
+ *                      response or the fetch itself fails after all retries.
  */
 export async function compressToWebP(
   tmpPublicUrl: string,
   originalData: ArrayBuffer,
   originalMime: string,
 ): Promise<{ data: ArrayBuffer; mimeType: string }> {
-  try {
-    const res = await fetch(tmpPublicUrl, {
-      cf: {
-        image: {
-          width: TARGET_WIDTH,
-          format: 'webp',
-          quality: QUALITY,
-          fit: 'scale-down', // never upscale small covers
+  let lastErr: unknown
+
+  for (let attempt = 0; attempt < RESIZE_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // Exponential back-off: 300 ms, 600 ms, 1200 ms …
+      await sleep(RESIZE_RETRY_BASE_MS * Math.pow(2, attempt - 1))
+    }
+
+    try {
+      const res = await fetch(tmpPublicUrl, {
+        cf: {
+          image: {
+            width: TARGET_WIDTH,
+            format: 'webp',
+            quality: QUALITY,
+            fit: 'scale-down', // never upscale small covers
+          },
         },
-      },
-    })
+      })
 
-    if (!res.ok) {
-      // Production Image Resizing failure — reject the upload.
-      throw new Error(`Image Resizing failed with HTTP ${res.status}`)
-    }
+      if (res.status === 404 && attempt < RESIZE_RETRIES - 1) {
+        // Temporary R2 CDN propagation delay — retry.
+        lastErr = new Error(`Image Resizing got 404 on attempt ${attempt + 1}, retrying…`)
+        continue
+      }
 
-    const mimeType = res.headers.get('Content-Type') ?? 'image/webp'
-    const data = await res.arrayBuffer()
-    return { data, mimeType }
-  } catch (err) {
-    if (isLocalDevUnsupported(err)) {
-      // Local dev (miniflare): cf.image not supported — fall back silently.
-      console.warn('[image] cf.image not available in local dev, storing original')
-      return { data: originalData, mimeType: originalMime }
+      if (!res.ok) {
+        // Non-retryable production failure — reject the upload.
+        throw new Error(`Image Resizing failed with HTTP ${res.status}`)
+      }
+
+      const mimeType = res.headers.get('Content-Type') ?? 'image/webp'
+      const data = await res.arrayBuffer()
+      return { data, mimeType }
+    } catch (err) {
+      if (isLocalDevUnsupported(err)) {
+        // Local dev (miniflare): cf.image not supported — fall back silently.
+        console.warn('[image] cf.image not available in local dev, storing original')
+        return { data: originalData, mimeType: originalMime }
+      }
+      lastErr = err
+      // For non-404 errors, don't retry — re-throw immediately.
+      if (!(err instanceof Error && err.message.includes('retrying'))) {
+        throw err
+      }
     }
-    // Production failure — re-throw so the upload handler returns 422.
-    throw err
   }
+
+  // All retries exhausted.
+  throw lastErr ?? new Error('Image Resizing failed after all retries')
 }
