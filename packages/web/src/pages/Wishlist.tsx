@@ -22,13 +22,11 @@ import { tagColor } from '@tomekeep/shared'
 // ---------------------------------------------------------------------------
 
 type WishFilter = 'all' | 'pending'
-type WishSort = 'added' | 'priority' | 'title'
+type WishSort = 'title' | 'author' | 'added'
 type ViewMode = 'detail' | 'compact'
 
 const VIEW_MODE_KEY = 'tk_wl_view'
 const COMPACT_COLS_KEY = 'tk_wl_cols'
-
-const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,12 +35,10 @@ const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 function sortWishlist(items: CachedWishlistItem[], key: WishSort, dir: 'asc' | 'desc'): CachedWishlistItem[] {
   return [...items].sort((a, b) => {
     let cmp = 0
-    if (key === 'priority') {
-      const pa = priorityOrder[a.priority] ?? 99
-      const pb = priorityOrder[b.priority] ?? 99
-      cmp = pa - pb
-    } else if (key === 'title') {
+    if (key === 'title') {
       cmp = a.title.localeCompare(b.title)
+    } else if (key === 'author') {
+      cmp = (a.author ?? '').localeCompare(b.author ?? '')
     } else {
       // 'added'
       cmp = a.added_at.localeCompare(b.added_at)
@@ -347,19 +343,19 @@ export function Wishlist() {
                   <div className="ml-auto flex items-center gap-1.5">
                     <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-visible">
                       {([
-                        { key: 'added' as WishSort,    label: t('sort_added'),    defaultDir: 'desc' as const, icon: (
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
-                          </svg>
-                        ) },
-                        { key: 'priority' as WishSort, label: t('sort_priority'), defaultDir: 'asc' as const, icon: (
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0-3.75-3.75M17.25 21 21 17.25" />
-                          </svg>
-                        ) },
                         { key: 'title' as WishSort,    label: t('sort_title'),    defaultDir: 'asc' as const, icon: (
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
+                          </svg>
+                        ) },
+                        { key: 'author' as WishSort,   label: t('sort_author'),   defaultDir: 'asc' as const, icon: (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                          </svg>
+                        ) },
+                        { key: 'added' as WishSort,    label: t('sort_added'),    defaultDir: 'desc' as const, icon: (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
                           </svg>
                         ) },
                       ] as const).map(({ key: sk, label, defaultDir, icon }, i, arr) => {
@@ -522,10 +518,25 @@ export function Wishlist() {
         <div className={`px-4 pt-3 ${viewMode === 'compact' ? 'grid gap-1' : 'space-y-2'}`}
           style={viewMode === 'compact' ? { gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` } : undefined}
         >
-          {loading && (
-            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12"
-              style={viewMode === 'compact' ? { gridColumn: '1 / -1' } : undefined}
-            >…</p>
+          {loading && viewMode === 'detail' && (
+            Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="flex gap-2.5 animate-pulse">
+                <div className="w-14 h-20 rounded bg-gray-200 dark:bg-gray-700 shrink-0" />
+                <div className="flex-1 py-1 space-y-2">
+                  <div className="h-3.5 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
+                  <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/2" />
+                  <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
+                </div>
+              </div>
+            ))
+          )}
+          {loading && viewMode === 'compact' && (
+            Array.from({ length: compactCols * 4 }).map((_, i) => (
+              <div key={i} className="animate-pulse flex flex-col gap-1">
+                <div className="w-full aspect-[2/3] rounded bg-gray-200 dark:bg-gray-700" />
+                <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-4/5 mx-auto" />
+              </div>
+            ))
           )}
           {!loading && visible.length === 0 && (
             <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12"
