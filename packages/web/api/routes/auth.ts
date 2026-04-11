@@ -50,7 +50,7 @@ function getClientIp(c: Context<HonoEnv>): string {
 /** Build a Set-Cookie string for the JWT token.
  *  Omits the `Secure` flag on local dev (no CF_PAGES env var) so that
  *  http://localhost cookies are accepted by the browser. */
-function loginCookie(token: string, isProduction: boolean, maxAge = 86400): string {
+function loginCookie(token: string, isProduction: boolean, maxAge = 60 * 60 * 24 * 90): string {
   const base = `tk=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`
   return isProduction ? `${base}; Secure` : base
 }

@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import type { HonoEnv } from '../lib/types.ts'
 import { authMiddleware } from '../middleware/auth.ts'
 import { dbAll, dbFirst, dbRun } from '../lib/db.ts'
+import { r2Delete } from '../lib/r2.ts'
 
 const books = new Hono<HonoEnv>()
 books.use('*', authMiddleware)
@@ -94,8 +95,8 @@ books.put('/:id', async (c) => {
   const { sub } = c.var.user
   const id = c.req.param('id')
 
-  const existing = await dbFirst<{ owner_id: string }>(
-    c.env.DB, 'SELECT owner_id FROM books WHERE id = ?', id,
+  const existing = await dbFirst<{ owner_id: string; cover_key: string | null }>(
+    c.env.DB, 'SELECT owner_id, cover_key FROM books WHERE id = ?', id,
   )
   if (!existing) return c.json({ error: 'not_found' }, 404)
   if (existing.owner_id !== sub) return c.json({ error: 'forbidden' }, 403)
@@ -130,6 +131,16 @@ books.put('/:id', async (c) => {
 
   await dbRun(c.env.DB, `UPDATE books SET ${fields.join(', ')} WHERE id = ?`, ...values)
 
+  // If the cover was replaced with a different key, delete the old R2 object.
+  // Fire-and-forget: cover cleanup is best-effort and must not block the response.
+  if (
+    body.cover_key !== undefined &&
+    existing.cover_key &&
+    existing.cover_key !== body.cover_key
+  ) {
+    void r2Delete(c.env.COVERS, existing.cover_key).catch(() => undefined)
+  }
+
   const updated = await dbFirst<BookRow>(c.env.DB, 'SELECT * FROM books WHERE id = ?', id)
   return c.json(parseBook(updated!))
 })
@@ -139,8 +150,8 @@ books.delete('/:id', async (c) => {
   const { sub } = c.var.user
   const id = c.req.param('id')
 
-  const existing = await dbFirst<{ owner_id: string }>(
-    c.env.DB, 'SELECT owner_id FROM books WHERE id = ?', id,
+  const existing = await dbFirst<{ owner_id: string; cover_key: string | null }>(
+    c.env.DB, 'SELECT owner_id, cover_key FROM books WHERE id = ?', id,
   )
   if (!existing) return c.json({ error: 'not_found' }, 404)
   if (existing.owner_id !== sub) return c.json({ error: 'forbidden' }, 403)
@@ -150,6 +161,13 @@ books.delete('/:id', async (c) => {
     "UPDATE books SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
     id,
   )
+
+  // Delete the R2 cover object if one exists.
+  // Fire-and-forget: cover cleanup is best-effort and must not block the response.
+  if (existing.cover_key) {
+    void r2Delete(c.env.COVERS, existing.cover_key).catch(() => undefined)
+  }
+
   return c.json({ ok: true })
 })
 
