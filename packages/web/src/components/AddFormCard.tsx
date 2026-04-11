@@ -14,7 +14,7 @@
 
 import { useState, useRef } from 'react'
 import { useLang } from '../lib/i18n.tsx'
-import { api } from '../lib/api.ts'
+import { api, coverUrl } from '../lib/api.ts'
 import { type CachedBook, type CachedWishlistItem } from '../lib/db-cache.ts'
 import { tagColor } from '@tomekeep/shared'
 import { IsbnScanModal } from './IsbnScanModal.tsx'
@@ -176,7 +176,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           >
             {coverKey ? (
               <img
-                src={`/api/covers/${coverKey}`}
+                src={coverUrl(coverKey)}
                 alt={title}
                 className="w-full h-full object-cover"
               />

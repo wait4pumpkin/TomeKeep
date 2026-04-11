@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
-import { api } from '../lib/api.ts'
+import { api, coverUrl } from '../lib/api.ts'
 import {
   getCachedBooks,
   getCachedReadingStates,
@@ -756,7 +756,7 @@ function BookGridCard({ book, status, deleting, compactCols, onEdit }: BookGridC
       <div className="w-full aspect-[2/3] bg-gray-100 dark:bg-gray-700 relative">
         {book.cover_key ? (
           <img
-            src={`/api/covers/${book.cover_key}`}
+                src={coverUrl(book.cover_key)}
             alt={book.title}
             className="w-full h-full object-cover"
             loading="lazy"
@@ -820,7 +820,7 @@ function BookCard({ book, status, deleting, onStatusCycle, onEdit, onDelete, t }
       <div className="flex-shrink-0 w-14 h-20 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-700">
         {book.cover_key ? (
           <img
-            src={`/api/covers/${book.cover_key}`}
+                src={coverUrl(book.cover_key)}
             alt={book.title}
             className="w-full h-full object-cover"
             loading="lazy"

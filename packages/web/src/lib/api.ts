@@ -95,3 +95,21 @@ export const api = {
     return res.json() as Promise<T>
   },
 }
+
+// ---------------------------------------------------------------------------
+// Cover image URL helper
+// ---------------------------------------------------------------------------
+// Cover images are stored in R2 and served directly from the public CDN.
+// Using the CDN URL directly (instead of routing through /api/covers/:key)
+// allows the Service Worker to cache the response with CacheFirst — the
+// /api/covers/ route returns a 302 redirect whose opaque response cannot be
+// reliably cached by the SW on iOS PWA.
+//
+// Cover keys are unguessable UUIDs, so public CDN access is safe (same model
+// as Douban / Amazon cover URLs). The /api/covers/:key auth-gated route
+// remains available for other use cases (e.g. desktop sync).
+const COVERS_CDN = 'https://covers.cbbnews.top'
+
+export function coverUrl(key: string): string {
+  return `${COVERS_CDN}/${key}`
+}

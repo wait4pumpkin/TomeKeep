@@ -48,12 +48,11 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,wasm}'],
         runtimeCaching: [
           {
-            // Cover images served from the public R2 CDN domain.
-            // Must be listed BEFORE the generic /api/ rule so Workbox matches it first.
+            // Cover images served directly from the public R2 CDN domain.
             // CacheFirst: covers are immutable (new upload = new UUID key), 7-day TTL.
-            urlPattern: ({ url }) =>
-              url.hostname === 'covers.cbbnews.top' ||
-              url.pathname.startsWith('/api/covers/'),
+            // Direct CDN URL avoids the /api/covers/ auth redirect, whose 302 opaque
+            // response cannot be reliably cached by the SW on iOS PWA.
+            urlPattern: ({ url }) => url.hostname === 'covers.cbbnews.top',
             handler: 'CacheFirst',
             options: {
               cacheName: 'covers-cache',
