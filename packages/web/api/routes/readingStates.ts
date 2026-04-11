@@ -37,7 +37,7 @@ readingStates.get('/', async (c) => {
   }
 
   if (since) {
-    filter += ' AND updated_at > ?'
+    filter += ' AND updated_at >= ?'
     params.push(since)
   }
 

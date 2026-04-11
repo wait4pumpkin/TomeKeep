@@ -41,7 +41,7 @@ books.get('/', async (c) => {
   if (since) {
     rows = await dbAll<BookRow>(
       c.env.DB,
-      'SELECT * FROM books WHERE owner_id = ? AND updated_at > ? ORDER BY updated_at ASC',
+      'SELECT * FROM books WHERE owner_id = ? AND updated_at >= ? ORDER BY updated_at ASC',
       sub, since,
     )
   } else {

@@ -44,7 +44,7 @@ wishlist.get('/', async (c) => {
   if (since) {
     rows = await dbAll<WishlistRow>(
       c.env.DB,
-      'SELECT * FROM wishlist WHERE owner_id = ? AND updated_at > ? ORDER BY updated_at ASC',
+      'SELECT * FROM wishlist WHERE owner_id = ? AND updated_at >= ? ORDER BY updated_at ASC',
       sub, since,
     )
   } else {
