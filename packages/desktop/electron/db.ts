@@ -3,6 +3,13 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { JSONFilePreset } from 'lowdb/node'
 
+// Debounce timers for reading-state pushes.
+// Key: "<userId>:<bookId>". Ensures that rapid status cycling (e.g. unread →
+// reading → read in quick succession) only pushes the *latest* state to the
+// cloud, preventing a slower "reading" push from overwriting a later "read"
+// push due to network reordering.
+const readingStatePushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
 export interface Book {
   id: string
   title: string
@@ -454,7 +461,29 @@ export async function setupDatabase() {
       db.data.readingStates.push(stamped)
     }
     await db.write()
-    void import('./sync.ts').then(m => m.pushReadingState(stamped)).catch(() => undefined)
+
+    // Debounced push: if the user cycles status rapidly (unread→reading→read),
+    // cancel any in-flight timer for this book and only push the latest state.
+    // This prevents an earlier "reading" request from arriving at the server
+    // after a later "read" request due to network reordering.
+    const debounceKey = `${state.userId}:${state.bookId}`
+    const pendingTimer = readingStatePushTimers.get(debounceKey)
+    if (pendingTimer) clearTimeout(pendingTimer)
+    readingStatePushTimers.set(
+      debounceKey,
+      setTimeout(() => {
+        readingStatePushTimers.delete(debounceKey)
+        // Re-read the latest state from db rather than using the closed-over
+        // `stamped`, so we always push the most up-to-date value.
+        const latest = db.data.readingStates.find(
+          rs => rs.userId === state.userId && rs.bookId === state.bookId,
+        )
+        if (latest) {
+          void import('./sync.ts').then(m => m.pushReadingState(latest)).catch(() => undefined)
+        }
+      }, 400),
+    )
+
     return stamped
   })
 
