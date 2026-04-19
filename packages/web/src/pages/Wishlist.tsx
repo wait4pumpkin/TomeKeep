@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
 import { api, coverUrl } from '../lib/api.ts'
+import { useSyncState } from '../lib/sync-context.ts'
 import {
   getCachedWishlist,
   upsertCachedWishlist,
@@ -76,6 +77,7 @@ function filterWishlist(
 
 export function Wishlist() {
   const { t } = useLang()
+  const { syncing } = useSyncState()
 
   const [items, setItems] = useState<CachedWishlistItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -257,11 +259,17 @@ export function Wishlist() {
         <div className={`sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 px-4 transition-[padding] duration-300 ${collapsed ? 'pt-2 pb-0' : 'pt-3 pb-3'}`}>
           {/* Title row: title/count + search button + add button */}
           <div className="flex items-center gap-2">
-            {/* Title + count */}
+            {/* Title + count + sync spinner */}
             <div className="flex items-baseline gap-2 min-w-0 flex-1">
               <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">
                 {t('page_wishlist')}
               </h1>
+              {syncing && (
+                <svg className="w-3.5 h-3.5 animate-spin text-blue-400 flex-shrink-0 self-center" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              )}
               {items.length > 0 && (
                 <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
                   {visible.length < items.length

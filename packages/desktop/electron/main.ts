@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeImage, protocol, net } from 'electron'
+import { app, BrowserWindow, nativeImage, protocol, net, systemPreferences } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -115,6 +115,13 @@ app.whenReady().then(async () => {
   setupPricing()
   setupCompanion()
   setupSync()
+
+  // Proactively request macOS camera permission so getUserMedia works in the renderer.
+  // On macOS 10.14+, without an explicit grant the OS silently blocks camera access.
+  if (process.platform === 'darwin') {
+    systemPreferences.askForMediaAccess('camera').catch(() => { /* user denied — handled in renderer */ })
+  }
+
   // Background pull after startup — fire-and-forget to keep launch fast
   void pullAll()
   createWindow()

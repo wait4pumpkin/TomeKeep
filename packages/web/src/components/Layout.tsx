@@ -8,6 +8,7 @@ import { InstallPrompt } from './InstallPrompt.tsx'
 import { getStoredTheme, applyTheme } from '@tomekeep/shared'
 import { syncProfiles, getActiveProfile, syncAndActivateProfile } from '../lib/profiles.ts'
 import { getSyncCursors, setSyncCursors } from '../lib/db-cache.ts'
+import { SyncContext } from '../lib/sync-context.ts'
 
 export function Layout() {
   const [syncing, setSyncing] = useState(false)
@@ -72,32 +73,25 @@ export function Layout() {
   }, [handleVisibilitySync])
 
   return (
-    <div className="flex flex-col h-dvh bg-gray-50 dark:bg-gray-900"
-      style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
-    >
-      {/* Sync indicators — floating top-right, only when active */}
-      {(syncing || syncError) && (
-        <div className="fixed top-2 right-3 z-50 flex items-center gap-1"
-          style={{ top: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}
-        >
-          {syncing && (
-            <svg className="w-4 h-4 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-            </svg>
-          )}
-          {syncError && !syncing && (
+    <SyncContext.Provider value={{ syncing, syncError }}>
+      <div className="flex flex-col h-dvh bg-gray-50 dark:bg-gray-900"
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      >
+        {/* Sync error indicator — fixed top-right, only shown when NOT actively syncing */}
+        {syncError && !syncing && (
+          <div className="fixed right-3 z-50"
+            style={{ top: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}
+          >
             <svg className="w-4 h-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
             </svg>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Page content */}
-      <main className="flex-1 overflow-y-auto">
-        <Outlet />
-      </main>
+        {/* Page content */}
+        <main className="flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
 
       {/* Bottom tab bar */}
       <nav
@@ -147,8 +141,9 @@ export function Layout() {
         </div>
       </nav>
 
-      {/* iOS install prompt */}
-      <InstallPrompt />
-    </div>
+        {/* iOS install prompt */}
+        <InstallPrompt />
+      </div>
+    </SyncContext.Provider>
   )
 }
