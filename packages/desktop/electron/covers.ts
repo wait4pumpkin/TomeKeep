@@ -183,11 +183,13 @@ export function setupCovers() {
           const bookIdx = db.data.books.findIndex(b => b.id === id)
           if (bookIdx !== -1) {
             db.data.books[bookIdx]!.coverKey = coverKey
+            db.data.books[bookIdx]!.syncStatus = 'pending'
             await db.write()
           } else {
             const wishIdx = db.data.wishlist.findIndex(w => w.id === id)
             if (wishIdx !== -1) {
               db.data.wishlist[wishIdx]!.coverKey = coverKey
+              db.data.wishlist[wishIdx]!.syncStatus = 'pending'
               await db.write()
             }
           }
