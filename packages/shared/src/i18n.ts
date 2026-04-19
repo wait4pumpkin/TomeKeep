@@ -190,6 +190,7 @@ const dict = {
   scan_unsupported_camera:   { zh: '当前环境不支持摄像头访问。', en: 'Camera not supported in this environment.' },
   scan_unsupported_barcode:  { zh: '当前环境不支持条码识别（BarcodeDetector）。', en: 'Barcode detection (BarcodeDetector) not supported.' },
   scan_permission_denied:    { zh: '摄像头权限被拒绝，请在系统设置中开启后重试。', en: 'Camera permission denied — enable it in System Settings and try again.' },
+  scan_open_system_settings: { zh: '打开系统设置', en: 'Open System Settings' },
   scan_hint_batch:   { zh: '将条形码对准摄像头，识别后自动继续，扫完后点击"完成"', en: 'Point the barcode at the camera; scanning continues automatically — click Done when finished' },
   scan_hint_single:  { zh: '将条形码对准摄像头，自动识别后关闭', en: 'Point the barcode at the camera — closes automatically after detection' },
   scan_count:        { zh: '已扫描 {n} 本', en: 'Scanned {n}' },

@@ -1,7 +1,7 @@
 {
   "name": "@tomekeep/desktop",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -50,10 +50,12 @@
   "build": {
     "appId": "com.tomekeep.app",
     "productName": "TomeKeep",
+    "executableName": "TomeKeep",
     "icon": "build/icon.png",
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
+      "identity": null,
       "extendInfo": {
         "NSCameraUsageDescription": "TomeKeep uses your camera to scan book ISBN barcodes."
       }
