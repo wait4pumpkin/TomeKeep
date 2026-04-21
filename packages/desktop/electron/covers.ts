@@ -225,10 +225,33 @@ export function setupCovers() {
     try {
       fs.writeFileSync(destPath, Buffer.from(base64Data, 'base64'))
       console.log('[covers:save-cover-data] saved %s → app://covers/%s.%s', destPath, id, ext)
-      return `app://covers/${id}.${ext}`
     } catch (e) {
       console.error('[covers:save-cover-data] write failed', e)
       return null
     }
+
+    // Attempt async upload to R2 (same as covers:save-cover)
+    void import('./sync.ts').then(async m => {
+      const coverKey = await m.uploadCoverToCloud(id)
+      if (coverKey) {
+        const { getDb } = await import('./db.ts')
+        const db = getDb()
+        const bookIdx = db.data.books.findIndex(b => b.id === id)
+        if (bookIdx !== -1) {
+          db.data.books[bookIdx]!.coverKey = coverKey
+          db.data.books[bookIdx]!.syncStatus = 'pending'
+          await db.write()
+        } else {
+          const wishIdx = db.data.wishlist.findIndex(w => w.id === id)
+          if (wishIdx !== -1) {
+            db.data.wishlist[wishIdx]!.coverKey = coverKey
+            db.data.wishlist[wishIdx]!.syncStatus = 'pending'
+            await db.write()
+          }
+        }
+      }
+    }).catch(err => console.error('[covers:save-cover-data] R2 upload error', err))
+
+    return `app://covers/${id}.${ext}`
   })
 }
