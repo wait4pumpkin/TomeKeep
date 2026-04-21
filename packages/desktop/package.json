@@ -52,6 +52,7 @@
     "productName": "TomeKeep",
     "executableName": "TomeKeep",
     "icon": "build/icon.png",
+    "afterPack": "./scripts/after-pack.cjs",
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
