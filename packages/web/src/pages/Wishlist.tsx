@@ -62,7 +62,7 @@ function filterWishlist(
       return item.tags.includes(t)
     })) return false
     if (q) {
-      const haystack = [item.title, item.author, item.isbn ?? '', item.publisher ?? '']
+      const haystack = [item.title, item.author, item.isbn ?? '']
         .join(' ')
         .toLowerCase()
       if (!haystack.includes(q)) return false

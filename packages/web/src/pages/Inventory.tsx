@@ -83,7 +83,7 @@ function filterBooks(
       return b.tags.includes(t)
     })) return false
     if (q) {
-      const haystack = [b.title, b.author, b.isbn ?? '', b.publisher ?? '']
+      const haystack = [b.title, b.author, b.isbn ?? '']
         .join(' ')
         .toLowerCase()
       if (!haystack.includes(q)) return false
@@ -472,17 +472,17 @@ export function Inventory() {
 
                     {/* Column count — only in compact mode */}
                     {viewMode === 'compact' && (
-                      <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                        {([2, 3, 4, 5, 6] as const).map(n => (
-                          <button
-                            key={n}
-                            onClick={() => { setCompactCols(n); localStorage.setItem(COMPACT_COLS_KEY, String(n)) }}
-                            className={`px-1.5 py-1 text-xs transition-colors ${compactCols === n ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                          >
-                            {n}
-                          </button>
-                        ))}
-                      </div>
+                      <button
+                        onClick={() => {
+                          const next = compactCols === 6 ? 2 : (compactCols + 1) as typeof compactCols
+                          setCompactCols(next)
+                          localStorage.setItem(COMPACT_COLS_KEY, String(next))
+                        }}
+                        title={t('compact_columns')}
+                        className="flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 text-xs font-medium transition-colors"
+                      >
+                        {compactCols}
+                      </button>
                     )}
 
                     {/* View toggle */}
