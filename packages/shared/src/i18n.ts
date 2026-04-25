@@ -122,6 +122,7 @@ const dict = {
   status_unread:  { zh: '未读', en: 'Unread' },
   status_reading: { zh: '在读', en: 'Reading' },
   status_read:    { zh: '已读', en: 'Read' },
+  reading_status: { zh: '阅读状态', en: 'Reading Status' },
 
   clip_perm_error:    { zh: '无法读取剪贴板，请检查权限。', en: 'Cannot read clipboard — check permissions.' },
   clip_empty:         { zh: '剪贴板为空。',                en: 'Clipboard is empty.' },

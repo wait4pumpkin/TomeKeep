@@ -16,6 +16,7 @@ import {
 } from '../lib/db-cache.ts'
 import { AddFormCard } from '../components/AddFormCard.tsx'
 import { PullToRefresh } from '../components/PullToRefresh.tsx'
+import BottomSheet from '../components/BottomSheet.tsx'
 import { runSync, pushReadingState } from '../lib/sync.ts'
 import { tagColor } from '@tomekeep/shared'
 import { getActiveProfile } from '../lib/profiles.ts'
@@ -598,17 +599,31 @@ export function Inventory() {
           </div>
         </div>
 
-        {/* Add / Edit form */}
-        {(showAdd || editBook) && (
+        {/* Add form — inline below header */}
+        {showAdd && (
           <div className="px-4 pt-4">
             <AddFormCard
               mode="inventory"
-              initial={editBook ?? undefined}
               onSaved={(book: CachedBook) => { void handleSaved(book) }}
-              onCancel={() => { setShowAdd(false); setEditBook(null) }}
+              onCancel={() => { setShowAdd(false) }}
             />
           </div>
         )}
+
+        {/* Edit form — bottom sheet */}
+        <BottomSheet open={!!editBook} onClose={() => setEditBook(null)}>
+          {editBook && (
+            <div className="px-4 pt-2">
+              <AddFormCard
+                mode="inventory"
+                initial={editBook}
+                initialStatus={statusForBook(editBook, stateMap)}
+                onSaved={(book: CachedBook) => { void handleSaved(book) }}
+                onCancel={() => setEditBook(null)}
+              />
+            </div>
+          )}
+        </BottomSheet>
 
         {/* Book list */}
         <div className={`px-4 pt-3 ${viewMode === 'compact' ? `grid gap-1` : 'space-y-2'}`}

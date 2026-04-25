@@ -4,6 +4,7 @@
 // Props:
 //   mode: 'inventory' | 'wishlist'
 //   initial: existing item to edit (omit for add)
+//   initialStatus: current reading status (inventory edit mode only)
 //   onSaved: called with the created/updated item after a successful API call
 //   onCancel: called when the user cancels
 //
@@ -11,11 +12,12 @@
 //   - Title, author, publisher, ISBN, detail URL fields
 //   - Cover upload via POST /api/covers/upload (multipart)
 //   - Tag management (edit mode only)
+//   - Reading status selector (inventory edit mode only)
 
 import { useState, useRef } from 'react'
 import { useLang } from '../lib/i18n.tsx'
 import { api, coverUrl } from '../lib/api.ts'
-import { type CachedBook, type CachedWishlistItem } from '../lib/db-cache.ts'
+import { type CachedBook, type CachedWishlistItem, upsertCachedReadingStates } from '../lib/db-cache.ts'
 import { tagColor } from '@tomekeep/shared'
 import { IsbnScanModal } from './IsbnScanModal.tsx'
 
@@ -24,6 +26,7 @@ import { IsbnScanModal } from './IsbnScanModal.tsx'
 // ---------------------------------------------------------------------------
 
 type Mode = 'inventory' | 'wishlist'
+type ReadingStatus = 'unread' | 'reading' | 'read'
 
 interface BookPayload {
   title: string
@@ -42,6 +45,7 @@ interface CoverUploadResponse {
 export interface AddFormCardProps {
   mode: Mode
   initial?: CachedBook | CachedWishlistItem
+  initialStatus?: ReadingStatus
   onSaved: (item: CachedBook & CachedWishlistItem) => void
   onCancel: () => void
 }
@@ -50,10 +54,11 @@ export interface AddFormCardProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardProps) {
+export function AddFormCard({ mode, initial, initialStatus, onSaved, onCancel }: AddFormCardProps) {
   const { t } = useLang()
 
   const isEdit = !!initial
+  const showStatusPicker = mode === 'inventory' && isEdit
 
   // Form fields
   const [title, setTitle] = useState(initial?.title ?? '')
@@ -64,6 +69,7 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
   const [coverKey, setCoverKey] = useState(initial?.cover_key ?? '')
   const [tags, setTags] = useState<string[]>(initial?.tags ?? [])
   const [tagInput, setTagInput] = useState('')
+  const [readingStatus, setReadingStatus] = useState<ReadingStatus>(initialStatus ?? 'unread')
 
   // Status
   const [saving, setSaving] = useState(false)
@@ -138,6 +144,20 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
       if (mode === 'inventory') {
         if (isEdit && initial) {
           result = await api.put<CachedBook & CachedWishlistItem>(`/books/${initial.id}`, base)
+          // Save reading status and update local cache
+          try {
+            await api.put('/reading-states', { book_id: initial.id, status: readingStatus })
+            await upsertCachedReadingStates([{
+              user_id: '',
+              book_id: initial.id,
+              profile_id: null,
+              status: readingStatus,
+              completed_at: readingStatus === 'read' ? new Date().toISOString() : null,
+              updated_at: new Date().toISOString(),
+            }])
+          } catch {
+            // non-fatal: status update failure shouldn't block book save
+          }
         } else {
           result = await api.post<CachedBook & CachedWishlistItem>('/books', base)
         }
@@ -300,6 +320,27 @@ export function AddFormCard({ mode, initial, onSaved, onCancel }: AddFormCardPro
           </div>
           )}
         </div>
+        )}
+
+        {/* Reading status — inventory edit mode only */}
+        {showStatusPicker && (
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600">
+              {(['unread', 'reading', 'read'] as ReadingStatus[]).map((s, i) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setReadingStatus(s)}
+                  className={`flex-1 py-1.5 text-sm transition-colors
+                    ${i > 0 ? 'border-l border-gray-200 dark:border-gray-600' : ''}
+                    ${readingStatus === s
+                      ? 'bg-blue-600 text-white font-medium'
+                      : 'bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
+                    }`}
+                >
+                  {t(`status_${s}` as Parameters<typeof t>[0])}
+                </button>
+              ))}
+            </div>
         )}
 
         {/* Error */}
