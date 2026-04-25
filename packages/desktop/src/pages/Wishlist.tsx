@@ -518,7 +518,7 @@ export function Wishlist() {
     if (isDouban) {
       const res = await window.meta.lookupDouban(text)
       if (res.ok) {
-        setNewItem(prev => mergeBookDraftWithMetadata(prev, res.value) as Partial<WishlistItem>)
+        setNewItem(prev => ({ ...mergeBookDraftWithMetadata(prev, res.value), detailUrl: text }) as Partial<WishlistItem>)
         setClipStatus({ state: 'success', message: t('filled_douban_dot') })
       } else {
         setClipStatus({ state: 'error', message: t('douban_parse_fail_manual') })

@@ -185,12 +185,14 @@ export function setupCovers() {
             db.data.books[bookIdx]!.coverKey = coverKey
             db.data.books[bookIdx]!.syncStatus = 'pending'
             await db.write()
+            await m.pushBook(db.data.books[bookIdx]!)
           } else {
             const wishIdx = db.data.wishlist.findIndex(w => w.id === id)
             if (wishIdx !== -1) {
               db.data.wishlist[wishIdx]!.coverKey = coverKey
               db.data.wishlist[wishIdx]!.syncStatus = 'pending'
               await db.write()
+              await m.pushWishlistItem(db.data.wishlist[wishIdx]!)
             }
           }
         }
@@ -241,12 +243,14 @@ export function setupCovers() {
           db.data.books[bookIdx]!.coverKey = coverKey
           db.data.books[bookIdx]!.syncStatus = 'pending'
           await db.write()
+          await m.pushBook(db.data.books[bookIdx]!)
         } else {
           const wishIdx = db.data.wishlist.findIndex(w => w.id === id)
           if (wishIdx !== -1) {
             db.data.wishlist[wishIdx]!.coverKey = coverKey
             db.data.wishlist[wishIdx]!.syncStatus = 'pending'
             await db.write()
+            await m.pushWishlistItem(db.data.wishlist[wishIdx]!)
           }
         }
       }
