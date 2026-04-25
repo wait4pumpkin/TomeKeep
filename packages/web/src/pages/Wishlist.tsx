@@ -2,12 +2,12 @@
 // PWA wishlist page.
 // Reads from IndexedDB cache; writes go through the API and refresh the cache.
 
-import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
 import { api, coverUrl } from '../lib/api.ts'
 import { useSyncState } from '../lib/sync-context.ts'
+import { useWishlistContext, useBooksContext } from '../lib/data-context.tsx'
 import {
-  getCachedWishlist,
   upsertCachedWishlist,
   upsertCachedBooks,
   type CachedWishlistItem,
@@ -78,10 +78,8 @@ function filterWishlist(
 export function Wishlist() {
   const { t } = useLang()
   const { syncing } = useSyncState()
-
-  const [items, setItems] = useState<CachedWishlistItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [, startTransition] = useTransition()
+  const { items, loading, setItems, reload } = useWishlistContext()
+  const { reload: reloadBooks } = useBooksContext()
 
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
@@ -118,29 +116,12 @@ export function Wishlist() {
   }, [])
 
   // ---------------------------------------------------------------------------
-  // Load from cache
+  // Load from cache — delegates to shared DataProvider context
   // ---------------------------------------------------------------------------
 
-  const loadFromCache = useCallback(async (background = false) => {
-    const ws = await getCachedWishlist()
-    if (background) {
-      startTransition(() => setItems(ws))
-    } else {
-      setItems(ws)
-    }
-  }, [startTransition])
-
-  useEffect(() => {
-    setLoading(true)
-    loadFromCache().finally(() => setLoading(false))
-  }, [loadFromCache])
-
-  // Reload from cache whenever a background sync writes new data
-  useEffect(() => {
-    function onSync() { void loadFromCache(true) }
-    window.addEventListener('tomekeep:sync', onSync)
-    return () => window.removeEventListener('tomekeep:sync', onSync)
-  }, [loadFromCache])
+  const loadFromCache = useCallback((background = false) => {
+    return reload(background)
+  }, [reload])
 
   // ---------------------------------------------------------------------------
   // Pull-to-refresh
@@ -148,8 +129,8 @@ export function Wishlist() {
 
   const handleRefresh = useCallback(async () => {
     await runSync()
-    await loadFromCache()
-  }, [loadFromCache])
+    await reload()
+  }, [reload])
 
   // ---------------------------------------------------------------------------
   // Toggle pending_buy
@@ -186,6 +167,7 @@ export function Wishlist() {
       const book = await api.post<CachedBook>(`/wishlist/${item.id}/move-to-inventory`, {})
       // Write the new book into the inventory cache immediately
       await upsertCachedBooks([book])
+      void reloadBooks(true)  // refresh inventory context in background
       // Mark wishlist item as soft-deleted in the wishlist cache
       const tombstone: CachedWishlistItem = {
         ...item,

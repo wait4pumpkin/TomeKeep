@@ -1,7 +1,7 @@
 // src/components/Layout.tsx
 // Main shell: bottom tab bar, sync management.
 
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useCallback, useState } from 'react'
 import { runSync, setupVisibilitySyncListener } from '../lib/sync.ts'
 import { InstallPrompt } from './InstallPrompt.tsx'
@@ -9,8 +9,10 @@ import { getStoredTheme, applyTheme } from '@tomekeep/shared'
 import { syncProfiles, getActiveProfile, syncAndActivateProfile } from '../lib/profiles.ts'
 import { getSyncCursors, setSyncCursors } from '../lib/db-cache.ts'
 import { SyncContext } from '../lib/sync-context.ts'
+import { DataProvider } from '../lib/data-context.tsx'
 
 export function Layout() {
+  const location = useLocation()
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState(false)
 
@@ -74,6 +76,7 @@ export function Layout() {
 
   return (
     <SyncContext.Provider value={{ syncing, syncError }}>
+      <DataProvider>
       <div className="flex flex-col h-dvh bg-gray-50 dark:bg-gray-900"
         style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
@@ -90,7 +93,9 @@ export function Layout() {
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
-          <Outlet />
+          <div key={location.pathname} className="page-fade-in">
+            <Outlet />
+          </div>
         </main>
 
       {/* Bottom tab bar */}
@@ -144,6 +149,7 @@ export function Layout() {
         {/* iOS install prompt */}
         <InstallPrompt />
       </div>
+      </DataProvider>
     </SyncContext.Provider>
   )
 }

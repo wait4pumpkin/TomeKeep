@@ -2,13 +2,12 @@
 // PWA book library page.
 // Reads from IndexedDB cache; writes go through the API and refresh the cache.
 
-import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useLang, type DictKey } from '../lib/i18n.tsx'
 import { api, coverUrl } from '../lib/api.ts'
 import { useSyncState } from '../lib/sync-context.ts'
+import { useBooksContext } from '../lib/data-context.tsx'
 import {
-  getCachedBooks,
-  getCachedReadingStates,
   upsertCachedBooks,
   upsertCachedReadingStates,
   type CachedBook,
@@ -19,7 +18,6 @@ import { PullToRefresh } from '../components/PullToRefresh.tsx'
 import BottomSheet from '../components/BottomSheet.tsx'
 import { runSync, pushReadingState } from '../lib/sync.ts'
 import { tagColor } from '@tomekeep/shared'
-import { getActiveProfile } from '../lib/profiles.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -110,14 +108,11 @@ const statusCycle: Record<ReadingStatus, ReadingStatus> = {
 export function Inventory() {
   const { t } = useLang()
   const { syncing } = useSyncState()
-
-  const [books, setBooks] = useState<CachedBook[]>([])
-  const [stateMap, setStateMap] = useState<Map<string, CachedReadingState>>(new Map())
-  const [loading, setLoading] = useState(true)
-  const [, startTransition] = useTransition()
-
-  // Active profile — null means the account-level default
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => getActiveProfile()?.id ?? null)
+  const {
+    books, stateMap, loading, activeProfileId,
+    setBooks, setStateMap,
+    reload,
+  } = useBooksContext()
 
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'detail'
@@ -157,57 +152,12 @@ export function Inventory() {
   }, [])
 
   // ---------------------------------------------------------------------------
-  // Load from cache
+  // Load from cache — delegates to shared DataProvider context
   // ---------------------------------------------------------------------------
 
-  const loadFromCache = useCallback(async (background = false) => {
-    const profileId = getActiveProfile()?.id ?? null
-    const [bs, allStates] = await Promise.all([getCachedBooks(), getCachedReadingStates(undefined)])
-    const map = new Map<string, CachedReadingState>()
-    // First pass: load the null-profile (desktop-written) rows as a baseline
-    for (const r of allStates) {
-      if (r.profile_id === null) map.set(r.book_id, r)
-    }
-    // Second pass: profile-specific rows take precedence (overwrite the baseline)
-    if (profileId !== null) {
-      for (const r of allStates) {
-        if (r.profile_id === profileId) map.set(r.book_id, r)
-      }
-    }
-    // Batch both updates; wrap in startTransition for background reloads so React
-    // doesn't flash a loading state mid-render.
-    if (background) {
-      startTransition(() => {
-        setBooks(bs)
-        setStateMap(map)
-      })
-    } else {
-      setBooks(bs)
-      setStateMap(map)
-    }
-  }, [startTransition])
-
-  useEffect(() => {
-    setLoading(true)
-    loadFromCache().finally(() => setLoading(false))
-  }, [loadFromCache])
-
-  // Reload from cache whenever a background sync writes new data
-  useEffect(() => {
-    function onSync() { void loadFromCache(true) }
-    window.addEventListener('tomekeep:sync', onSync)
-    return () => window.removeEventListener('tomekeep:sync', onSync)
-  }, [loadFromCache])
-
-  // Reload when active profile changes
-  useEffect(() => {
-    function onProfile() {
-      setActiveProfileId(getActiveProfile()?.id ?? null)
-      void loadFromCache()
-    }
-    window.addEventListener('tomekeep:profile', onProfile)
-    return () => window.removeEventListener('tomekeep:profile', onProfile)
-  }, [loadFromCache])
+  const loadFromCache = useCallback((background = false) => {
+    return reload(background)
+  }, [reload])
 
   // ---------------------------------------------------------------------------
   // Pull-to-refresh
@@ -215,8 +165,8 @@ export function Inventory() {
 
   const handleRefresh = useCallback(async () => {
     await runSync()
-    await loadFromCache()
-  }, [loadFromCache])
+    await reload()
+  }, [reload])
 
   // ---------------------------------------------------------------------------
   // Cycle reading status
