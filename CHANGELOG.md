@@ -8,6 +8,15 @@ All notable changes to TomeKeep are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+### 修复 / Fixed
+
+**Web / PWA**
+- 修复移动端编辑面板中设置阅读状态无效的问题：编辑面板此前把阅读状态写到账户级（`profile_id = NULL`）行，而界面上活跃 profile 的专属行优先显示，导致改动看似无效；现改为与卡片状态按钮一致，携带活跃 `profile_id` 写入
+
+### Fixed (English summary)
+
+- Fixed reading status changes made from the book edit bottom sheet having no visible effect on mobile: the edit form wrote to the account-level (`profile_id = NULL`) row while profile-specific rows take precedence in the UI; it now sends the active `profile_id` like the card status button does
+
 ---
 
 ## [1.0.6] - 2026-08-16

@@ -20,6 +20,7 @@ import { api, coverUrl } from '../lib/api.ts'
 import { type CachedBook, type CachedWishlistItem, upsertCachedReadingStates } from '../lib/db-cache.ts'
 import { tagColor } from '@tomekeep/shared'
 import { IsbnScanModal } from './IsbnScanModal.tsx'
+import { pushReadingState } from '../lib/sync.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +47,9 @@ export interface AddFormCardProps {
   mode: Mode
   initial?: CachedBook | CachedWishlistItem
   initialStatus?: ReadingStatus
+  /** Active reading profile to write the status to (inventory edit mode only).
+   *  null → account-level (legacy) row. Omitted → falls back to null. */
+  initialProfileId?: string | null
   onSaved: (item: CachedBook & CachedWishlistItem) => void
   onCancel: () => void
 }
@@ -54,7 +58,7 @@ export interface AddFormCardProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function AddFormCard({ mode, initial, initialStatus, onSaved, onCancel }: AddFormCardProps) {
+export function AddFormCard({ mode, initial, initialStatus, initialProfileId, onSaved, onCancel }: AddFormCardProps) {
   const { t } = useLang()
 
   const isEdit = !!initial
@@ -144,17 +148,12 @@ export function AddFormCard({ mode, initial, initialStatus, onSaved, onCancel }:
       if (mode === 'inventory') {
         if (isEdit && initial) {
           result = await api.put<CachedBook & CachedWishlistItem>(`/books/${initial.id}`, base)
-          // Save reading status and update local cache
+          // Save reading status against the active profile and update local cache.
+          // Must include profile_id — otherwise the status lands on the account-level
+          // (null-profile) row, which is invisible when a profile is active.
           try {
-            await api.put('/reading-states', { book_id: initial.id, status: readingStatus })
-            await upsertCachedReadingStates([{
-              user_id: '',
-              book_id: initial.id,
-              profile_id: null,
-              status: readingStatus,
-              completed_at: readingStatus === 'read' ? new Date().toISOString() : null,
-              updated_at: new Date().toISOString(),
-            }])
+            const updated = await pushReadingState(initial.id, readingStatus, initialProfileId ?? null)
+            await upsertCachedReadingStates([updated])
           } catch {
             // non-fatal: status update failure shouldn't block book save
           }

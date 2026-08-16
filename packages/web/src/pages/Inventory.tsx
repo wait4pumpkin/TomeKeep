@@ -568,6 +568,7 @@ export function Inventory() {
                 mode="inventory"
                 initial={editBook}
                 initialStatus={statusForBook(editBook, stateMap)}
+                initialProfileId={activeProfileId}
                 onSaved={(book: CachedBook) => { void handleSaved(book) }}
                 onCancel={() => setEditBook(null)}
               />
