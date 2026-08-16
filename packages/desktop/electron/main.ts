@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeImage, protocol, net, systemPreferences } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { setupDatabase } from './db'
 import { setupCovers } from './covers'
@@ -9,7 +10,7 @@ import { setupPricing } from './pricing'
 import { resolvePreloadPath } from './preloadPath'
 import { setupStores } from './stores'
 import { setupCompanion } from './companion-server'
-import { setupSync, pullAll } from './sync'
+import { setupSync, pullAll, runSyncRepair } from './sync'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -45,7 +46,12 @@ function createWindow() {
   const iconPath = resolveIconPath()
 
   // On macOS, app.dock.setIcon() is needed to change the dock icon at runtime
-  if (process.platform === 'darwin' && app.dock) {
+  // in dev mode (where the bundle icon is the default Electron icon). In
+  // packaged builds the bundle .icns already provides the icon and
+  // build/icon.png is NOT shipped (electron-builder `files` only includes
+  // dist/dist-electron/public), so guard the call to avoid setting an empty
+  // image that interferes with Dock rendering.
+  if (process.platform === 'darwin' && app.dock && fs.existsSync(iconPath)) {
     app.dock.setIcon(nativeImage.createFromPath(iconPath))
   }
 
@@ -122,7 +128,10 @@ app.whenReady().then(async () => {
     systemPreferences.askForMediaAccess('camera').catch(() => { /* user denied — handled in renderer */ })
   }
 
-  // Background pull after startup — fire-and-forget to keep launch fast
-  void pullAll()
+  // Background pull after startup — fire-and-forget to keep launch fast.
+  // After the pull, run the startup repair: replay any pending local writes
+  // (books/wishlist/reading states whose earlier push failed) and backfill
+  // covers that never reached R2. Both are idempotent and require a token.
+  void pullAll().then(() => runSyncRepair())
   createWindow()
 })

@@ -28,6 +28,24 @@ review_cycle_days: 30
 - dead-letter queues
 - alerting
 
+## Desktop ↔ Cloud Sync Repair (2026-08)
+
+### Failure Mode
+Local writes (books / wishlist / reading states) are pushed to the cloud asynchronously after each add/update. A failed push (token expired or cleared on 401, network outage, API error) leaves the record with `syncStatus: 'pending'` locally. Previously nothing replayed the pending queue, so records could stay stuck locally (invisible on the PWA) indefinitely.
+
+### Control: Startup Repair
+- On app launch, after a successful login, and on a manual pull (`立即同步`), the desktop runs `runSyncRepair()` (`electron/sync.ts`):
+  1. **Cover backfill** — any book/wishlist with a local cover file but no R2 `coverKey` is uploaded and marked pending (fixes records synced with `cover_key = NULL`).
+  2. **Pending replay** — all records with `syncStatus: 'pending'` are pushed (PUT, fallback POST); failures stay pending.
+- Idempotent; safe to run on every launch. Skipped entirely when not logged in (no token).
+
+### Known Path Bug (fixed in v1.0.6)
+The token file path was computed at module load, before `app.setPath('userData', .../TomeKeep)` ran, so the token landed in the default userData dir (`~/Library/Application Support/@tomekeep/desktop/.sync-token`) instead of the data dir (`.../TomeKeep/`). Reads and writes were internally consistent, so sync worked, but the file lived outside the app's data directory. Fixed by computing the path inside `getToken`/`setToken`/`clearToken`. Users must log in once after upgrading (the old-path token is no longer read).
+
+### Failure Recovery
+- Records that fail during repair keep `syncStatus: 'pending'` and are retried on the next launch/login — no data is lost.
+- Server returns the authoritative `updated_at` (LWW); repaired records never overwrite newer cloud state.
+
 ## Observability Requirements
 - structured logging
 - core metrics

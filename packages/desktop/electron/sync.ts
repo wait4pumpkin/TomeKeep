@@ -30,12 +30,20 @@ function getApiBase(): string {
 // Token persistence — Electron safeStorage (OS keychain on macOS)
 // ---------------------------------------------------------------------------
 
-const TOKEN_FILE = path.join(app.getPath('userData'), '.sync-token')
+// NOTE: this path must be computed at call time, NOT at module load.
+// main.ts overrides app.getPath('userData') at startup (after module imports
+// have already evaluated), so a module-level constant would capture the
+// default userData ("@tomekeep/desktop") and split the token away from the
+// real data directory ("TomeKeep"). That happened in v1.0.5 and older.
+function tokenFilePath(): string {
+  return path.join(app.getPath('userData'), '.sync-token')
+}
 
 export function getToken(): string | null {
   try {
-    if (!fs.existsSync(TOKEN_FILE)) return null
-    const encrypted = fs.readFileSync(TOKEN_FILE)
+    const tokenFile = tokenFilePath()
+    if (!fs.existsSync(tokenFile)) return null
+    const encrypted = fs.readFileSync(tokenFile)
     if (!safeStorage.isEncryptionAvailable()) return null
     return safeStorage.decryptString(encrypted)
   } catch {
@@ -46,11 +54,11 @@ export function getToken(): string | null {
 function setToken(token: string): void {
   if (!safeStorage.isEncryptionAvailable()) return
   const encrypted = safeStorage.encryptString(token)
-  fs.writeFileSync(TOKEN_FILE, encrypted)
+  fs.writeFileSync(tokenFilePath(), encrypted)
 }
 
 function clearToken(): void {
-  try { fs.unlinkSync(TOKEN_FILE) } catch { /* already gone */ }
+  try { fs.unlinkSync(tokenFilePath()) } catch { /* already gone */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -566,6 +574,74 @@ export async function pushPendingQueue(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Startup repair — heal stuck local state on every launch / after login
+// ---------------------------------------------------------------------------
+
+/** Returns true if a local cover file exists for the given record id. */
+function hasLocalCover(id: string): boolean {
+  const coversDir = path.join(app.getPath('userData'), 'covers')
+  for (const ext of ['jpg', 'jpeg', 'png', 'webp']) {
+    if (fs.existsSync(path.join(coversDir, `${id}.${ext}`))) return true
+  }
+  return false
+}
+
+/**
+ * One-shot repair, run at startup, after login, and on manual pull.
+ * Idempotent — safe to run repeatedly.
+ *
+ *   1. Cover backfill: any book/wishlist record that has a local cover file
+ *      but no R2 coverKey gets uploaded and marked pending (fixes books that
+ *      synced with cover_key = NULL, e.g. after a failed R2 upload).
+ *   2. Replay the pending queue (books / wishlist / reading states) so records
+ *      whose earlier push failed get another chance. Records stay 'pending'
+ *      on failure and are retried on the next repair run.
+ */
+export async function runSyncRepair(): Promise<{ covers: number; pushed: number }> {
+  if (!getToken()) return { covers: 0, pushed: 0 }
+  const db = getDb()
+
+  // Phase 1: upload missing covers (only records without a coverKey).
+  let covers = 0
+  for (const book of db.data.books) {
+    if (!book.coverKey && hasLocalCover(book.id)) {
+      const key = await uploadCoverToCloud(book.id)
+      if (key) {
+        const idx = db.data.books.findIndex(b => b.id === book.id)
+        if (idx !== -1) {
+          db.data.books[idx]!.coverKey = key
+          db.data.books[idx]!.syncStatus = 'pending'
+          covers++
+        }
+      }
+    }
+  }
+  for (const item of db.data.wishlist) {
+    if (!item.coverKey && hasLocalCover(item.id)) {
+      const key = await uploadCoverToCloud(item.id)
+      if (key) {
+        const idx = db.data.wishlist.findIndex(w => w.id === item.id)
+        if (idx !== -1) {
+          db.data.wishlist[idx]!.coverKey = key
+          db.data.wishlist[idx]!.syncStatus = 'pending'
+          covers++
+        }
+      }
+    }
+  }
+  if (covers > 0) await db.write()
+
+  // Phase 2: replay the pending queue (now including cover-backed records,
+  // so each record is pushed at most once with its final coverKey).
+  const pushed =
+    db.data.books.filter(b => b.syncStatus === 'pending').length +
+    db.data.wishlist.filter(w => w.syncStatus === 'pending').length +
+    db.data.readingStates.filter(rs => rs.syncStatus === 'pending').length
+  await pushPendingQueue()
+  return { covers, pushed }
+}
+
+// ---------------------------------------------------------------------------
 // One-shot migration: push all local data that hasn't been synced yet
 // ---------------------------------------------------------------------------
 
@@ -730,8 +806,8 @@ export function setupSync(): void {
       const data = await res.json() as { token?: string; error?: string }
       if (!data.token) return { ok: false, error: 'no_token' }
       setToken(data.token)
-      // Kick off initial pull in background
-      void pullAll()
+      // Kick off initial pull in background, then repair any stuck local state
+      void pullAll().then(() => runSyncRepair())
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -754,9 +830,13 @@ export function setupSync(): void {
     }
   })
 
-  // sync:pull — trigger a full incremental pull
+  // sync:pull — trigger a full incremental pull, then replay pending writes
   ipcMain.handle('sync:pull', async () => {
-    return pullAll()
+    const result = await pullAll()
+    // A manual pull should be fully bidirectional: replay pending local writes
+    // and backfill missing covers so local → cloud is covered too.
+    await runSyncRepair()
+    return result
   })
 
   // sync:push-pending — replay pending queue

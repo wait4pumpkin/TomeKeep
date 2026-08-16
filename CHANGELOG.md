@@ -10,6 +10,27 @@ All notable changes to TomeKeep are documented here. Format follows [Keep a Chan
 
 ---
 
+## [1.0.6] - 2026-08-16
+
+### 修复 / Fixed
+
+**桌面端 / Desktop**
+- 同步修复：应用启动、登录成功及点击"立即同步"时自动重放 pending 队列（books / wishlist / reading states），失败的书不再永久滞留本地
+- 封面补传：启动时自动检测"本地有封面但无 R2 coverKey"的记录并上传，修复云端封面缺失
+- 修复 token 存储路径 bug：token 文件路径改为调用时计算（此前在模块加载时计算，导致 token 落在默认 userData 目录 `@tomekeep/desktop/` 而非数据目录 `TomeKeep/`）；升级后需重新登录一次（旧路径 token 不再读取）
+- 修复 Dock 图标偏大：图标加透明边距（内容 99% → 84%，符合 macOS 图标规范）；`app.dock.setIcon` 仅在图标文件存在时调用（打包后 `build/icon.png` 未随包发布，此前会设置空图像）
+- 修复逻辑幂等，可安全地在每次启动时运行；未登录时自动跳过
+
+### Fixed (English summary)
+
+- Desktop sync repair: the pending queue (books / wishlist / reading states) is automatically replayed on app launch, after login, and on manual pull, so records with failed pushes no longer stay stuck locally
+- Cover backfill: records with a local cover but no R2 coverKey are uploaded at startup, fixing missing cloud covers
+- Fixed token path bug: the token file path is now computed at call time (previously computed at module load, so the token landed in the default userData dir `@tomekeep/desktop/` instead of the data dir `TomeKeep/`); a one-time re-login is required after upgrading
+- Fixed oversized Dock icon: added transparent margins to the icon (content 99% → 84%, matching macOS icon guidelines); `app.dock.setIcon` is now guarded to only run when the icon file exists (in packaged builds `build/icon.png` is not shipped, so an empty image was being set)
+- Repair is idempotent and safely runs on every launch; skipped when not logged in
+
+---
+
 ## [0.1.0] - 2026-04-10
 
 ### 新增 / Added
@@ -59,5 +80,6 @@ All notable changes to TomeKeep are documented here. Format follows [Keep a Chan
 
 ---
 
-[Unreleased]: https://github.com/wait4pumpkin/TomeKeep/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/wait4pumpkin/TomeKeep/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/wait4pumpkin/TomeKeep/compare/v1.0.5...v1.0.6
 [0.1.0]: https://github.com/wait4pumpkin/TomeKeep/releases/tag/v0.1.0
