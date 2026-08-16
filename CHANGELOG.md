@@ -8,13 +8,21 @@ All notable changes to TomeKeep are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+---
+
+## [1.0.7] - 2026-08-16
+
 ### 修复 / Fixed
+
+**桌面端 / Desktop**
+- 修复新增书/心愿单封面不同步到云端的问题：封面预览的异步 R2 上传在记录插入本地库之前完成，返回的 `coverKey` 被丢弃，导致记录以 `cover_key = NULL` 推送（手机端只显示占位图）。现在 `pushBook` / `pushWishlistItem` 在推送前会自检：本地有封面但无 `coverKey` 时先上传再推送，封面随记录同步，不再依赖启动/手动同步兜底
 
 **Web / PWA**
 - 修复移动端编辑面板中设置阅读状态无效的问题：编辑面板此前把阅读状态写到账户级（`profile_id = NULL`）行，而界面上活跃 profile 的专属行优先显示，导致改动看似无效；现改为与卡片状态按钮一致，携带活跃 `profile_id` 写入
 
 ### Fixed (English summary)
 
+- Fixed new book / wishlist covers not reaching the cloud: the async R2 cover upload in the preview path completed before the record was inserted locally, and the returned `coverKey` was silently discarded, so records were pushed with `cover_key = NULL` (mobile showed only the placeholder). `pushBook` / `pushWishlistItem` now upload the local cover first when `coverKey` is missing, so covers travel with the record and no longer depend on startup repair timing.
 - Fixed reading status changes made from the book edit bottom sheet having no visible effect on mobile: the edit form wrote to the account-level (`profile_id = NULL`) row while profile-specific rows take precedence in the UI; it now sends the active `profile_id` like the card status button does
 
 ---

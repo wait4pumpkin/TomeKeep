@@ -404,9 +404,34 @@ export async function pullAll(): Promise<{ updated: boolean; error?: string }> {
 // Push helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Make sure a record carries an R2 coverKey before it is pushed to the cloud.
+ *
+ * New records hit a race: covers:save-cover starts a fire-and-forget R2 upload
+ * as soon as the cover preview is downloaded — before the record is inserted
+ * into lowdb at submit time. That upload usually completes first, finds no
+ * record, and silently discards the returned key, so the record would be
+ * pushed with cover_key = NULL and show no cover on the PWA until a
+ * runSyncRepair (startup / login / manual pull) backfills it.
+ *
+ * This re-uploads the local cover at push time, when the record definitely
+ * exists, eliminating the timing dependency. Idempotent: records that already
+ * have a coverKey (or no local cover file) are left untouched.
+ */
+async function ensureCoverKey(record: { id: string; coverKey?: string | null }): Promise<void> {
+  if (record.coverKey) return
+  if (!hasLocalCover(record.id)) return
+  const coverKey = await uploadCoverToCloud(record.id)
+  if (coverKey) {
+    record.coverKey = coverKey
+    await getDb().write()
+  }
+}
+
 export async function pushBook(book: Book): Promise<void> {
   const db = getDb()
   try {
+    await ensureCoverKey(book)
     const payload = bookToApi(book)
     // Try PUT first; if 404 → POST (new record on server)
     try {
@@ -431,6 +456,7 @@ export async function pushBook(book: Book): Promise<void> {
 export async function pushWishlistItem(item: WishlistItem): Promise<void> {
   const db = getDb()
   try {
+    await ensureCoverKey(item)
     const payload = wishlistItemToApi(item)
     try {
       await apiRequest('PUT', `/wishlist/${item.id}`, payload)

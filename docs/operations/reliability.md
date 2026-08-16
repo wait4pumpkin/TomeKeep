@@ -39,6 +39,12 @@ Local writes (books / wishlist / reading states) are pushed to the cloud asynchr
   2. **Pending replay** — all records with `syncStatus: 'pending'` are pushed (PUT, fallback POST); failures stay pending.
 - Idempotent; safe to run on every launch. Skipped entirely when not logged in (no token).
 
+### Known Cover-Upload Race (fixed after v1.0.6)
+
+Adding a new book / wishlist item on the desktop used to race: the form's cover preview calls `covers:save-cover` before the record is inserted, and that handler starts a fire-and-forget R2 upload immediately. The upload usually completed before the user submitted the form, the callback found no record in lowdb, and the returned `coverKey` was silently discarded. The record was then pushed with `cover_key = NULL` and showed no cover on the PWA until a later `runSyncRepair` (startup / login / manual pull) backfilled it.
+
+Fix: `pushBook` / `pushWishlistItem` now call `ensureCoverKey()` first — if the record has a local cover file but no `coverKey`, the cover is uploaded and the key persisted **before** the record is pushed. The cover therefore travels with the record regardless of timing; the startup repair remains as a safety net for legacy records.
+
 ### Known Path Bug (fixed in v1.0.6)
 The token file path was computed at module load, before `app.setPath('userData', .../TomeKeep)` ran, so the token landed in the default userData dir (`~/Library/Application Support/@tomekeep/desktop/.sync-token`) instead of the data dir (`.../TomeKeep/`). Reads and writes were internally consistent, so sync worked, but the file lived outside the app's data directory. Fixed by computing the path inside `getToken`/`setToken`/`clearToken`. Users must log in once after upgrading (the old-path token is no longer read).
 
