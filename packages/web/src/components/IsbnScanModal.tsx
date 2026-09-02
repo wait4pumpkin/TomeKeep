@@ -180,6 +180,13 @@ export function IsbnScanModal({ isOpen, onClose, onDetected, mode = 'single' }: 
   const [scanned, setScanned] = useState<string[]>([])
   const cooldownRef = useRef(false)
   const isDetectingRef = useRef(false)
+  const onCloseRef = useRef(onClose)
+  const onDetectedRef = useRef(onDetected)
+
+  // Parent status updates (especially during batch writes) must not restart the
+  // camera effect just because callback identities changed on a re-render.
+  onCloseRef.current = onClose
+  onDetectedRef.current = onDetected
 
   // Reset scanned list on open
   useEffect(() => {
@@ -275,13 +282,13 @@ export function IsbnScanModal({ isOpen, onClose, onDetected, mode = 'single' }: 
                 if (mode === 'single') {
                   setTimeout(() => {
                     if (!cancelled) {
-                      onDetected(first.rawValue)
-                      onClose()
+                      onDetectedRef.current(first.rawValue)
+                      onCloseRef.current()
                     }
                   }, 180)
                   return
                 } else {
-                  onDetected(first.rawValue)
+                  onDetectedRef.current(first.rawValue)
                   setScanned(prev =>
                     prev.includes(first.rawValue) ? prev : [...prev, first.rawValue],
                   )
@@ -333,7 +340,7 @@ export function IsbnScanModal({ isOpen, onClose, onDetected, mode = 'single' }: 
       }
       setStatus({ state: 'idle' })
     }
-  }, [isOpen, onClose, onDetected, mode, t])
+  }, [isOpen, mode, t])
 
   if (!isOpen) return null
 

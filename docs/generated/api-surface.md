@@ -392,8 +392,8 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET`  | `/api/books?since=<ISO>` | Logged in | Return all books (or books updated after `since`). |
-| `POST` | `/api/books` | Logged in | Create a book. Body fields: `id?` (caller-supplied UUID; falls back to server-generated UUID — pass the local desktop id during migration to keep ids in sync), `title` (required), `author?`, `isbn?`, `publisher?`, `cover_key?`, `detail_url?`, `tags?`, `added_at?` (ISO 8601; falls back to `datetime('now')`). Returns 201 with the created book row. |
-| `PUT`  | `/api/books/:id` | Logged in | Update an existing book. Returns 404 `{ error: 'not_found' }` if no book with that id exists. Returns 403 if the book belongs to another user. |
+| `POST` | `/api/books` | Logged in | Create a book. ISBN is optional; when present it is checksum-validated, normalized to ISBN-13, and checked against the owner's active books. Returns 400 `invalid_isbn`, 409 `duplicate_isbn`, or 201 with the created row. |
+| `PUT`  | `/api/books/:id` | Logged in | Update an existing book. ISBN follows the same validation, normalization, and active-record duplicate rules. Returns 404 `{ error: 'not_found' }` if no book with that id exists. Returns 403 if the book belongs to another user. |
 | `DELETE` | `/api/books/:id` | Logged in | Soft-delete a book (sets `deleted_at`). Returns 404/403 as above. |
 
 ### Web/PWA API endpoints (wishlist)
@@ -401,10 +401,21 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET`  | `/api/wishlist?since=<ISO>` | Logged in | Return all wishlist items (or items updated after `since`). |
-| `POST` | `/api/wishlist` | Logged in | Create a wishlist item. Body fields: `id?` (caller-supplied UUID; falls back to server-generated UUID — pass the local desktop id during migration to keep ids in sync), `title` (required), `author?`, `isbn?`, `publisher?`, `cover_key?`, `detail_url?`, `tags?`, `priority?`, `pending_buy?`, `added_at?` (ISO 8601; falls back to `datetime('now')`). Returns 201 with the created item row. |
-| `PUT`  | `/api/wishlist/:id` | Logged in | Update an existing wishlist item. Returns 404/403 as above. |
+| `POST` | `/api/wishlist` | Logged in | Create a wishlist item. ISBN is optional; when present it is checksum-validated, normalized to ISBN-13, and checked against active wishlist items. Returns 400/409 or 201. |
+| `PUT`  | `/api/wishlist/:id` | Logged in | Update an existing wishlist item. ISBN follows the same validation, normalization, and duplicate rules. Returns 404/403 as above. |
 | `DELETE` | `/api/wishlist/:id` | Logged in | Soft-delete a wishlist item. |
 | `POST` | `/api/wishlist/:id/move-to-inventory` | Logged in | Atomically delete a wishlist item and create a new book from it. Returns 201 `{ bookId, title }`. |
+
+### Web/PWA API endpoints (ISBN entry support)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/metadata/isbn` | Logged in | Body `{ isbn }`. Validates and normalizes ISBN, then attempts Douban ISBN search followed by OpenLibrary. Returns normalized metadata with `source`, or 404 `not_found`. |
+| `POST` | `/api/metadata/openlib` | Logged in | Body `{ isbn }`. Direct OpenLibrary metadata lookup for a valid ISBN. |
+| `POST` | `/api/metadata/douban` | Logged in | Body `{ url }`. Parse a validated Douban subject URL. |
+| `POST` | `/api/covers/import` | Logged in | Body `{ url }`. Import an HTTPS image from the OpenLibrary/Douban host allowlist, validate redirects/type/size, compress, and persist it to R2. |
+
+The PWA camera scanner uses `getUserMedia` in an HTTPS secure context. On browsers without native `BarcodeDetector` (including iOS Safari), it uses the bundled ZXing-WASM ponyfill. Single scan fills the form; Inventory batch scan serializes metadata lookup and writes while skipping duplicate ISBNs.
 
 All routes are prefixed `/api`. Routes outside `/api/auth/*` require a valid JWT (via httpOnly cookie for PWA, or `Authorization: Bearer <token>` for Electron).
 
@@ -471,4 +482,3 @@ interface InviteCode {
 | `POST /delete-entry?token=T` | token | receives `{ isbn }`, fires `companion:delete-entry` IPC and broadcasts `{ type:'delete-ack', isbn }` SSE |
 | `GET /vendor/*` | — | serves local static assets (e.g. `zxing-library.min.js`) |
 | `GET /ping` | — | health check, returns `{ alive: true }` |
-

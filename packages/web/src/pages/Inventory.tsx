@@ -554,6 +554,8 @@ export function Inventory() {
           <div className="px-4 pt-4">
             <AddFormCard
               mode="inventory"
+              existingIsbns={books.flatMap(book => book.isbn ? [book.isbn] : [])}
+              onBatchComplete={() => { loadFromCache(true) }}
               onSaved={(book: CachedBook) => { void handleSaved(book) }}
               onCancel={() => { setShowAdd(false) }}
             />
@@ -569,6 +571,7 @@ export function Inventory() {
                 initial={editBook}
                 initialStatus={statusForBook(editBook, stateMap)}
                 initialProfileId={activeProfileId}
+                existingIsbns={books.flatMap(book => book.isbn ? [book.isbn] : [])}
                 onSaved={(book: CachedBook) => { void handleSaved(book) }}
                 onCancel={() => setEditBook(null)}
               />

@@ -15,7 +15,7 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 
 ### 2.1 Inventory Management
 - **Add Book**: User manually enters ISBN or scans a barcode to fill ISBN when adding a book. The system attempts to fetch and fill metadata (title, author, cover, publisher) after an explicit user action (ISBN Fill or Douban Fill).
-- **ISBN Barcode Scan**: User opens the scan modal; the camera preview displays a live bounding-box overlay highlighting detected barcode candidates. On successful decode, a short audio beep plays and the modal closes automatically.
+- **ISBN Barcode Scan**: On macOS and the iOS PWA, the user can scan once to populate the add form or continuously scan books into Inventory. The camera preview displays a live bounding-box overlay; a successful decode plays a short beep. ISBN-10 and ISBN-13 are validated and normalized to ISBN-13 before lookup and persistence.
 - **ISBN Semantics**: Each book card displays the language/region derived from the ISBN registration group (e.g. "中文 · 中国大陆"). If the ISBN registrant prefix matches a known publisher, the publisher name is shown in italics as an inferred value (not persisted). Tapping the semantic label copies the raw ISBN to the clipboard.
 - **Reading Status**: Reading status (`unread` / `reading` / `read`) is **per-user** and stored independently of the book record. Each user maintains their own reading state for any shared book. Status is indicated by a colour-coded icon badge overlaid on the book cover (green checkmark = Read, yellow open-book = Reading, grey closed-book = Unread). Users without an explicit state for a book are treated as `unread` by default. When a book transitions to `read`, the completion date (`completedAt`) is automatically recorded as an ISO timestamp and displayed on the card as `✓ YYYY-MM-DD`. Transitioning away from `read` clears the completion date.
 - **Sort (Library)**: The Library page provides a sort control (icon button group, same row as the search bar) with four keys: Entry Date (`addedAt`, default desc), Completion Date (`completedAt`, desc; books without a date sort last), Title (asc), Author (asc). Clicking the active key toggles direction; clicking a new key switches to it at its default direction.
@@ -49,6 +49,7 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 - **FR-INV-13**: When a book's reading status transitions to `read`, the system SHALL record the current timestamp as `completedAt` in the `ReadingState` record and display it on the book card as `✓ YYYY-MM-DD`. Transitioning away from `read` SHALL clear `completedAt`.
 - **FR-INV-14**: The Library page SHALL provide a sort control with keys: Entry Date, Completion Date, Title, Author. The active sort key and direction SHALL be reflected visually on the control.
 - **FR-INV-15**: The Library compact view SHALL provide a column-count slider (range 8–20, default 8) in the toolbar row. The selected column count SHALL be persisted to `localStorage` and restored on next visit.
+- **FR-INV-16**: The iOS PWA SHALL support typed, pasted, single-camera-scan, and continuous-camera-scan ISBN entry. It SHALL validate checksums, normalize ISBN-10 to ISBN-13, reject active duplicates, and query Douban with an OpenLibrary fallback. Metadata lookup failure SHALL NOT prevent manual completion; continuous scanning MAY save an ISBN-only placeholder title when metadata is unavailable.
 - **FR-INV-17**: The Library page SHALL display a reading progress bar below the tag filter row. The bar SHALL span the full content width, be visually subtle (thin track), show a pulsing animation at all times, and display a `{read}/{total} 已读` label. Progress is computed from the currently filtered book set (respects active search, status, and tag filters). The bar SHALL only be visible when the library is non-empty.
 
 ### 3.2 Wishlist Module
@@ -58,6 +59,7 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 - **FR-WISH-04**: System SHALL allow adding and removing free-form text tags on each wishlist item; tags are persisted alongside the item.
 - **FR-WISH-05**: System SHALL provide a tag filter bar on the Wishlist page; selecting multiple tags filters items using AND logic (item must contain all selected tags).
 - **FR-WISH-06**: The Wishlist page SHALL provide a sort control with keys: Entry Date, Title, Author, Priority. The active sort key and direction SHALL be reflected visually on the control.
+- **FR-WISH-07**: Wishlist ISBN entry SHALL provide the same validation, normalization, duplicate detection, single-camera-scan, and metadata-fill behavior as Inventory manual entry; continuous scan is Inventory-only.
 
 ### 3.3 Price Comparison Module
 - **FR-PRICE-01**: System SHALL provide an interface to fetch prices for a given ISBN/Title.
@@ -74,6 +76,7 @@ The Book Management System (TomeKeep) is a desktop application designed to help 
 ### 4.1 Platform
 - **NFR-PLAT-01**: The application MUST run as a native macOS application (Electron).
 - **NFR-PLAT-02**: The UI MUST be responsive and touch-friendly (preparation for mobile).
+- **NFR-PLAT-03**: The iOS client MAY remain a PWA for ISBN entry. Camera scanning requires a secure HTTPS context, a user-granted camera permission, and a foreground page; native iOS background execution is not required for this workflow.
 
 ### 4.2 Data & Privacy
 - **NFR-DATA-01**: All data MUST be stored locally (SQLite/JSON).

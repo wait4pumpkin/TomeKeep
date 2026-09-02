@@ -30,8 +30,8 @@ Base path: `/api/books`
 |--------|------|:---:|---|
 | `GET` | `/api/books` | JWT | List all books for the authenticated user, ordered by `added_at DESC`. |
 | `GET` | `/api/books?since=<ISO>` | JWT | Incremental sync: return books with `updated_at > since`, ordered by `updated_at ASC`. Used by desktop sync. |
-| `POST` | `/api/books` | JWT | Create a book. Accepts caller-supplied `id` (pass desktop record id for identity-stable migration). Required: `title`. Optional: `author`, `isbn`, `publisher`, `cover_key`, `detail_url`, `tags[]`, `added_at`. Returns 201. |
-| `PUT` | `/api/books/:id` | JWT | Update an existing book. Partial update — only provided fields are changed. Returns 404 if not found, 403 if not owner. |
+| `POST` | `/api/books` | JWT | Create a book. Accepts caller-supplied `id`. Required: `title`. Optional ISBN is checksum-validated, normalized to ISBN-13, and must be unique among active books; invalid input returns 400 and a duplicate returns 409. Returns 201. |
+| `PUT` | `/api/books/:id` | JWT | Update an existing book. Partial update; ISBN uses the same normalization and duplicate rules as create. Returns 404 if not found, 403 if not owner. |
 | `DELETE` | `/api/books/:id` | JWT | Soft-delete a book (sets `deleted_at`, bumps `updated_at`). Soft deletes propagate via incremental sync. Returns 404/403 as above. |
 
 ---
@@ -44,8 +44,8 @@ Base path: `/api/wishlist`
 |--------|------|:---:|---|
 | `GET` | `/api/wishlist` | JWT | List all wishlist items for the authenticated user, ordered by `added_at DESC`. |
 | `GET` | `/api/wishlist?since=<ISO>` | JWT | Incremental sync: items with `updated_at > since`. |
-| `POST` | `/api/wishlist` | JWT | Create a wishlist item. Accepts caller-supplied `id`. Required: `title`. Optional: `author`, `isbn`, `publisher`, `cover_key`, `detail_url`, `tags[]`, `priority` (default: `medium`), `pending_buy` (0/1), `added_at`. Returns 201. |
-| `PUT` | `/api/wishlist/:id` | JWT | Update an existing wishlist item. Partial update. Returns 404/403 as above. |
+| `POST` | `/api/wishlist` | JWT | Create a wishlist item. Required: `title`. Optional ISBN is checksum-validated, normalized to ISBN-13, and must be unique among active wishlist items. Returns 201, or 400/409 for invalid/duplicate ISBN. |
+| `PUT` | `/api/wishlist/:id` | JWT | Update an existing wishlist item. Partial update; ISBN uses the same normalization and duplicate rules as create. Returns 404/403 as above. |
 | `DELETE` | `/api/wishlist/:id` | JWT | Soft-delete a wishlist item. |
 | `POST` | `/api/wishlist/:id/move-to-inventory` | JWT | **Atomic operation**: soft-deletes the wishlist item and inserts a new book record in a single D1 batch transaction. Returns 201 `{ bookId, title }`. |
 
@@ -84,6 +84,7 @@ Base path: `/api/covers`
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
 | `POST` | `/api/covers/upload` | JWT | Upload a cover image. Accepts `multipart/form-data` with `file` field. Image is compressed to WebP before storing in R2. Returns `{ coverKey }` where `coverKey` is the R2 object path (`covers/<owner_id>/<uuid>.webp`). Max size enforced. |
+| `POST` | `/api/covers/import` | JWT | Import a metadata-provider cover from an HTTPS URL. Only OpenLibrary and Douban image hosts are allowed; redirects, MIME type, and maximum size are validated before R2 persistence. Returns `{ coverKey }`. |
 | `GET` | `/api/covers/:key` | JWT | Serve a cover image. Validates ownership (key must belong to the authenticated user's books or wishlist). Returns a 302 redirect to a signed R2 URL (production) or streams directly (local dev). |
 
 ---
@@ -94,8 +95,9 @@ Base path: `/api/metadata`
 
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
-| `GET` | `/api/metadata/douban?isbn=<isbn>` | JWT | Proxy Douban book metadata lookup by ISBN. Returns normalized `BookMetadata`. |
-| `GET` | `/api/metadata/openlibrary?isbn=<isbn>` | JWT | Proxy OpenLibrary metadata lookup by ISBN. Returns normalized `BookMetadata`. |
+| `POST` | `/api/metadata/douban` | JWT | Parse a Douban subject URL. Body: `{ url }`. Returns normalized `BookMetadata`. |
+| `POST` | `/api/metadata/openlib` | JWT | Look up a checksum-valid ISBN through OpenLibrary. Body: `{ isbn }`. |
+| `POST` | `/api/metadata/isbn` | JWT | ISBN metadata waterfall for PWA entry: Douban ISBN search first, then OpenLibrary. Body: `{ isbn }`; returns 404 when neither source has a result. |
 
 ---
 

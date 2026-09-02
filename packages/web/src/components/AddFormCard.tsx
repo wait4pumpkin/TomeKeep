@@ -16,9 +16,19 @@
 
 import { useState, useRef } from 'react'
 import { useLang } from '../lib/i18n.tsx'
-import { api, coverUrl } from '../lib/api.ts'
-import { type CachedBook, type CachedWishlistItem, upsertCachedReadingStates } from '../lib/db-cache.ts'
-import { tagColor } from '@tomekeep/shared'
+import { api, ApiError, coverUrl } from '../lib/api.ts'
+import {
+  type CachedBook,
+  type CachedWishlistItem,
+  upsertCachedBooks,
+  upsertCachedReadingStates,
+} from '../lib/db-cache.ts'
+import {
+  canonicalizeIsbn,
+  mergeBookDraftWithMetadata,
+  tagColor,
+  type BookMetadata,
+} from '@tomekeep/shared'
 import { IsbnScanModal } from './IsbnScanModal.tsx'
 import { pushReadingState } from '../lib/sync.ts'
 
@@ -50,7 +60,11 @@ export interface AddFormCardProps {
   /** Active reading profile to write the status to (inventory edit mode only).
    *  null → account-level (legacy) row. Omitted → falls back to null. */
   initialProfileId?: string | null
+  /** Existing ISBN values in the current collection, used to prevent duplicates. */
+  existingIsbns?: string[]
   onSaved: (item: CachedBook & CachedWishlistItem) => void
+  /** Called after the queued batch scans have finished writing to the local cache. */
+  onBatchComplete?: () => void
   onCancel: () => void
 }
 
@@ -58,7 +72,7 @@ export interface AddFormCardProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function AddFormCard({ mode, initial, initialStatus, initialProfileId, onSaved, onCancel }: AddFormCardProps) {
+export function AddFormCard({ mode, initial, initialStatus, initialProfileId, existingIsbns = [], onSaved, onBatchComplete, onCancel }: AddFormCardProps) {
   const { t } = useLang()
 
   const isEdit = !!initial
@@ -79,9 +93,143 @@ export function AddFormCard({ mode, initial, initialStatus, initialProfileId, on
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [uploadingCover, setUploadingCover] = useState(false)
-  const [showScanner, setShowScanner] = useState(false)
+  const [scanMode, setScanMode] = useState<'single' | 'batch' | null>(null)
+  const [lookupState, setLookupState] = useState<'idle' | 'loading' | 'found' | 'not_found'>('idle')
+  const [batchResult, setBatchResult] = useState({ saved: 0, skipped: 0, failed: 0 })
 
   const coverInputRef = useRef<HTMLInputElement>(null)
+  const batchSeenRef = useRef(new Set<string>())
+  const batchQueueRef = useRef(Promise.resolve())
+
+  type MetadataResponse = BookMetadata & {
+    source: 'douban' | 'openlib'
+    detailUrl?: string
+  }
+
+  function isDuplicate(candidate: string): boolean {
+    const initialIsbn = canonicalizeIsbn(initial?.isbn ?? '')
+    return existingIsbns.some(raw => {
+      const existing = canonicalizeIsbn(raw)
+      return existing === candidate && existing !== initialIsbn
+    })
+  }
+
+  async function importMetadataCover(url?: string): Promise<string> {
+    if (!url) return ''
+    try {
+      const imported = await api.post<CoverUploadResponse>('/covers/import', { url })
+      return imported.coverKey
+    } catch {
+      return ''
+    }
+  }
+
+  async function fetchMetadata(isbn13: string): Promise<MetadataResponse | null> {
+    try {
+      return await api.post<MetadataResponse>('/metadata/isbn', { isbn: isbn13 })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null
+      throw err
+    }
+  }
+
+  async function handleIsbnLookup(raw = isbn) {
+    const isbn13 = canonicalizeIsbn(raw)
+    if (!isbn13) {
+      setError(t('isbn_invalid'))
+      setLookupState('idle')
+      return
+    }
+    setIsbn(isbn13)
+    if (isDuplicate(isbn13)) {
+      setError(t('isbn_duplicate'))
+      setLookupState('idle')
+      return
+    }
+
+    setError('')
+    setLookupState('loading')
+    try {
+      const metadata = await fetchMetadata(isbn13)
+      if (!metadata) {
+        setLookupState('not_found')
+        return
+      }
+      const merged = mergeBookDraftWithMetadata(
+        { title, author, publisher, isbn: isbn13 },
+        metadata,
+      )
+      setTitle(merged.title ?? '')
+      setAuthor(merged.author ?? '')
+      setPublisher(merged.publisher ?? '')
+      if (!detailUrl && metadata.detailUrl) setDetailUrl(metadata.detailUrl)
+      if (!coverKey && metadata.coverUrl) {
+        const importedKey = await importMetadataCover(metadata.coverUrl)
+        if (importedKey) setCoverKey(importedKey)
+      }
+      setLookupState('found')
+    } catch (err) {
+      setLookupState('not_found')
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function saveBatchIsbn(raw: string) {
+    const isbn13 = canonicalizeIsbn(raw)
+    if (!isbn13) {
+      setBatchResult(r => ({ ...r, failed: r.failed + 1 }))
+      return
+    }
+    if (isDuplicate(isbn13) || batchSeenRef.current.has(isbn13)) {
+      setBatchResult(r => ({ ...r, skipped: r.skipped + 1 }))
+      return
+    }
+
+    // Reserve the ISBN before awaiting network calls so rapid detections cannot
+    // enqueue the same book twice.
+    batchSeenRef.current.add(isbn13)
+    try {
+      const metadata = await fetchMetadata(isbn13)
+      const coverKeyFromMetadata = await importMetadataCover(metadata?.coverUrl)
+      const created = await api.post<CachedBook & CachedWishlistItem>('/books', {
+        title: metadata?.title?.trim() || isbn13,
+        author: metadata?.author?.trim() || '',
+        publisher: metadata?.publisher?.trim() || '',
+        isbn: isbn13,
+        cover_key: coverKeyFromMetadata,
+        detail_url: metadata?.detailUrl ?? '',
+        tags: [],
+      })
+      await upsertCachedBooks([created])
+      setBatchResult(r => ({ ...r, saved: r.saved + 1 }))
+    } catch (err) {
+      batchSeenRef.current.delete(isbn13)
+      if (err instanceof ApiError && err.status === 409) {
+        setBatchResult(r => ({ ...r, skipped: r.skipped + 1 }))
+      } else {
+        setBatchResult(r => ({ ...r, failed: r.failed + 1 }))
+      }
+    }
+  }
+
+  function handleBatchDetected(raw: string) {
+    batchQueueRef.current = batchQueueRef.current.then(() => saveBatchIsbn(raw))
+  }
+
+  function openBatchScanner() {
+    batchSeenRef.current = new Set()
+    batchQueueRef.current = Promise.resolve()
+    setBatchResult({ saved: 0, skipped: 0, failed: 0 })
+    setScanMode('batch')
+  }
+
+  function closeScanner() {
+    const wasBatch = scanMode === 'batch'
+    setScanMode(null)
+    if (wasBatch) {
+      void batchQueueRef.current.then(() => onBatchComplete?.())
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Cover upload
@@ -129,14 +277,25 @@ export function AddFormCard({ mode, initial, initialStatus, initialProfileId, on
       setError(t('form_title_placeholder'))
       return
     }
-    setSaving(true)
     setError('')
+
+    const isbn13 = isbn.trim() ? canonicalizeIsbn(isbn) : null
+    if (isbn.trim() && !isbn13) {
+      setError(t('isbn_invalid'))
+      return
+    }
+    if (isbn13 && isDuplicate(isbn13)) {
+      setError(t('isbn_duplicate'))
+      return
+    }
+
+    setSaving(true)
 
     const base: BookPayload = {
       title: title.trim(),
       author: author.trim(),
       publisher: publisher.trim(),
-      isbn: isbn.trim(),
+      isbn: isbn13 ?? '',
       cover_key: coverKey.trim(),
       detail_url: detailUrl.trim(),
       tags,
@@ -170,7 +329,9 @@ export function AddFormCard({ mode, initial, initialStatus, initialProfileId, on
 
       onSaved(result)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (err instanceof ApiError && err.status === 409) setError(t('isbn_duplicate'))
+      else if (err instanceof ApiError && err.message === 'invalid_isbn') setError(t('isbn_invalid'))
+      else setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
     }
@@ -245,19 +406,31 @@ export function AddFormCard({ mode, initial, initialStatus, initialProfileId, on
           </div>
         </div>
 
-        {/* ISBN + scan button */}
+        {/* ISBN lookup + scan actions */}
         <div className="flex gap-2">
           <input
             type="text"
             value={isbn}
-            onChange={e => setIsbn(e.target.value)}
+            onChange={e => {
+              setIsbn(e.target.value)
+              setLookupState('idle')
+              setError('')
+            }}
             placeholder="ISBN"
             inputMode="numeric"
-            className="flex-1 px-2.5 py-1.5 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="min-w-0 flex-1 px-2.5 py-1.5 text-base rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
             type="button"
-            onClick={() => setShowScanner(true)}
+            onClick={() => { void handleIsbnLookup() }}
+            disabled={!isbn.trim() || lookupState === 'loading'}
+            className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 disabled:opacity-40 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+          >
+            {lookupState === 'loading' ? t('isbn_lookup_loading') : t('isbn_lookup')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setScanMode('single')}
             title={t('scan_isbn')}
             className="flex-shrink-0 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
           >
@@ -266,7 +439,29 @@ export function AddFormCard({ mode, initial, initialStatus, initialProfileId, on
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 18.75h.75v.75h-.75v-.75ZM18.75 13.5h.75v.75h-.75v-.75ZM18.75 18.75h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
             </svg>
           </button>
+          {mode === 'inventory' && !isEdit && (
+            <button
+              type="button"
+              onClick={openBatchScanner}
+              title={t('scan_batch')}
+              className="flex-shrink-0 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+            >
+              {t('scan_batch_short')}
+            </button>
+          )}
         </div>
+
+        {lookupState === 'found' && (
+          <p className="text-xs text-green-600 dark:text-green-400">{t('isbn_lookup_found')}</p>
+        )}
+        {lookupState === 'not_found' && !error && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">{t('isbn_lookup_not_found')}</p>
+        )}
+        {(batchResult.saved > 0 || batchResult.skipped > 0 || batchResult.failed > 0) && (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {t('isbn_batch_result', batchResult)}
+          </p>
+        )}
 
         {/* Detail URL */}
         <input
@@ -368,10 +563,13 @@ export function AddFormCard({ mode, initial, initialStatus, initialProfileId, on
 
       {/* ISBN barcode scanner modal */}
       <IsbnScanModal
-        isOpen={showScanner}
-        onClose={() => setShowScanner(false)}
-        onDetected={raw => setIsbn(raw)}
-        mode="single"
+        isOpen={scanMode !== null}
+        onClose={closeScanner}
+        onDetected={raw => {
+          if (scanMode === 'batch') handleBatchDetected(raw)
+          else void handleIsbnLookup(raw)
+        }}
+        mode={scanMode ?? 'single'}
       />
     </div>
   )

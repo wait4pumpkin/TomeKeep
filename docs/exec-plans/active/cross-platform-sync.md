@@ -384,6 +384,7 @@ CREATE INDEX idx_price_isbn ON price_cache(book_isbn);
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/covers/upload` | 上传封面（multipart/form-data），压缩为 WebP 后存入 R2 |
+| POST | `/api/covers/import` | 从受信任的豆瓣/OpenLibrary HTTPS 图片地址导入封面，校验跳转、类型和大小后存入 R2 |
 | GET  | `/api/covers/:key` | 获取封面（验证归属 → 生成签名 URL → 302 重定向） |
 
 **上传流程**：
@@ -400,6 +401,7 @@ CREATE INDEX idx_price_isbn ON price_cache(book_isbn);
 |------|------|------|
 | POST | `/api/metadata/douban` | 代理豆瓣页面，复用 `@tomekeep/shared/douban` 解析逻辑 |
 | POST | `/api/metadata/openlib` | OpenLibrary 查询 |
+| POST | `/api/metadata/isbn` | ISBN 统一查询：校验并规范化后按豆瓣 → OpenLibrary 降级 |
 
 **豆瓣代理请求体**：`{ "url": "https://book.douban.com/subject/12345/" }`
 
@@ -740,6 +742,8 @@ POST /api/metadata/douban             [客户端] tesseract.js OCR
 | 4.4 | 实现离线写操作队列（IndexedDB pending queue + 重放） |
 | 4.5 | 覆盖 Background Sync 兼容处理（iOS 降级到 visibilitychange） |
 
+**2026-09-02 实施状态**：4.1 已完成。PWA 支持手输/粘贴、单次摄像头扫描、书库连续扫描；ISBN-10/13 统一为 ISBN-13，并在客户端与 API 两层做有效性及重复校验。单扫会查询元数据并回填表单，连续扫描会串行查询、导入受信任来源封面并直接入库。iOS Safari 通过 HTTPS `getUserMedia` + 本地 ZXing-WASM 工作，不依赖原生 App。4.2、4.3、4.4、4.5 仍按原计划待完成，其中离线写入队列不属于本次在线录入闭环。
+
 **验收标准**：海报图 QR 码识别可正确获取元数据；ISBN 扫码在 iOS Safari 中正常工作；离线写操作在联网后自动同步。
 
 ### 总时间线
@@ -810,6 +814,7 @@ npx wrangler d1 migrations apply tomekeep-db
 | 豆瓣反爬封禁后端代理 | 元数据获取失败 | 自动降级到 OpenLibrary；客户端 OCR 备选路径 |
 | Cloudflare D1/R2 免费层变更 | 可能产生费用 | 当前用量远低于额度；可迁移到自建 PocketBase |
 | iOS PWA 存储被系统清除 | 缓存丢失 | 核心数据在 D1，本地仅为缓存，重新同步即可恢复 |
+| 部分 iOS 版本的主屏幕 PWA 不持久保存摄像头授权 | 冷启动后可能再次弹出权限请求 | 每次打开扫描器前进行能力检测并提供明确权限提示；若该交互不可接受再评估原生壳 |
 | Workers CPU 时间（免费层 10ms） | 图片压缩可能超时 | 客户端预处理限制尺寸；超时降级不压缩直接存储 |
 | 桌面端与 PWA 端时钟不同步 | LWW 冲突解决错误 | 使用服务端 `updated_at`（D1 datetime('now')）作为权威时间戳 |
 

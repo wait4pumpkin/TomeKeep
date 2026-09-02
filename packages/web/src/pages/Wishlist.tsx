@@ -498,6 +498,7 @@ export function Wishlist() {
             <AddFormCard
               mode="wishlist"
               initial={editItem ?? undefined}
+              existingIsbns={items.flatMap(item => item.isbn ? [item.isbn] : [])}
               onSaved={(item: CachedWishlistItem) => { void handleSaved(item) }}
               onCancel={() => { setShowAdd(false); setEditItem(null) }}
             />

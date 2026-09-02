@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { convertIsbn10ToIsbn13, isValidIsbn10, isValidIsbn13, normalizeIsbn, parseIsbnSemantics } from './isbn'
+import {
+  canonicalizeIsbn,
+  convertIsbn10ToIsbn13,
+  isSameIsbn,
+  isValidIsbn10,
+  isValidIsbn13,
+  normalizeIsbn,
+  parseIsbnSemantics,
+} from './isbn'
 
 describe('isbn', () => {
   it('validates ISBN-13 checksum', () => {
@@ -30,6 +38,18 @@ describe('isbn', () => {
 
   it('converts ISBN-10 to ISBN-13 for lookup', () => {
     expect(convertIsbn10ToIsbn13('316148410X')).toBe('9783161484100')
+  })
+
+  it('canonicalizes scanner and pasted input to ISBN-13', () => {
+    expect(canonicalizeIsbn('ISBN 978-3-16-148410-0')).toBe('9783161484100')
+    expect(canonicalizeIsbn('316-148410-X')).toBe('9783161484100')
+    expect(canonicalizeIsbn('9783161484101')).toBeNull()
+  })
+
+  it('compares ISBN-10 and ISBN-13 as the same book', () => {
+    expect(isSameIsbn('316148410X', '978-3-16-148410-0')).toBe(true)
+    expect(isSameIsbn('316148410X', '9780306406157')).toBe(false)
+    expect(isSameIsbn('not an isbn', 'not an isbn')).toBe(false)
   })
 })
 

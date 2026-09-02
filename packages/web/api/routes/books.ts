@@ -6,6 +6,7 @@ import type { HonoEnv } from '../lib/types.ts'
 import { authMiddleware } from '../middleware/auth.ts'
 import { dbAll, dbFirst, dbRun } from '../lib/db.ts'
 import { r2Delete } from '../lib/r2.ts'
+import { canonicalizeIsbn } from '@tomekeep/shared'
 
 const books = new Hono<HonoEnv>()
 books.use('*', authMiddleware)
@@ -71,6 +72,17 @@ books.post('/', async (c) => {
 
   if (!body.title) return c.json({ error: 'title_required' }, 400)
 
+  const isbn = body.isbn?.trim() ? canonicalizeIsbn(body.isbn) : null
+  if (body.isbn?.trim() && !isbn) return c.json({ error: 'invalid_isbn' }, 400)
+  if (isbn) {
+    const duplicate = await dbFirst<{ id: string }>(
+      c.env.DB,
+      'SELECT id FROM books WHERE owner_id = ? AND isbn = ? AND deleted_at IS NULL LIMIT 1',
+      sub, isbn,
+    )
+    if (duplicate) return c.json({ error: 'duplicate_isbn', id: duplicate.id }, 409)
+  }
+
   // Accept a caller-supplied id (e.g. from desktop migration) so the local
   // and cloud records share the same identifier. Fall back to a new UUID when
   // no id is provided (e.g. from the PWA).
@@ -81,7 +93,7 @@ books.post('/', async (c) => {
     c.env.DB,
     `INSERT INTO books (id, owner_id, title, author, isbn, publisher, cover_key, detail_url, tags, added_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
-    id, sub, body.title, body.author ?? '', body.isbn ?? null,
+    id, sub, body.title, body.author ?? '', isbn,
     body.publisher ?? null, body.cover_key ?? null, body.detail_url ?? null, tags,
     body.added_at ?? null,
   )
@@ -115,9 +127,20 @@ books.put('/:id', async (c) => {
   const fields: string[] = []
   const values: unknown[] = []
 
+  const isbn = body.isbn?.trim() ? canonicalizeIsbn(body.isbn) : null
+  if (body.isbn?.trim() && !isbn) return c.json({ error: 'invalid_isbn' }, 400)
+  if (body.isbn !== undefined && isbn) {
+    const duplicate = await dbFirst<{ id: string }>(
+      c.env.DB,
+      'SELECT id FROM books WHERE owner_id = ? AND isbn = ? AND id != ? AND deleted_at IS NULL LIMIT 1',
+      sub, isbn, id,
+    )
+    if (duplicate) return c.json({ error: 'duplicate_isbn', id: duplicate.id }, 409)
+  }
+
   if (body.title !== undefined) { fields.push('title = ?'); values.push(body.title) }
   if (body.author !== undefined) { fields.push('author = ?'); values.push(body.author) }
-  if (body.isbn !== undefined) { fields.push('isbn = ?'); values.push(body.isbn) }
+  if (body.isbn !== undefined) { fields.push('isbn = ?'); values.push(isbn) }
   if (body.publisher !== undefined) { fields.push('publisher = ?'); values.push(body.publisher) }
   if (body.cover_key !== undefined) { fields.push('cover_key = ?'); values.push(body.cover_key) }
   if (body.detail_url !== undefined) { fields.push('detail_url = ?'); values.push(body.detail_url) }

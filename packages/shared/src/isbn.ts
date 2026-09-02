@@ -40,6 +40,22 @@ export function toIsbn13(value: NormalizedIsbn): string | null {
   return convertIsbn10ToIsbn13(value.normalized)
 }
 
+/**
+ * Normalize arbitrary user/scanner input to a canonical ISBN-13 string.
+ * Returns null for empty input, non-ISBN text, or a checksum failure.
+ */
+export function canonicalizeIsbn(raw: string): string | null {
+  const normalized = normalizeIsbn(raw)
+  return normalized.ok ? toIsbn13(normalized.value) : null
+}
+
+/** Compare two ISBN inputs after ISBN-10 → ISBN-13 normalization. */
+export function isSameIsbn(left: string, right: string): boolean {
+  const a = canonicalizeIsbn(left)
+  const b = canonicalizeIsbn(right)
+  return a !== null && b !== null && a === b
+}
+
 export function isValidIsbn13(isbn13: string): boolean {
   if (!/^\d{13}$/.test(isbn13)) return false
   const digits = isbn13.split('').map(d => Number(d))

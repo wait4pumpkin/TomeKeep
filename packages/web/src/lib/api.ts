@@ -111,5 +111,9 @@ export const api = {
 const COVERS_CDN = 'https://covers.cbbnews.top'
 
 export function coverUrl(key: string): string {
+  if (import.meta.env.DEV) {
+    const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+    return `${BASE}/covers/${encodedKey}`
+  }
   return `${COVERS_CDN}/${key}`
 }
