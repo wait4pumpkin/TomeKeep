@@ -60,7 +60,7 @@ review_cycle_days: 14
 - 自动同步协调器版本已重新签名、覆盖安装并在 iPhone 13 Pro 启动；应用数据容器 UUID 保持不变。启动同步后只读导出的 SwiftData 主库通过 `integrity_check`，仍包含 366 本藏书、219 项愿望、2 个档案、269 条阅读状态、25 条价格缓存和 585 张封面，三类可写同步记录的 pending 数均为 0。
 - iOS 愿望单新增表单已与书库统一为中/大两档原生 Sheet，并移除仅适合 macOS 的 480 pt 最小宽度；书库、愿望单和设置的 iOS 一级标题统一为紧凑显示，减少顶部空白。原生双端新增剪贴板导入，识别豆瓣详情 URL、ISBN 与书名；macOS 保留新增时自动解析豆瓣 URL，iOS 根据系统粘贴隐私采用明确点击后读取。
 - iOS 书库与愿望单顶部信息层级继续收敛：一级标题改用更清晰的 `title3 semibold`，常驻搜索栏替换为左上角搜索按钮；点击后在标签条上方展开 38 pt 紧凑搜索框，关闭时清空隐藏筛选并完整归还列表空间。展开/收起支持连续反向操作，并在“减少动态效果”下使用淡入淡出。
-- 原生双端多端同步能力复核完成：iOS/macOS 共用同一 `NativeSyncEngine`，在启动、前台、登录、本地变更和手动操作时重放 SwiftData pending 数据；默认生产 API 在线，但完整原生协议仍需随本地服务端改动和 0004—0007 D1 迁移正式发布。参考 bushbaby 加入两台已配对 iPhone 的统一签名/覆盖安装脚本，以及 launchd 到期前 48 小时自动重签和多时段重试；后台构建使用 Application Support 私有快照，避免 Documents 权限阻塞。
+- 原生双端多端同步能力复核完成：iOS/macOS 共用同一 `NativeSyncEngine`，在启动、前台、登录、本地变更和手动操作时重放 SwiftData pending 数据。提交 `3533a1c` 触发的 GitHub Actions 已成功应用生产 D1 0004—0007 并发布 Pages；线上 PWA/health 为 200，原生 `price-cache` 已由 404 变为正确的未认证 401。参考 bushbaby 加入两台已配对 iPhone 的统一签名/覆盖安装脚本，以及 launchd 到期前 48 小时自动重签和多时段重试；后台构建使用 Application Support 私有快照，避免 Documents 权限阻塞。
 - 双机真实部署已使用同一签名构建覆盖安装到 iPhone 16 Pro 与 iPhone 13 Pro，两个既有数据容器均保持不变。Xcode Accounts 重新登录后，强制刷新已生成有效至 2026-10-10 18:38（Asia/Shanghai）的双设备描述文件并更新 launchd 私有快照，自动续签链路闭环。
 - 原生客户端继续采用离线优先启动：钥匙串已有 TomeKeep Token 时直接恢复并自动同步，没有 Token 时只写入本机。为避免状态歧义，iOS/macOS 主界面新增持续可见的“未登录：数据仅保存在本机”提示及设置入口；401 会清除失效 Token 并回到该状态。Xcode/Apple ID 登录不参与业务数据同步。
 

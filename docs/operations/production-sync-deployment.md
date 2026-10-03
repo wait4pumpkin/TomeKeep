@@ -14,9 +14,9 @@ iOS 和 macOS 共用 `NativeSyncEngine`。登录同一账户后，两端都会�
 
 客户端不会在启动时强制展示登录页。钥匙串中已有 TomeKeep Bearer Token 时会直接恢复并同步；没有 Token 时只使用本机 SwiftData，主界面显示“未登录：数据仅保存在本机”并提供设置入口。Xcode Accounts 登录仅用于开发签名，与 TomeKeep 云账户无关。
 
-默认 API 为 `https://tomekeep.pages.dev/api/`。2026-10-03 的只读探测确认 `/api/health` 返回 HTTP 200，未认证的 `/api/auth/me` 与 `/api/sync/status` 正确返回 HTTP 401；但原生价格同步所需 `/api/price-cache` 返回 HTTP 404。
+默认 API 为 `https://tomekeep.pages.dev/api/`。2026-10-03，提交 `3533a1c` 触发的 [GitHub Actions 第 24 次部署](https://github.com/wait4pumpkin/TomeKeep/actions/runs/37117354224) 已成功完成 Web 构建、生产 D1 `0004`—`0007` 迁移和 Cloudflare Pages 发布。发布后的只读冒烟检查确认：PWA 首页和 `/api/health` 返回 HTTP 200，未认证的 `/api/auth/me`、`/api/books` 与原生 `/api/price-cache` 均正确返回 HTTP 401；后者在发布前为 HTTP 404。
 
-因此线上当前只能视为“旧版核心同步服务存在”，不能视为完整原生协议已发布。原生客户端依赖的稳定分页、档案 tombstone、价格缓存同步和安全加固仍包含尚未进入远端 `main` 的代码与 `0004`—`0007` D1 迁移。完整多端同步验收前必须发布最新服务端。
+这表示完整原生同步协议已经部署。生产账号的双端最终一致性仍需在 iOS 与 macOS 分别登录同一个 TomeKeep 账户后进行有认证验收；未登录设备保持纯本机模式。
 
 ## 发布门禁
 
