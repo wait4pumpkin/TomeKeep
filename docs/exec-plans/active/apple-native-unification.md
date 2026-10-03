@@ -339,6 +339,7 @@ Electron 导入器必须：
 - macOS 可访问性驱动巡检：通过浅色/深色、愿望单双视图、作者与方向排序、⌘1–⌘4 导航及新建多窗口。启用本机 Developer Mode 后，签名 XCTest UI runner 也已通过迁移书库摘要、愿望单、封面网格、阅读档案与快捷键自动化。
 - 本轮旧版体验对齐后的 macOS 实机巡检：通过完成日期年/月分组、标签选中/未选中语义、80 pt 固定侧栏、仅含档案选择的用户弹窗，以及深色切回跟随系统后整窗恢复系统浅色；旧版 1024×1024 图标与原生 AppIcon 源文件 SHA-1 一致。更新后的 UI 测试源码可构建，但两次 XCTest 运行均在用例执行前因系统 automation mode 初始化超时退出；该环境问题未覆盖上述可访问性驱动巡检结果。
 - `xcodebuild ... -scheme TomeKeepIOS -destination 'generic/platform=iOS Simulator' ... build`：通过。
+- iOS 正式认证页视觉复审：登录页已改用真实 App Icon，删除解释性副标题，将服务地址降级到次级 Sheet；注册页移除“账户”分组和一次性邀请码说明。`swift test` 49 项通过，iPhone 17 模拟器构建及登录/注册页截图巡检通过。
 - `xcodebuild ... -scheme TomeKeepIOS -destination 'id=<device>' ... build`：通过；development provisioning profile 自动生成，USB 真机安装成功。
 - 远程 iOS 模拟器启动 `com.tomekeep.app.nativepreview`：通过；关键中文文案可由辅助功能读取。
 - 隔离 SQLite 依次应用 0001—0004：通过；两个重复默认状态归并为最新一条，随后 upsert 行数保持 1。本地 D1 已继续应用 0005 档案 tombstone。

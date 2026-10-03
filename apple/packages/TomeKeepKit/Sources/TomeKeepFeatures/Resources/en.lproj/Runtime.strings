@@ -382,3 +382,7 @@
 "正在登录…" = "Signing In…";
 "高级设置" = "Advanced Settings";
 "正式服务已预设；仅本地开发时需要修改。" = "The production service is preconfigured; change this only for local development.";
+"创建账户" = "Create Account";
+"服务设置" = "Service Settings";
+"正在注册…" = "Registering…";
+"创建并登录" = "Create Account and Sign In";

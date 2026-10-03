@@ -4480,6 +4480,100 @@ private struct PriceHistoryView: View {
     }
 }
 
+private struct AppBrandIcon: View {
+    let size: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.accentColor.gradient)
+            Image(systemName: "books.vertical.fill")
+                .font(.system(size: size * 0.46, weight: .medium))
+                .foregroundStyle(.white)
+            Image("AppIcon")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+        }
+        .frame(width: size, height: size)
+        .clipShape(.rect(cornerRadius: cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .stroke(.white.opacity(0.22), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AuthenticationFieldRow<Content: View>: View {
+    let symbol: String
+    let content: Content
+
+    init(symbol: String, @ViewBuilder content: () -> Content) {
+        self.symbol = symbol
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            content
+                .textFieldStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 52)
+    }
+}
+
+private struct ServiceConfigurationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var apiBaseURL: String
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 10) {
+                AuthenticationFieldRow(symbol: "network") {
+                    TextField(tkLocalized("API 地址"), text: $apiBaseURL)
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+#endif
+                }
+                .background(.background, in: .rect(cornerRadius: 14))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.secondary.opacity(0.22), lineWidth: 0.5)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(Color.primary.opacity(0.025))
+            .navigationTitle(Text(verbatim: tkLocalized("服务设置")))
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(tkLocalized("完成")) { dismiss() }
+                }
+            }
+        }
+#if os(iOS)
+        .presentationDetents([.height(190)])
+        .presentationDragIndicator(.visible)
+#elseif os(macOS)
+        .frame(width: 440, height: 180)
+#endif
+    }
+}
+
 private struct AuthenticationGateView: View {
     @Environment(NativeSyncCoordinator.self) private var syncCoordinator
     @AppStorage("tomekeep.apiBaseURL") private var apiBaseURL = "https://tomekeep.pages.dev/api/"
@@ -4488,101 +4582,109 @@ private struct AuthenticationGateView: View {
     @State private var isWorking = false
     @State private var errorMessage: String?
     @State private var isRegistering = false
-    @State private var showsAdvancedSettings = false
+    @State private var isShowingServiceSettings = false
     var body: some View {
-        ScrollView {
-            VStack(spacing: 22) {
-                VStack(spacing: 10) {
-                    Image(systemName: "books.vertical.fill")
-                        .font(.system(size: 46, weight: .medium))
+        ZStack(alignment: .topTrailing) {
+            ScrollView {
+                VStack(spacing: 28) {
+                    VStack(spacing: 14) {
+                        AppBrandIcon(size: 82, cornerRadius: 19)
+                        Text("TomeKeep")
+                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                    }
+
+                    VStack(spacing: 16) {
+                        VStack(spacing: 0) {
+                            AuthenticationFieldRow(symbol: "person") {
+                                TextField(tkLocalized("用户名"), text: $username)
+#if os(iOS)
+                                    .textInputAutocapitalization(.never)
+                                    .textContentType(.username)
+                                    .autocorrectionDisabled()
+#endif
+                            }
+                            Divider().padding(.leading, 48)
+                            AuthenticationFieldRow(symbol: "lock") {
+                                SecureField(tkLocalized("密码"), text: $password)
+#if os(iOS)
+                                    .textContentType(.password)
+                                    .submitLabel(.go)
+#endif
+                                    .onSubmit { submitLogin() }
+                            }
+                        }
+                        .background(.background, in: .rect(cornerRadius: 14))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.secondary.opacity(0.22), lineWidth: 0.5)
+                        }
+
+                        if let errorMessage {
+                            Label {
+                                Text(verbatim: errorMessage)
+                            } icon: {
+                                Image(systemName: "exclamationmark.circle.fill")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
+                        Button {
+                            submitLogin()
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isWorking { ProgressView().controlSize(.small) }
+                                Text(verbatim: tkLocalized(isWorking ? "正在登录…" : "登录"))
+                            }
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(!canSubmit)
+
+                        Button(tkLocalized("创建账户")) {
+                            isRegistering = true
+                        }
+                        .buttonStyle(.plain)
                         .foregroundStyle(Color.accentColor)
-                        .accessibilityHidden(true)
-                    Text("TomeKeep")
-                        .font(.largeTitle.weight(.bold))
-                    Text(verbatim: tkLocalized("登录后使用书库，并在设备间自动同步。"))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                        .disabled(isWorking || validatedBaseURL == nil)
+                    }
+                    .frame(maxWidth: 360)
                 }
-
-                VStack(spacing: 14) {
-                    TextField(tkLocalized("用户名"), text: $username)
-#if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .textContentType(.username)
-                        .autocorrectionDisabled()
-#endif
-                    SecureField(tkLocalized("密码"), text: $password)
-#if os(iOS)
-                        .textContentType(.password)
-                        .submitLabel(.go)
-#endif
-                        .onSubmit { submitLogin() }
-
-                    if let errorMessage {
-                        Label {
-                            Text(verbatim: errorMessage)
-                        } icon: {
-                            Image(systemName: "exclamationmark.circle")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Button {
-                        submitLogin()
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isWorking { ProgressView().controlSize(.small) }
-                            Text(verbatim: tkLocalized(isWorking ? "正在登录…" : "登录"))
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(!canSubmit)
-
-                    Button(tkLocalized("使用邀请码注册")) {
-                        isRegistering = true
-                    }
-                    .disabled(isWorking || validatedBaseURL == nil)
-
-                    DisclosureGroup(
-                        tkLocalized("高级设置"),
-                        isExpanded: $showsAdvancedSettings
-                    ) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField(tkLocalized("API 地址"), text: $apiBaseURL)
-#if os(iOS)
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.URL)
-                                .autocorrectionDisabled()
-#endif
-                            Text(verbatim: tkLocalized("正式服务已预设；仅本地开发时需要修改。"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 8)
-                    }
-                    .font(.callout)
-                }
-                .textFieldStyle(.roundedBorder)
-                .padding(22)
-                .background(.regularMaterial, in: .rect(cornerRadius: 18))
+                .padding(.horizontal, 26)
+                .padding(.top, 72)
+                .padding(.bottom, 40)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: 390)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 48)
-            .frame(maxWidth: .infinity)
+
+            Button {
+                isShowingServiceSettings = true
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 36, height: 36)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .background(.thinMaterial, in: .circle)
+            .padding(18)
+            .help(Text(verbatim: tkLocalized("服务设置")))
+            .accessibilityLabel(Text(verbatim: tkLocalized("服务设置")))
         }
-        .background(Color.accentColor.opacity(0.035))
+        .background(Color.primary.opacity(0.025))
         .sheet(isPresented: $isRegistering) {
             if let baseURL = validatedBaseURL {
                 RegistrationView(baseURL: baseURL) { user in
                     completeAuthentication(user)
                 }
             }
+        }
+        .sheet(isPresented: $isShowingServiceSettings) {
+            ServiceConfigurationView(apiBaseURL: $apiBaseURL)
         }
     }
 
@@ -4982,43 +5084,99 @@ private struct RegistrationView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("账户") {
-                    TextField("用户名", text: $username)
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 12) {
+                        AppBrandIcon(size: 62, cornerRadius: 15)
+                        Text(verbatim: tkLocalized("创建账户"))
+                            .font(.title2.weight(.bold))
+                    }
+
+                    VStack(spacing: 0) {
+                        AuthenticationFieldRow(symbol: "person") {
+                            TextField(tkLocalized("用户名"), text: $username)
 #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .textContentType(.username)
+                                .autocorrectionDisabled()
 #endif
-                    TextField("显示名称", text: $displayName)
-                    SecureField("密码（至少 8 位）", text: $password)
-                    TextField("邀请码", text: $inviteCode)
+                        }
+                        Divider().padding(.leading, 48)
+                        AuthenticationFieldRow(symbol: "textformat") {
+                            TextField(tkLocalized("显示名称"), text: $displayName)
 #if os(iOS)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
+                                .textContentType(.name)
 #endif
-                }
-                Section {
-                    Text("邀请码只能使用一次；注册成功后会直接登录，并将会话保存在系统钥匙串中。")
+                        }
+                        Divider().padding(.leading, 48)
+                        AuthenticationFieldRow(symbol: "lock") {
+                            SecureField(tkLocalized("密码（至少 8 位）"), text: $password)
+#if os(iOS)
+                                .textContentType(.newPassword)
+#endif
+                        }
+                        Divider().padding(.leading, 48)
+                        AuthenticationFieldRow(symbol: "ticket") {
+                            TextField(tkLocalized("邀请码"), text: $inviteCode)
+#if os(iOS)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                                .submitLabel(.go)
+#endif
+                                .onSubmit { submitRegistration() }
+                        }
+                    }
+                    .background(.background, in: .rect(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.secondary.opacity(0.22), lineWidth: 0.5)
+                    }
+
+                    if let message {
+                        Label {
+                            Text(verbatim: message)
+                        } icon: {
+                            Image(systemName: "exclamationmark.circle.fill")
+                        }
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    Button {
+                        submitRegistration()
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isWorking { ProgressView().controlSize(.small) }
+                            Text(verbatim: tkLocalized(isWorking ? "正在注册…" : "创建并登录"))
+                        }
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity, minHeight: 28)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canSubmit || isWorking)
                 }
-                if let message {
-                    Section { Text(message).foregroundStyle(.red) }
-                }
+                .frame(maxWidth: 380)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 36)
+                .frame(maxWidth: .infinity)
             }
-            .formStyle(.grouped)
-            .navigationTitle("注册 TomeKeep")
+            .background(Color.primary.opacity(0.025))
+            .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("注册") { Task { await register() } }
-                        .disabled(!canSubmit || isWorking)
-                }
             }
-            .overlay { if isWorking { ProgressView() } }
         }
+        .interactiveDismissDisabled(isWorking)
+#if os(iOS)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+#endif
 #if os(macOS)
-        .frame(minWidth: 460, minHeight: 430)
+        .frame(minWidth: 480, minHeight: 560)
 #endif
     }
 
@@ -5027,6 +5185,11 @@ private struct RegistrationView: View {
         !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         password.count >= 8 &&
         !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func submitRegistration() {
+        guard canSubmit, !isWorking else { return }
+        Task { await register() }
     }
 
     @MainActor
