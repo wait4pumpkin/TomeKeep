@@ -1,5 +1,10 @@
 "%@ · %@" = "%1$@ · %2$@";
 "%@ · %lld 个标签" = "%1$@ · %2$lld tags";
+"%lld 个标签" = "%lld tags";
+"切换阅读档案" = "Switch Reading Profile";
+"同步失败" = "Sync Failed";
+"同步中" = "Syncing";
+"同步空闲" = "Sync Idle";
 "%@ 验证后仍无法自动采价，可使用“比价”窗口手工保存。" = "Automatic capture from %@ still failed after verification. Save it manually in the price comparison window.";
 "%@，%@，%@" = "%1$@, %2$@, %3$@";
 "%lld" = "%lld";

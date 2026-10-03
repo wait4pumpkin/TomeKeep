@@ -15,6 +15,8 @@ import Testing
     #expect(tkLocalized("稳定 ID、幂等导入、SHA-256 校验、逐记录报告", locale: english) == "Stable IDs, idempotent import, SHA-256 validation, and per-record reporting")
     #expect(tkLocalized("没有符合筛选条件的书籍", locale: english) == "No Books Match These Filters")
     #expect(tkLocalized("设置", locale: english) == "Settings")
+    #expect(tkLocalized("切换阅读档案", locale: english) == "Switch Reading Profile")
+    #expect(tkLocalized("同步中", locale: english) == "Syncing")
 
     let template = tkLocalized("同步完成：接收 %lld 条，发送 %lld 条。", locale: english)
     #expect(String(format: template, locale: english, arguments: [3, 2]) == "Sync complete: received 3 and sent 2.")

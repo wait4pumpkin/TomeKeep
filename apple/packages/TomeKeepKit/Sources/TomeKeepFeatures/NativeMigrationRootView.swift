@@ -690,15 +690,26 @@ private struct TagFilterBar: View {
                     }
                 } label: {
                     Text(tag)
+#if os(iOS)
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+#else
                         .font(.caption.weight(.medium))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
+#endif
                         .foregroundStyle(selected ? Color.white : Color.secondary)
                         .background(selected ? color : Color.clear, in: .capsule)
                         .overlay {
                             Capsule().stroke(selected ? color : Color.primary.opacity(0.16), lineWidth: 1)
                         }
+#if os(iOS)
+                        .frame(minHeight: 44)
+                        .contentShape(.rect)
+#else
                         .contentShape(.capsule)
+#endif
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("tag.filter.\(tag)")
@@ -714,6 +725,7 @@ private struct TagFilterBar: View {
                 .help("清除标签筛选")
             }
             Spacer(minLength: 0)
+#if os(macOS)
             if let compactColumns {
                 Slider(
                     value: Binding(
@@ -728,6 +740,7 @@ private struct TagFilterBar: View {
                 .accessibilityLabel("每行封面数量")
                 .accessibilityValue("\(compactColumns.wrappedValue)")
             }
+#endif
         }
     }
 }
@@ -1032,13 +1045,14 @@ private struct LibraryView: View {
     @AppStorage("native.library.selectedTags") private var storedSelectedTags = ""
     @State private var activeProfile: UserProfile?
     @State private var readingStates: [String: ReadingState] = [:]
-    @State private var progressPulse = false
     @State private var coverPreview: CoverPreviewRoute?
     @State private var expandedCompactBookID: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 #if os(iOS)
     @State private var isPresentingContinuousScanner = false
     @State private var isSearchPresented = false
+    @State private var isTagsPresented = false
+    @State private var isTopControlsCompact = false
 #endif
 
     let platform: TomeKeepPlatform
@@ -1055,37 +1069,7 @@ private struct LibraryView: View {
         }
 #else
         let navigationBase = libraryContent.navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(isSearchPresented ? "关闭搜索" : "搜索", systemImage: isSearchPresented ? "xmark" : "magnifyingglass") {
-                        toggleSearch()
-                    }
-                    .accessibilityIdentifier("library.search.toggle")
-                }
-                ToolbarItem { librarySortMenu }
-                ToolbarItem {
-                    Button {
-                        displayMode = displayMode == .covers ? .details : .covers
-                    } label: {
-                        Label(
-                            displayMode == .covers ? "切换到详细视图" : "切换到封面视图",
-                            systemImage: displayMode == .covers ? "rectangle.grid.1x2" : "square.grid.2x2"
-                        )
-                    }
-                    .accessibilityIdentifier("library.display.toggle")
-                }
-                ToolbarItem {
-                    Button("连续扫描", systemImage: "barcode.viewfinder") {
-                        isPresentingContinuousScanner = true
-                    }
-                    .accessibilityIdentifier("library.scan.toolbar")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("添加书籍", systemImage: "plus") { presentAdd() }
-                        .accessibilityIdentifier("library.add.toolbar")
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
 #endif
         let navigation = navigationBase.safeAreaInset(edge: .bottom) {
             libraryProgress
@@ -1136,7 +1120,6 @@ private struct LibraryView: View {
         let lifecycle = presentations.task {
             selectedTags = decodeStoredTags(storedSelectedTags)
             reload()
-            progressPulse = !reduceMotion
         }
         .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.syncCompleted)) { _ in
             reload()
@@ -1166,12 +1149,13 @@ private struct LibraryView: View {
             libraryControlBar
                 .zIndex(10)
 #else
+            iosLibraryControlBar
             if isSearchPresented {
                 IOSInlineSearchField(text: $searchText, prompt: tkLocalized("标题、作者或 ISBN"))
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
 #endif
-            if !allTags.isEmpty {
+            if !allTags.isEmpty && showsTagFilters {
                 TagFilterBar(
                     tags: allTags,
                     selection: $selectedTags,
@@ -1221,34 +1205,38 @@ private struct LibraryView: View {
                 if displayMode == .covers {
                     ScrollView {
                         LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 96, maximum: 132), spacing: 14)],
+                            columns: [GridItem(.adaptive(minimum: 96, maximum: 132), spacing: 10)],
                             alignment: .leading,
-                            spacing: 18
+                            spacing: 12
                         ) {
                             ForEach(filteredBooks) { book in
                                 IOSCompactBookCard(book: book) { presentEdit(book) }
                                     .contextMenu { iosBookContextMenu(book) }
                             }
                         }
-                        .padding(16)
+                        .padding(12)
                     }
                     .refreshable { reload() }
+                    .modifier(IOSScrollDensityObserver(isCompact: $isTopControlsCompact))
                 } else {
                     List {
                         if let sections = iosGroupedBookSections {
                             ForEach(sections) { section in
-                                Section {
-                                    ForEach(section.books) { book in iosBookRow(book) }
-                                } header: {
-                                    iosSectionLabel(section)
-                                }
+                                iosSectionLabel(section)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                                    .listRowSeparator(.hidden)
+                                ForEach(section.books) { book in iosBookRow(book) }
                             }
                         } else {
                             ForEach(filteredBooks) { book in iosBookRow(book) }
                         }
                     }
-                    .listStyle(.inset)
+                    .listStyle(.plain)
+                    .environment(\.defaultMinListRowHeight, 0)
                     .refreshable { reload() }
+                    .modifier(IOSScrollDensityObserver(isCompact: $isTopControlsCompact))
                 }
 #endif
             }
@@ -1290,11 +1278,52 @@ private struct LibraryView: View {
                         }
                     }
         } label: {
+#if os(iOS)
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+                .accessibilityLabel(tkLocalized("筛选与排序"))
+#else
             Label("筛选与排序", systemImage: selectedTags.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+#endif
         }
     }
 
+    private var showsTagFilters: Bool {
 #if os(iOS)
+        isTagsPresented
+#else
+        true
+#endif
+    }
+
+#if os(iOS)
+    private var iosLibraryControlBar: some View {
+        HStack(spacing: 0) {
+            IOSLibraryControlButton(title: tkLocalized(isSearchPresented ? "关闭搜索" : "搜索"), symbol: "magnifyingglass", selected: isSearchPresented, action: toggleSearch)
+                .accessibilityIdentifier("library.search.toggle")
+            IOSLibraryControlButton(title: tkLocalized("标签筛选"), symbol: "tag", selected: isTagsPresented || !selectedTags.isEmpty, count: selectedTags.count) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { isTagsPresented.toggle() }
+            }
+            Spacer(minLength: 0)
+            librarySortMenu
+            IOSLibraryControlButton(title: tkLocalized(displayMode == .covers ? "切换到详细视图" : "切换到封面视图"), symbol: displayMode == .covers ? "rectangle.grid.1x2" : "square.grid.2x2") {
+                displayMode = displayMode == .covers ? .details : .covers
+            }
+            .accessibilityIdentifier("library.display.toggle")
+            IOSLibraryControlButton(title: tkLocalized("连续扫描"), symbol: "barcode.viewfinder") { isPresentingContinuousScanner = true }
+                .accessibilityIdentifier("library.scan.toolbar")
+            IOSLibraryControlButton(title: tkLocalized("添加书籍"), symbol: "plus", action: presentAdd)
+                .accessibilityIdentifier("library.add.toolbar")
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, isTopControlsCompact ? 0 : 8)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
     private func toggleSearch() {
         if isSearchPresented { searchText = "" }
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.22)) {
@@ -1407,18 +1436,20 @@ private struct LibraryView: View {
                 VStack(spacing: 7) {
                     ProgressView(value: readingProgress)
                         .tint(.accentColor)
-                        .opacity(progressPulse ? 0.72 : 1)
-                        .animation(
-                            reduceMotion ? nil : .easeInOut(duration: 1.6).repeatForever(autoreverses: true),
-                            value: progressPulse
-                        )
                         .accessibilityLabel("阅读进度")
                         .accessibilityValue("\(readCount) / \(filteredBooks.count) 已读")
                     HStack(spacing: 6) {
+                        SyncActivityIndicator()
                         Text("\(readCount)/\(filteredBooks.count) 已读")
-                        Text("· 本机书库 \(books.count) 本")
-                        if let activeProfile { Text("· \(activeProfile.name)") }
                         if !selectedTags.isEmpty { Text("· \(selectedTags.count) 个标签") }
+                        Spacer(minLength: 4)
+                        if let activeProfile {
+#if os(iOS)
+                            ReadingProfileMenu(activeProfile: activeProfile)
+#else
+                            Text(activeProfile.name)
+#endif
+                        }
                     }
                 }
                 .font(.caption)
@@ -1427,7 +1458,7 @@ private struct LibraryView: View {
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity)
                 .background(.bar)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("library.summary")
         }
     }
@@ -1639,6 +1670,7 @@ private struct LibraryView: View {
         }
         .buttonStyle(.plain)
         .contextMenu { iosBookContextMenu(book) }
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
                 cycleReadingStatus(for: book)
@@ -2484,34 +2516,31 @@ private struct BookRow: View {
     let readingState: ReadingState?
 
     var body: some View {
-        HStack(spacing: TomeKeepTheme.contentSpacing) {
+        HStack(spacing: 12) {
             TomeKeepBookCover(fileURL: localCoverURL)
-                .frame(width: 52, height: 78)
+                .frame(width: 46, height: 69)
                 .overlay(alignment: .bottomTrailing) {
                     ReadingStatusBadge(status: readingState?.status ?? .unread, compact: true)
                         .offset(x: 5, y: 5)
                 }
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(book.title)
                     .font(.headline)
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .lineLimit(1)
                 if !book.author.isEmpty {
                     Text(book.author)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 HStack(spacing: 8) {
                     if let isbn = book.isbn {
                         Button {
                             copyToPasteboard(isbn)
                         } label: {
-                            if let semantics = ISBN(isbn)?.semantics {
-                                Label("\(tkLocalized(semantics.language)) · \(tkLocalized(semantics.region))", systemImage: "barcode")
-                            } else {
-                                Label(isbn, systemImage: "barcode")
-                            }
+                            Text(isbn)
                         }
                         .buttonStyle(.plain)
                         .help("复制 ISBN \(isbn)")
@@ -2535,7 +2564,7 @@ private struct BookRow: View {
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 2)
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
         .accessibilityHint("打开编辑表单")
@@ -2556,7 +2585,7 @@ private struct IOSCompactBookCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 5) {
                 TomeKeepBookCover(fileURL: localCoverURL)
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .clipShape(.rect(cornerRadius: 7))
@@ -2564,7 +2593,7 @@ private struct IOSCompactBookCard: View {
                 Text(book.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .multilineTextAlignment(.leading)
                 if !book.author.isEmpty {
                     Text(book.author)
@@ -2625,6 +2654,8 @@ private struct WishlistView: View {
     @State private var recentlyDeletedItem: WishlistItem?
 #if os(iOS)
     @State private var isSearchPresented = false
+    @State private var isTagsPresented = false
+    @State private var isTopControlsCompact = false
 #endif
 #if os(macOS)
     @State private var expandedCompactItemID: String?
@@ -2654,36 +2685,15 @@ private struct WishlistView: View {
                 }
             }
 #else
-        let navigationBase = wishlistContent
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(isSearchPresented ? "关闭搜索" : "搜索", systemImage: isSearchPresented ? "xmark" : "magnifyingglass") {
-                        toggleSearch()
-                    }
-                    .accessibilityIdentifier("wishlist.search.toggle")
-                }
-                ToolbarItem { wishlistSortMenu }
-                ToolbarItem {
-                    Button {
-                        displayMode = displayMode == .covers ? .details : .covers
-                    } label: {
-                        Label(
-                            displayMode == .covers ? "切换到详细视图" : "切换到封面视图",
-                            systemImage: displayMode == .covers ? "rectangle.grid.1x2" : "square.grid.2x2"
-                        )
-                    }
-                    .accessibilityIdentifier("wishlist.display.toggle")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("添加愿望", systemImage: "plus") { presentAdd() }
-                }
-            }
+        let navigationBase = wishlistContent.navigationTitle("")
+            .toolbar(.hidden, for: .navigationBar)
 #endif
         let navigation = navigationBase.safeAreaInset(edge: .bottom) {
             if !items.isEmpty {
-                Text("共 \(items.count) 项 · \(items.filter(\.pendingBuy).count) 项待购买")
+                HStack(spacing: 6) {
+                    SyncActivityIndicator()
+                    Text("共 \(items.count) 项 · \(items.filter(\.pendingBuy).count) 项待购买")
+                }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
@@ -2809,12 +2819,13 @@ private struct WishlistView: View {
             wishlistControlBar
                 .zIndex(10)
 #else
+            iosWishlistControlBar
             if isSearchPresented {
                 IOSInlineSearchField(text: $searchText, prompt: tkLocalized("书名、作者或 ISBN"))
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
 #endif
-            if !allTags.isEmpty || !items.isEmpty {
+            if !allTags.isEmpty && showsTagFilters {
                 TagFilterBar(
                     tags: allTags,
                     selection: $selectedTags,
@@ -2858,9 +2869,9 @@ private struct WishlistView: View {
                 if displayMode == .covers {
                     ScrollView {
                         LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 96, maximum: 132), spacing: 14)],
+                            columns: [GridItem(.adaptive(minimum: 96, maximum: 132), spacing: 10)],
                             alignment: .leading,
-                            spacing: 18
+                            spacing: 12
                         ) {
                             ForEach(filteredItems) { item in
                                 IOSCompactWishlistCard(item: item, coverURL: localCoverURL(item.coverFileName)) {
@@ -2869,9 +2880,10 @@ private struct WishlistView: View {
                                 .contextMenu { wishlistContextMenu(for: item) }
                             }
                         }
-                        .padding(16)
+                        .padding(12)
                     }
                     .refreshable { reload() }
+                    .modifier(IOSScrollDensityObserver(isCompact: $isTopControlsCompact))
                 } else {
                     wishlistList
                 }
@@ -2913,14 +2925,52 @@ private struct WishlistView: View {
                         }
                     }
         } label: {
+#if os(iOS)
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+                .accessibilityLabel(tkLocalized("筛选与排序"))
+#else
             Label(
                 selectedTags.isEmpty ? sort.label : tkLocalizedFormat("%@ · %lld 个标签", sort.label, selectedTags.count),
                 systemImage: "line.3.horizontal.decrease.circle"
             )
+#endif
         }
     }
 
+    private var showsTagFilters: Bool {
 #if os(iOS)
+        isTagsPresented
+#else
+        true
+#endif
+    }
+
+#if os(iOS)
+    private var iosWishlistControlBar: some View {
+        HStack(spacing: 0) {
+            IOSLibraryControlButton(title: tkLocalized(isSearchPresented ? "关闭搜索" : "搜索"), symbol: "magnifyingglass", selected: isSearchPresented, action: toggleSearch)
+                .accessibilityIdentifier("wishlist.search.toggle")
+            IOSLibraryControlButton(title: tkLocalized("标签筛选"), symbol: "tag", selected: isTagsPresented || !selectedTags.isEmpty, count: selectedTags.count) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { isTagsPresented.toggle() }
+            }
+            Spacer(minLength: 0)
+            wishlistSortMenu
+            IOSLibraryControlButton(title: tkLocalized(displayMode == .covers ? "切换到详细视图" : "切换到封面视图"), symbol: displayMode == .covers ? "rectangle.grid.1x2" : "square.grid.2x2") {
+                displayMode = displayMode == .covers ? .details : .covers
+            }
+            .accessibilityIdentifier("wishlist.display.toggle")
+            IOSLibraryControlButton(title: tkLocalized("添加愿望"), symbol: "plus", action: presentAdd)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, isTopControlsCompact ? 0 : 8)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
     private func toggleSearch() {
         if isSearchPresented { searchText = "" }
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.22)) {
@@ -3016,13 +3066,15 @@ private struct WishlistView: View {
 
     private var wishlistList: some View {
         List(filteredItems) { item in
-                    HStack(spacing: 14) {
+                    HStack(spacing: 12) {
                         TomeKeepBookCover(fileURL: localCoverURL(item.coverFileName))
                             .frame(width: 44, height: 66)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title).font(.headline)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.title).font(.headline).lineLimit(1)
                             Text(item.author.isEmpty ? tkLocalized("未知作者") : item.author)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
                             HStack(spacing: 8) {
                                 Label(tkLocalized(item.priority.label), systemImage: item.priority.symbol)
                                 if item.pendingBuy { Label("待购买", systemImage: "cart") }
@@ -3043,13 +3095,14 @@ private struct WishlistView: View {
                             .buttonStyle(.bordered)
 #endif
                     }
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 2)
                     .contentShape(.rect)
                     .onTapGesture { presentEdit(item) }
                     .contextMenu {
                         wishlistContextMenu(for: item)
                     }
 #if os(iOS)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         Button {
                             togglePendingBuy(item)
@@ -3065,8 +3118,12 @@ private struct WishlistView: View {
                     }
 #endif
                 }
-                .listStyle(.inset)
+                .listStyle(.plain)
+                .environment(\.defaultMinListRowHeight, 0)
                 .refreshable { reload() }
+#if os(iOS)
+                .modifier(IOSScrollDensityObserver(isCompact: $isTopControlsCompact))
+#endif
     }
 
     @ViewBuilder
@@ -3521,7 +3578,7 @@ private struct IOSCompactWishlistCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 5) {
                 ZStack(alignment: .topTrailing) {
                     TomeKeepBookCover(fileURL: coverURL)
                         .aspectRatio(2.0 / 3.0, contentMode: .fit)
@@ -3540,7 +3597,7 @@ private struct IOSCompactWishlistCard: View {
                 Text(item.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .multilineTextAlignment(.leading)
                 HStack(spacing: 4) {
                     Image(systemName: item.priority.symbol)

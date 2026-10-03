@@ -3,6 +3,16 @@ import Testing
 import TomeKeepDomain
 @testable import TomeKeepFeatures
 
+@Test func compactControlsUseSeparateCollapseAndRestoreThresholds() {
+    #expect(!compactTopControls(scrollOffset: 0, wasCompact: false))
+    #expect(!compactTopControls(scrollOffset: 80, wasCompact: false))
+    #expect(compactTopControls(scrollOffset: 81, wasCompact: false))
+    #expect(compactTopControls(scrollOffset: 64, wasCompact: true))
+    #expect(compactTopControls(scrollOffset: 17, wasCompact: true))
+    #expect(!compactTopControls(scrollOffset: 16, wasCompact: true))
+    #expect(!compactTopControls(scrollOffset: -20, wasCompact: true))
+}
+
 @Test func dateSectionsSeparateMonthsAndRepeatYearsOnlyWhenNeeded() throws {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
