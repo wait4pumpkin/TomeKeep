@@ -4485,17 +4485,7 @@ private struct AppBrandIcon: View {
     let cornerRadius: CGFloat
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.accentColor.gradient)
-            Image(systemName: "books.vertical.fill")
-                .font(.system(size: size * 0.46, weight: .medium))
-                .foregroundStyle(.white)
-            Image("AppIcon")
-                .resizable()
-                .interpolation(.high)
-                .scaledToFill()
-        }
+        applicationIcon
         .frame(width: size, height: size)
         .clipShape(.rect(cornerRadius: cornerRadius))
         .overlay {
@@ -4505,6 +4495,47 @@ private struct AppBrandIcon: View {
         .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
         .accessibilityHidden(true)
     }
+
+    @ViewBuilder
+    private var applicationIcon: some View {
+#if os(iOS)
+        if let icon = Self.iOSApplicationIcon {
+            Image(uiImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+        } else {
+            fallbackIcon
+        }
+#elseif os(macOS)
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+#endif
+    }
+
+    private var fallbackIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.accentColor.gradient)
+            Image(systemName: "books.vertical.fill")
+                .font(.system(size: size * 0.46, weight: .medium))
+                .foregroundStyle(.white)
+        }
+    }
+
+#if os(iOS)
+    private static var iOSApplicationIcon: UIImage? {
+        guard
+            let icons = Bundle.main.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any],
+            let primaryIcon = icons["CFBundlePrimaryIcon"] as? [String: Any],
+            let filenames = primaryIcon["CFBundleIconFiles"] as? [String]
+        else { return nil }
+
+        return filenames.reversed().lazy.compactMap { UIImage(named: $0) }.first
+    }
+#endif
 }
 
 private struct AuthenticationFieldRow<Content: View>: View {
@@ -4645,7 +4676,7 @@ private struct AuthenticationGateView: View {
                         .controlSize(.large)
                         .disabled(!canSubmit)
 
-                        Button(tkLocalized("创建账户")) {
+                        Button(tkLocalized("注册")) {
                             isRegistering = true
                         }
                         .buttonStyle(.plain)
@@ -5076,7 +5107,6 @@ private struct RegistrationView: View {
     let didRegister: (AuthUser) -> Void
 
     @State private var username = ""
-    @State private var displayName = ""
     @State private var password = ""
     @State private var inviteCode = ""
     @State private var isWorking = false
@@ -5088,7 +5118,7 @@ private struct RegistrationView: View {
                 VStack(spacing: 24) {
                     VStack(spacing: 12) {
                         AppBrandIcon(size: 62, cornerRadius: 15)
-                        Text(verbatim: tkLocalized("创建账户"))
+                        Text(verbatim: tkLocalized("注册"))
                             .font(.title2.weight(.bold))
                     }
 
@@ -5099,13 +5129,6 @@ private struct RegistrationView: View {
                                 .textInputAutocapitalization(.never)
                                 .textContentType(.username)
                                 .autocorrectionDisabled()
-#endif
-                        }
-                        Divider().padding(.leading, 48)
-                        AuthenticationFieldRow(symbol: "textformat") {
-                            TextField(tkLocalized("显示名称"), text: $displayName)
-#if os(iOS)
-                                .textContentType(.name)
 #endif
                         }
                         Divider().padding(.leading, 48)
@@ -5149,7 +5172,7 @@ private struct RegistrationView: View {
                     } label: {
                         HStack(spacing: 8) {
                             if isWorking { ProgressView().controlSize(.small) }
-                            Text(verbatim: tkLocalized(isWorking ? "正在注册…" : "创建并登录"))
+                            Text(verbatim: tkLocalized(isWorking ? "正在注册…" : "注册"))
                         }
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity, minHeight: 28)
@@ -5182,7 +5205,6 @@ private struct RegistrationView: View {
 
     private var canSubmit: Bool {
         username.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
-        !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         password.count >= 8 &&
         !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -5201,7 +5223,7 @@ private struct RegistrationView: View {
             let user = try await AuthenticationService(baseURL: baseURL).register(
                 username: username.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password,
-                name: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+                name: username.trimmingCharacters(in: .whitespacesAndNewlines),
                 inviteCode: inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             didRegister(user)
