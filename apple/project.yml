@@ -1,0 +1,134 @@
+name: TomeKeep
+
+options:
+  minimumXcodeGenVersion: 2.42.0
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.1.0
+
+packages:
+  TomeKeepKit:
+    path: packages/TomeKeepKit
+
+targets:
+  TomeKeepIOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: apps/ios
+      - path: assets
+      - path: localization
+        buildPhase: resources
+    dependencies:
+      - package: TomeKeepKit
+        product: TomeKeepFeatures
+      - package: TomeKeepKit
+        product: TomeKeepPersistence
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tomekeep.app.nativepreview
+        PRODUCT_NAME: TomeKeep Next
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: TomeKeep Next
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.books
+        INFOPLIST_KEY_NSCameraUsageDescription: TomeKeep uses the camera only when you choose to scan an ISBN barcode.
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+
+  TomeKeepMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: apps/macos
+      - path: assets
+      - path: localization
+        buildPhase: resources
+    dependencies:
+      - package: TomeKeepKit
+        product: TomeKeepFeatures
+      - package: TomeKeepKit
+        product: TomeKeepPersistence
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tomekeep.app.nativepreview.macos
+        PRODUCT_NAME: TomeKeep Next
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: TomeKeep Next
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.books
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+        CODE_SIGN_ENTITLEMENTS: apps/macos/TomeKeepMac.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+
+  TomeKeepCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: tests/core
+    dependencies:
+      - target: TomeKeepIOS
+      - package: TomeKeepKit
+        product: TomeKeepDomain
+      - package: TomeKeepKit
+        product: TomeKeepMetadata
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tomekeep.tests.core
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TomeKeep Next.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TomeKeep Next"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+  TomeKeepMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: tests/macos-ui
+    dependencies:
+      - target: TomeKeepMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tomekeep.tests.macos-ui
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: TomeKeepMac
+
+schemes:
+  TomeKeepIOS:
+    build:
+      targets:
+        TomeKeepIOS: all
+        TomeKeepCoreTests: [test]
+    test:
+      targets:
+        - TomeKeepCoreTests
+  TomeKeepMac:
+    build:
+      targets:
+        TomeKeepMac: all
+    run:
+      config: Debug
+    test:
+      targets:
+        - TomeKeepMacUITests

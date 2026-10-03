@@ -1,5 +1,11 @@
 # Product Spec: Book Management & Price Comparison
 
+> **Platform evolution (2026-09-23):** Existing requirements remain the
+> behavioral migration baseline. The target clients are native SwiftUI apps for
+> macOS and iOS; see `apple-native-clients.md`. References to Electron or the
+> iOS PWA describe the currently shipping implementation until migration is
+> accepted, not the final platform architecture.
+
 ## 1. Introduction
 
 ### 1.1 Purpose

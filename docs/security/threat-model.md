@@ -19,6 +19,8 @@ review_cycle_days: 30
 - API to internal services
 - service to third-party providers
 - operator/admin access paths
+- native app to third-party metadata sites
+- legacy Electron data directory to native migration importer
 
 ## Key Risks
 - privilege escalation
@@ -28,6 +30,9 @@ review_cycle_days: 30
 - insecure direct object references
 - unintended camera access or excessive camera capture
 - third-party metadata provider outage or unexpected response
+- cross-user object access through sync or cover identifiers
+- malicious legacy data or cover files during local migration
+- token theft from native client storage
 
 ## Security Controls
 - authentication
@@ -45,6 +50,15 @@ review_cycle_days: 30
   - for URL-based lookups, enforce strict allowlist and fetch canonical provider URLs only
   - enforce request timeouts and handle failures without blocking core flows
   - do not log ISBN or provider responses
+- native client controls:
+  - store API credentials in Keychain and website cookies in an app-specific persistent WebKit data store
+  - do not use the TomeKeep service as a metadata or cover-fetch proxy for native clients
+  - use durable idempotency identifiers for replayed sync writes
+- migration controls:
+  - treat legacy JSON, paths, URLs, and images as untrusted input
+  - read but never mutate the legacy Electron data directory
+  - validate paths remain within the selected legacy directory
+  - import inside a transaction and emit a verification manifest
 
 ## Review Triggers
 Review this document when:

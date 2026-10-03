@@ -10,6 +10,7 @@
     "dev:wrangler": "CI=true wrangler pages dev --compatibility-date=2024-09-23 --ip 0.0.0.0 --port 8788",
     "build": "vite build",
     "preview": "wrangler pages dev --compatibility-date=2024-09-23 dist",
+    "test": "vitest run api",
     "typecheck": "tsc --noEmit",
     "deploy": "vite build && wrangler pages deploy dist"
   },
@@ -32,6 +33,7 @@
     "typescript": "~5.9.3",
     "vite": "^6.4.1",
     "vite-plugin-pwa": "^0.21.1",
+    "vitest": "^3.2.4",
     "wrangler": "4.59.0"
   }
 }

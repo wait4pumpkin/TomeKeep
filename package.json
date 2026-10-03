@@ -8,7 +8,7 @@
     "dev:web": "pnpm --filter @tomekeep/web dev",
     "dev:full": "npx concurrently -n desktop,web -c cyan,green \"pnpm --filter @tomekeep/desktop dev\" \"pnpm --filter @tomekeep/web dev\"",
     "build": "pnpm --filter @tomekeep/desktop build",
-    "test": "pnpm --filter @tomekeep/desktop test && pnpm --filter @tomekeep/shared test",
+    "test": "pnpm --filter @tomekeep/desktop test && pnpm --filter @tomekeep/shared test && pnpm --filter @tomekeep/web test",
     "lint": "pnpm -r lint",
     "electron:build": "pnpm --filter @tomekeep/desktop electron:build",
     "migrate:cloud": "tsx scripts/migrate-local-to-cloud.ts"

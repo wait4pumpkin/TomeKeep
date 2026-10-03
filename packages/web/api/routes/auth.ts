@@ -92,18 +92,40 @@ auth.post('/register', async (c) => {
   const id = crypto.randomUUID()
   const passwordHash = await hashPassword(password)
 
-  await dbRun(
-    c.env.DB,
-    'INSERT INTO users (id, username, password_hash, name) VALUES (?, ?, ?, ?)',
-    id, username, passwordHash, name,
-  )
+  // D1 batches are transactional. The conditional INSERT makes consuming an
+  // invitation a compare-and-set operation: a concurrent registration that
+  // loses the race inserts no user and therefore cannot receive a token.
+  let registrationResults
+  try {
+    registrationResults = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO users (id, username, password_hash, name)
+         SELECT ?, ?, ?, ?
+         FROM invite_codes
+         WHERE code = ? AND used_by IS NULL`,
+      ).bind(id, username, passwordHash, name, inviteCode),
+      c.env.DB.prepare(
+        `UPDATE invite_codes
+         SET used_by = ?, used_at = datetime('now')
+         WHERE code = ? AND used_by IS NULL
+           AND EXISTS (SELECT 1 FROM users WHERE id = ?)`,
+      ).bind(id, inviteCode, id),
+    ])
+  } catch {
+    // The preflight uniqueness check gives the common path a stable error;
+    // this second check also covers a concurrent registration of the name.
+    const conflictingUser = await dbFirst(
+      c.env.DB,
+      'SELECT id FROM users WHERE username = ?',
+      username,
+    )
+    if (conflictingUser) return c.json({ error: 'username_taken' }, 409)
+    return c.json({ error: 'registration_failed' }, 500)
+  }
 
-  // Mark invite code as used
-  await dbRun(
-    c.env.DB,
-    "UPDATE invite_codes SET used_by = ?, used_at = datetime('now') WHERE code = ?",
-    id, inviteCode,
-  )
+  if ((registrationResults[0].meta.changes ?? 0) !== 1) {
+    return c.json({ error: 'invite_code_used' }, 400)
+  }
 
   const token = await signJwt({ sub: id, username }, c.env.JWT_SECRET)
   const isProd = Boolean(c.env.CF_PAGES)

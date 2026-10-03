@@ -391,7 +391,7 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET`  | `/api/books?since=<ISO>` | Logged in | Return all books (or books updated after `since`). |
+| `GET`  | `/api/books?since=<ISO>` | Logged in | Legacy array response containing books updated at or after the inclusive cursor. Native clients add `page_size` (max 500) and receive `{ items, next_cursor }`; continue with `page_updated_at` and `page_after`. |
 | `POST` | `/api/books` | Logged in | Create a book. ISBN is optional; when present it is checksum-validated, normalized to ISBN-13, and checked against the owner's active books. Returns 400 `invalid_isbn`, 409 `duplicate_isbn`, or 201 with the created row. |
 | `PUT`  | `/api/books/:id` | Logged in | Update an existing book. ISBN follows the same validation, normalization, and active-record duplicate rules. Returns 404 `{ error: 'not_found' }` if no book with that id exists. Returns 403 if the book belongs to another user. |
 | `DELETE` | `/api/books/:id` | Logged in | Soft-delete a book (sets `deleted_at`). Returns 404/403 as above. |
@@ -400,7 +400,7 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET`  | `/api/wishlist?since=<ISO>` | Logged in | Return all wishlist items (or items updated after `since`). |
+| `GET`  | `/api/wishlist?since=<ISO>` | Logged in | Legacy array response containing wishlist items at or after the inclusive cursor. Native pagination uses `page_size`, `page_updated_at`, and `page_after`. |
 | `POST` | `/api/wishlist` | Logged in | Create a wishlist item. ISBN is optional; when present it is checksum-validated, normalized to ISBN-13, and checked against active wishlist items. Returns 400/409 or 201. |
 | `PUT`  | `/api/wishlist/:id` | Logged in | Update an existing wishlist item. ISBN follows the same validation, normalization, and duplicate rules. Returns 404/403 as above. |
 | `DELETE` | `/api/wishlist/:id` | Logged in | Soft-delete a wishlist item. |
@@ -411,9 +411,26 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `POST` | `/api/metadata/isbn` | Logged in | Body `{ isbn }`. Validates and normalizes ISBN, then attempts Douban ISBN search followed by OpenLibrary. Returns normalized metadata with `source`, or 404 `not_found`. |
-| `POST` | `/api/metadata/openlib` | Logged in | Body `{ isbn }`. Direct OpenLibrary metadata lookup for a valid ISBN. |
-| `POST` | `/api/metadata/douban` | Logged in | Body `{ url }`. Parse a validated Douban subject URL. |
 | `POST` | `/api/covers/import` | Logged in | Body `{ url }`. Import an HTTPS image from the OpenLibrary/Douban host allowlist, validate redirects/type/size, compress, and persist it to R2. |
+| `POST` | `/api/covers/upload` | Logged in | Multipart field `file`, maximum 2 MiB. JPEG/PNG/GIF/WebP is identified from magic bytes rather than the caller-controlled MIME header. Returns `{ coverKey }`. |
+| `GET` | `/api/covers/:key` | Logged in | Return or redirect to a cover after verifying that the key belongs to the authenticated account. |
+
+### Profile endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/profiles` | Logged in | Return active profiles only; this remains the PWA-compatible default. |
+| `GET` | `/api/profiles?include_deleted=1` | Logged in | Native sync view including `deleted_at` tombstones. |
+| `POST` | `/api/profiles` | Logged in | Idempotently create/update a profile and clear an older tombstone. Maximum five active profiles per account. |
+| `PATCH` | `/api/profiles/:id` | Logged in | Rename an owned profile and clear an older tombstone. |
+| `DELETE` | `/api/profiles/:id` | Logged in | Atomically soft-delete a profile and delete its reading states. Refuses the last active profile with 422 `last_profile`. |
+
+### Native price-cache endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/price-cache?page_size=250` | Logged in | Owner-scoped paginated quote rows. Continue with `page_updated_at` and `page_after`; iOS only reads the merged result. |
+| `PUT` | `/api/price-cache` | Logged in | macOS upserts one channel quote. IDs are derived from owner/cache key/channel, URLs must be HTTPS, and `updated_at` uses a server-side LWW guard. |
 
 The PWA camera scanner uses `getUserMedia` in an HTTPS secure context. On browsers without native `BarcodeDetector` (including iOS Safari), it uses the bundled ZXing-WASM ponyfill. Single scan fills the form; Inventory batch scan serializes metadata lookup and writes while skipping duplicate ISBNs.
 

@@ -6,7 +6,7 @@ import type { HonoEnv } from '../lib/types.ts'
 import { authMiddleware } from '../middleware/auth.ts'
 import { dbFirst } from '../lib/db.ts'
 import { r2Put, r2PutTmp, r2Delete } from '../lib/r2.ts'
-import { compressToWebP, MAX_BYTES } from '../lib/image.ts'
+import { compressToWebP, detectedImageMime, MAX_BYTES } from '../lib/image.ts'
 
 const covers = new Hono<HonoEnv>()
 covers.use('*', authMiddleware)
@@ -106,8 +106,9 @@ covers.post('/upload', async (c) => {
     return c.json({ error: 'file_too_large', maxBytes: MAX_BYTES }, 413)
   }
 
-  const originalMime = blob.type || 'image/jpeg'
   const originalData = await blob.arrayBuffer()
+  const originalMime = detectedImageMime(originalData)
+  if (!originalMime) return c.json({ error: 'invalid_cover_type' }, 415)
 
   const coverKey = await persistCover(c.env, sub, originalData, originalMime)
 
@@ -130,9 +131,6 @@ covers.post('/import', async (c) => {
     return c.json({ error: 'cover_fetch_failed' }, 422)
   }
 
-  const mime = (res.headers.get('Content-Type') ?? '').split(';')[0].trim().toLowerCase()
-  if (!mime.startsWith('image/')) return c.json({ error: 'invalid_cover_type' }, 422)
-
   const declaredSize = Number(res.headers.get('Content-Length') ?? 0)
   if (declaredSize > MAX_BYTES) {
     return c.json({ error: 'file_too_large', maxBytes: MAX_BYTES }, 413)
@@ -141,6 +139,8 @@ covers.post('/import', async (c) => {
   if (data.byteLength > MAX_BYTES) {
     return c.json({ error: 'file_too_large', maxBytes: MAX_BYTES }, 413)
   }
+  const mime = detectedImageMime(data)
+  if (!mime) return c.json({ error: 'invalid_cover_type' }, 422)
 
   const coverKey = await persistCover(c.env, sub, data, mime)
   return c.json({ coverKey })

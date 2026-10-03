@@ -7,7 +7,6 @@ import type { HonoEnv } from '../lib/types.ts'
 import { authMiddleware } from '../middleware/auth.ts'
 import {
   canonicalizeIsbn,
-  extractDoubanSubjectId,
   parseDoubanSearchHtml,
   parseDoubanSubjectHtml,
   parseOpenLibraryBooksApiResponse,
@@ -51,59 +50,6 @@ async function lookupDoubanByIsbn(isbn13: string): Promise<(BookMetadata & { det
   return result.ok ? { ...result.value, isbn13, detailUrl } : null
 }
 
-// POST /api/metadata/douban
-// Body: { url: "https://book.douban.com/subject/12345/" }
-// Rate limit: enforced at Cloudflare WAF level; here we do basic validation only.
-metadata.post('/douban', async (c) => {
-  const body = await c.req.json<{ url?: string }>()
-  if (!body.url) return c.json({ error: 'url_required' }, 400)
-
-  const subjectResult = extractDoubanSubjectId(body.url)
-  if (!subjectResult.ok) return c.json({ error: 'invalid_url' }, 400)
-
-  const subjectId = subjectResult.value
-  const doubanUrl = `https://book.douban.com/subject/${subjectId}/`
-
-  let html: string
-  try {
-    const res = await fetch(doubanUrl, { headers: DOUBAN_HEADERS })
-    if (res.status === 403 || res.status === 302) {
-      return c.json({ error: 'blocked' }, 503)
-    }
-    if (!res.ok) {
-      return c.json({ error: 'fetch_failed', status: res.status }, 502)
-    }
-    html = await res.text()
-  } catch (err) {
-    return c.json({ error: 'network_error', detail: String(err) }, 502)
-  }
-
-  const result = parseDoubanSubjectHtml(html)
-  if (!result.ok) {
-    return c.json({ error: result.error }, 422)
-  }
-
-  return c.json({ ...result.value, source: 'douban' })
-})
-
-// POST /api/metadata/openlib
-// Body: { isbn: "9780000000000" }
-metadata.post('/openlib', async (c) => {
-  const body = await c.req.json<{ isbn?: string }>()
-  if (!body.isbn) return c.json({ error: 'isbn_required' }, 400)
-
-  const isbn = canonicalizeIsbn(body.isbn)
-  if (!isbn) return c.json({ error: 'invalid_isbn' }, 400)
-
-  try {
-    const value = await lookupOpenLibrary(isbn)
-    if (!value) return c.json({ error: 'not_found' }, 404)
-    return c.json({ ...value, source: 'openlib' })
-  } catch (err) {
-    return c.json({ error: 'network_error', detail: String(err) }, 502)
-  }
-})
-
 // POST /api/metadata/isbn
 // Body: { isbn }. Best-effort waterfall optimized for Chinese books:
 // Douban search + subject page first, then OpenLibrary.
@@ -120,8 +66,8 @@ metadata.post('/isbn', async (c) => {
     if (openlib) return c.json({ ...openlib, source: 'openlib' })
 
     return c.json({ error: 'not_found' }, 404)
-  } catch (err) {
-    return c.json({ error: 'network_error', detail: String(err) }, 502)
+  } catch {
+    return c.json({ error: 'network_error' }, 502)
   }
 })
 

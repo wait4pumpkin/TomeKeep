@@ -30,6 +30,11 @@ TomeKeep 是一款面向书籍爱好者的桌面应用，帮助你管理个人�
 
 TomeKeep is a desktop application for book lovers to catalog their personal library, track wishlists, and automatically compare prices across major online retailers. Data is stored locally by default, with optional cloud sync powered by Cloudflare D1 + R2, and a companion PWA for mobile access.
 
+> **原生化进行中 / Native migration in progress**：TomeKeep 正在将 macOS 与
+> iOS 统一迁移到 SwiftUI 原生客户端。迁移完成前 Electron 与 PWA 将继续维护，
+> 且不会删除旧数据或现有功能。详见
+> [`docs/exec-plans/active/apple-native-unification.md`](docs/exec-plans/active/apple-native-unification.md)。
+
 ---
 
 ## 功能 / Features
@@ -51,6 +56,7 @@ TomeKeep is a desktop application for book lovers to catalog their personal libr
 | 层 / Layer | 技术 / Technology |
 |---|---|
 | 桌面框架 Desktop | Electron 41 |
+| 原生客户端 Native clients | SwiftUI（iOS 17+ / macOS 14+，迁移中） |
 | UI | React 19 + Vite 6 + TypeScript |
 | 样式 Styling | Tailwind CSS v4 |
 | 本地存储 Local DB | lowdb (JSON file) |
@@ -66,6 +72,7 @@ TomeKeep is a desktop application for book lovers to catalog their personal libr
 
 ```
 TomeKeep/
+├── apple/          # iOS/macOS SwiftUI 客户端与共享 Swift Package
 ├── packages/
 │   ├── desktop/     # Electron 桌面客户端 / Electron desktop client
 │   ├── web/         # Cloudflare Pages PWA + Hono API
@@ -127,7 +134,7 @@ pnpm wrangler r2 bucket create tomekeep-covers
 
 # 3. 运行数据库迁移 / Apply database migrations
 cd packages/web
-pnpm wrangler d1 migrations apply tomekeep-db --remote
+pnpm wrangler d1 migrations apply books --remote
 
 # 4. 配置 Secrets / Set secrets
 pnpm wrangler secret put JWT_SECRET

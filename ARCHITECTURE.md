@@ -1,5 +1,12 @@
 # ARCHITECTURE.md
 
+> **Migration notice (2026-09-23):** The architecture below describes the
+> currently shipping Electron + PWA system. TomeKeep is migrating to unified
+> native SwiftUI clients for macOS and iOS. The current implementations remain
+> supported until the migration gates pass. See
+> `docs/design-docs/apple-native-architecture.md` and
+> `docs/exec-plans/active/apple-native-unification.md` for the target state.
+
 ## System Overview
 
 TomeKeep 是一个 macOS 桌面应用，基于 Electron + React 19 + TypeScript + Vite + Tailwind CSS v4 构建，使用 lowdb（JSON 文件）作为本地持久化层。主进程（Node.js）与渲染进程（浏览器环境）之间通过 IPC 严格隔离。

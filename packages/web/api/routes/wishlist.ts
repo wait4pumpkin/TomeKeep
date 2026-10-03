@@ -40,6 +40,35 @@ function parseItem(row: WishlistRow) {
 wishlist.get('/', async (c) => {
   const { sub } = c.var.user
   const since = c.req.query('since')
+  const requestedPageSize = Number(c.req.query('page_size'))
+  const pageSize = Number.isInteger(requestedPageSize) && requestedPageSize > 0
+    ? Math.min(requestedPageSize, 500)
+    : null
+  const pageUpdatedAt = c.req.query('page_updated_at')
+  const pageAfter = c.req.query('page_after')
+
+  if (pageSize) {
+    const params: unknown[] = [sub]
+    let filter = 'WHERE owner_id = ?'
+    if (since) { filter += ' AND updated_at >= ?'; params.push(since) }
+    if (pageUpdatedAt && pageAfter) {
+      filter += ' AND (updated_at > ? OR (updated_at = ? AND id > ?))'
+      params.push(pageUpdatedAt, pageUpdatedAt, pageAfter)
+    }
+    params.push(pageSize + 1)
+    const page = await dbAll<WishlistRow>(
+      c.env.DB,
+      `SELECT * FROM wishlist ${filter} ORDER BY updated_at ASC, id ASC LIMIT ?`,
+      ...params,
+    )
+    const hasMore = page.length > pageSize
+    const items = page.slice(0, pageSize)
+    const last = items.at(-1)
+    return c.json({
+      items: items.map(parseItem),
+      next_cursor: hasMore && last ? { updated_at: last.updated_at, after: last.id } : null,
+    })
+  }
 
   let rows: WishlistRow[]
   if (since) {

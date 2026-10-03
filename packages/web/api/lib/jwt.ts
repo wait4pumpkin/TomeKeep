@@ -8,6 +8,14 @@ export interface JwtPayload {
   exp: number
 }
 
+interface JwtHeader {
+  alg: string
+  typ: string
+}
+
+const MAX_TOKEN_LENGTH = 8_192
+const CLOCK_SKEW_SECONDS = 5 * 60
+
 function b64url(buf: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buf)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
@@ -39,18 +47,46 @@ export async function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, secret: 
 }
 
 export async function verifyJwt(token: string, secret: string): Promise<JwtPayload | null> {
-  const parts = token.split('.')
-  if (parts.length !== 3) return null
-  const [header, body, sigB64] = parts
-  const key = await importKey(secret)
-  const valid = await crypto.subtle.verify(
-    'HMAC',
-    key,
-    fromB64url(sigB64) as unknown as ArrayBuffer,
-    new TextEncoder().encode(`${header}.${body}`) as unknown as ArrayBuffer,
-  )
-  if (!valid) return null
-  const payload = JSON.parse(new TextDecoder().decode(fromB64url(body))) as JwtPayload
-  if (payload.exp < Math.floor(Date.now() / 1000)) return null
-  return payload
+  if (!token || token.length > MAX_TOKEN_LENGTH) return null
+
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const [headerPart, bodyPart, signaturePart] = parts
+
+    const header = JSON.parse(
+      new TextDecoder().decode(fromB64url(headerPart)),
+    ) as Partial<JwtHeader>
+    if (header.alg !== 'HS256' || header.typ !== 'JWT') return null
+
+    const key = await importKey(secret)
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      fromB64url(signaturePart) as unknown as ArrayBuffer,
+      new TextEncoder().encode(`${headerPart}.${bodyPart}`) as unknown as ArrayBuffer,
+    )
+    if (!valid) return null
+
+    const payload = JSON.parse(
+      new TextDecoder().decode(fromB64url(bodyPart)),
+    ) as Partial<JwtPayload>
+    if (
+      typeof payload.sub !== 'string' || !payload.sub ||
+      typeof payload.username !== 'string' || !payload.username ||
+      typeof payload.iat !== 'number' || !Number.isFinite(payload.iat) ||
+      typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)
+    ) {
+      return null
+    }
+
+    const now = Math.floor(Date.now() / 1000)
+    if (payload.exp <= now || payload.iat > now + CLOCK_SKEW_SECONDS || payload.exp <= payload.iat) {
+      return null
+    }
+
+    return payload as JwtPayload
+  } catch {
+    return null
+  }
 }

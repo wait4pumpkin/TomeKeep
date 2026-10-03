@@ -1,11 +1,17 @@
 ---
 title: "Cross-Platform Sync"
-status: active
+status: superseded
 created: 2026-04-02
 owner: engineering
 ---
 
 # 跨平台同步执行计划
+
+> **Superseded on 2026-09-23.** This document records the implemented
+> Electron + PWA sync architecture and remains relevant during migration. The
+> target architecture and active work are now defined by
+> `apple-native-unification.md`. Do not remove the PWA or its required routes
+> until the native migration acceptance gates pass.
 
 ## 1. 概述
 

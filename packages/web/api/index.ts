@@ -12,8 +12,8 @@ import readingStateRoutes from './routes/readingStates.ts'
 import profileRoutes from './routes/profiles.ts'
 import coverRoutes from './routes/covers.ts'
 import metadataRoutes from './routes/metadata.ts'
-import priceRoutes from './routes/prices.ts'
 import syncRoutes from './routes/sync.ts'
+import priceCacheRoutes from './routes/priceCache.ts'
 
 const app = new Hono<HonoEnv>().basePath('/api')
 
@@ -29,8 +29,8 @@ app.route('/reading-states', readingStateRoutes)
 app.route('/profiles', profileRoutes)
 app.route('/covers', coverRoutes)
 app.route('/metadata', metadataRoutes)
-app.route('/prices', priceRoutes)
 app.route('/sync', syncRoutes)
+app.route('/price-cache', priceCacheRoutes)
 
 // Health check
 app.get('/health', (c) => c.json({ ok: true }))

@@ -29,6 +29,30 @@ export const TARGET_WIDTH = 400
 export const QUALITY = 85
 export const MAX_BYTES = 2 * 1024 * 1024 // 2 MB hard limit on upload
 
+/**
+ * Detect the small set of raster formats TomeKeep accepts from their magic
+ * bytes. Never trust multipart or upstream Content-Type values: an attacker
+ * controls those headers and R2 objects may later be served from a browser.
+ */
+export function detectedImageMime(data: ArrayBuffer): string | null {
+  const bytes = new Uint8Array(data, 0, Math.min(data.byteLength, 12))
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return 'image/png'
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return 'image/gif'
+  }
+  if (bytes.length >= 12 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return 'image/webp'
+  }
+  return null
+}
+
 const RESIZE_RETRIES = 4          // total attempts: 1 initial + 3 retries
 const RESIZE_RETRY_BASE_MS = 300  // 300 ms, 600 ms, 1200 ms, 2400 ms
 

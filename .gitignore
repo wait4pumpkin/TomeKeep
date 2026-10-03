@@ -124,6 +124,19 @@ dist
 # MacOS
 .DS_Store
 
+# Apple native generated/build state
+apple/*.xcodeproj/
+apple/DerivedData/
+apple/DerivedData-*/
+apple/.build/
+apple/.swiftpm/
+apple/packages/*/.build/
+apple/packages/*/.swiftpm/
+
+# Local web diagnostics / exported development data
+packages/web/dev-dist/
+packages/web/local-dump.sql
+
 # Electron-builder
 release/
 dist-electron/

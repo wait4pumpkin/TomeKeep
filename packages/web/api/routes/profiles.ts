@@ -17,14 +17,18 @@ interface ProfileRow {
   name: string
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 // GET /api/profiles
 profiles.get('/', async (c) => {
   const { sub } = c.var.user
+  const includeDeleted = c.req.query('include_deleted') === '1'
   const rows = await dbAll<ProfileRow>(
     c.env.DB,
-    'SELECT * FROM profiles WHERE owner_id = ? ORDER BY created_at ASC',
+    `SELECT * FROM profiles
+     WHERE owner_id = ? ${includeDeleted ? '' : 'AND deleted_at IS NULL'}
+     ORDER BY created_at ASC`,
     sub,
   )
   return c.json(rows)
@@ -45,7 +49,7 @@ profiles.post('/', async (c) => {
   // Enforce per-account limit (skip check if this is an upsert of an existing own profile)
   if (!existing) {
     const count = await dbFirst<{ n: number }>(
-      c.env.DB, 'SELECT COUNT(*) AS n FROM profiles WHERE owner_id = ?', sub,
+      c.env.DB, 'SELECT COUNT(*) AS n FROM profiles WHERE owner_id = ? AND deleted_at IS NULL', sub,
     )
     if ((count?.n ?? 0) >= MAX_PROFILES_PER_ACCOUNT) {
       return c.json({ error: 'profile_limit_reached' }, 422)
@@ -56,7 +60,10 @@ profiles.post('/', async (c) => {
     c.env.DB,
     `INSERT INTO profiles (id, owner_id, name)
      VALUES (?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = datetime('now')`,
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       deleted_at = NULL,
+       updated_at = datetime('now')`,
     body.id, sub, body.name.trim(),
   )
   const row = await dbFirst<ProfileRow>(c.env.DB, 'SELECT * FROM profiles WHERE id = ?', body.id)
@@ -76,7 +83,7 @@ profiles.patch('/:id', async (c) => {
 
   await dbRun(
     c.env.DB,
-    'UPDATE profiles SET name = ?, updated_at = datetime(\'now\') WHERE id = ?',
+    'UPDATE profiles SET name = ?, deleted_at = NULL, updated_at = datetime(\'now\') WHERE id = ?',
     body.name.trim(), id,
   )
   return c.json({ ok: true })
@@ -91,8 +98,21 @@ profiles.delete('/:id', async (c) => {
   if (!existing) return c.json({ error: 'not_found' }, 404)
   if (existing.owner_id !== sub) return c.json({ error: 'forbidden' }, 403)
 
-  // Cascade deletes reading_states rows via FK
-  await dbRun(c.env.DB, 'DELETE FROM profiles WHERE id = ?', id)
+  const activeCount = await dbFirst<{ n: number }>(
+    c.env.DB,
+    'SELECT COUNT(*) AS n FROM profiles WHERE owner_id = ? AND deleted_at IS NULL',
+    sub,
+  )
+  if ((activeCount?.n ?? 0) <= 1) return c.json({ error: 'last_profile' }, 422)
+
+  // Preserve a tombstone for other devices while removing dependent reading
+  // state in the same D1 batch.
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE profiles SET deleted_at = datetime(\'now\'), updated_at = datetime(\'now\') WHERE id = ? AND owner_id = ?',
+    ).bind(id, sub),
+    c.env.DB.prepare('DELETE FROM reading_states WHERE profile_id = ? AND user_id = ?').bind(id, sub),
+  ])
   return c.json({ ok: true })
 })
 

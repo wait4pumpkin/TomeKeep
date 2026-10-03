@@ -29,7 +29,7 @@ Base path: `/api/books`
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
 | `GET` | `/api/books` | JWT | List all books for the authenticated user, ordered by `added_at DESC`. |
-| `GET` | `/api/books?since=<ISO>` | JWT | Incremental sync: return books with `updated_at > since`, ordered by `updated_at ASC`. Used by desktop sync. |
+| `GET` | `/api/books?since=<ISO>` | JWT | Inclusive incremental sync. Add `page_size` (max 500) for `{ items, next_cursor }`; continue with `page_updated_at` and `page_after`. Without it, preserves the legacy array response. |
 | `POST` | `/api/books` | JWT | Create a book. Accepts caller-supplied `id`. Required: `title`. Optional ISBN is checksum-validated, normalized to ISBN-13, and must be unique among active books; invalid input returns 400 and a duplicate returns 409. Returns 201. |
 | `PUT` | `/api/books/:id` | JWT | Update an existing book. Partial update; ISBN uses the same normalization and duplicate rules as create. Returns 404 if not found, 403 if not owner. |
 | `DELETE` | `/api/books/:id` | JWT | Soft-delete a book (sets `deleted_at`, bumps `updated_at`). Soft deletes propagate via incremental sync. Returns 404/403 as above. |
@@ -43,7 +43,7 @@ Base path: `/api/wishlist`
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
 | `GET` | `/api/wishlist` | JWT | List all wishlist items for the authenticated user, ordered by `added_at DESC`. |
-| `GET` | `/api/wishlist?since=<ISO>` | JWT | Incremental sync: items with `updated_at > since`. |
+| `GET` | `/api/wishlist?since=<ISO>` | JWT | Inclusive incremental sync with the same optional native pagination contract as books. |
 | `POST` | `/api/wishlist` | JWT | Create a wishlist item. Required: `title`. Optional ISBN is checksum-validated, normalized to ISBN-13, and must be unique among active wishlist items. Returns 201, or 400/409 for invalid/duplicate ISBN. |
 | `PUT` | `/api/wishlist/:id` | JWT | Update an existing wishlist item. Partial update; ISBN uses the same normalization and duplicate rules as create. Returns 404/403 as above. |
 | `DELETE` | `/api/wishlist/:id` | JWT | Soft-delete a wishlist item. |
@@ -58,9 +58,10 @@ Base path: `/api/reading-states`
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
 | `GET` | `/api/reading-states` | JWT | List all reading states for the authenticated user. |
-| `GET` | `/api/reading-states?since=<ISO>` | JWT | Incremental sync: states with `updated_at > since`. |
+| `GET` | `/api/reading-states?since=<ISO>` | JWT | Incremental sync: states with `updated_at >= since`. |
 | `GET` | `/api/reading-states?profile_id=<uuid>` | JWT | Filter by profile. Use `profile_id=null` for legacy account-level states. |
-| `PUT` | `/api/reading-states` | JWT | Upsert a reading state. Body: `{ book_id, status, completed_at?, profile_id? }`. Status must be `unread`, `reading`, or `read`. `completed_at` is auto-set when `status === 'read'`. Uses `ON CONFLICT ... DO UPDATE`. |
+| `GET` | `/api/reading-states?page_size=<n>` | JWT | Stable native pagination ordered by `(updated_at, profile_id/book_id)`; response is `{ items, next_cursor }`. |
+| `PUT` | `/api/reading-states` | JWT | Upsert a reading state. Body: `{ book_id, status, completed_at?, profile_id? }`. The book and optional profile must belong to the authenticated account; foreign or deleted books return 404 `book_not_found`. Status must be `unread`, `reading`, or `read`. `completed_at` is auto-set when `status === 'read'`. Uses `ON CONFLICT ... DO UPDATE`. |
 
 ---
 
@@ -70,10 +71,11 @@ Base path: `/api/profiles`
 
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
-| `GET` | `/api/profiles` | JWT | List all profiles for the authenticated user (max 5). |
-| `POST` | `/api/profiles` | JWT | Create a profile. Body: `{ name }`. Maximum 5 profiles per account. |
-| `PUT` | `/api/profiles/:id` | JWT | Rename a profile. Body: `{ name }`. |
-| `DELETE` | `/api/profiles/:id` | JWT | Delete a profile and all its associated reading states (cascade). |
+| `GET` | `/api/profiles` | JWT | List active profiles for the authenticated user (max 5). |
+| `GET` | `/api/profiles?include_deleted=1` | JWT | Native sync view including `deleted_at` tombstones. |
+| `POST` | `/api/profiles` | JWT | Idempotently create/update a profile. Body: `{ id, name }`; clears an older tombstone. Maximum 5 active profiles. |
+| `PATCH` | `/api/profiles/:id` | JWT | Rename a profile. Body: `{ name }`; clears an older tombstone. |
+| `DELETE` | `/api/profiles/:id` | JWT | Atomically soft-delete a profile and delete its reading states. Returns 422 `last_profile` for the final active profile. |
 
 ---
 
@@ -83,8 +85,8 @@ Base path: `/api/covers`
 
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
-| `POST` | `/api/covers/upload` | JWT | Upload a cover image. Accepts `multipart/form-data` with `file` field. Image is compressed to WebP before storing in R2. Returns `{ coverKey }` where `coverKey` is the R2 object path (`covers/<owner_id>/<uuid>.webp`). Max size enforced. |
-| `POST` | `/api/covers/import` | JWT | Import a metadata-provider cover from an HTTPS URL. Only OpenLibrary and Douban image hosts are allowed; redirects, MIME type, and maximum size are validated before R2 persistence. Returns `{ coverKey }`. |
+| `POST` | `/api/covers/upload` | JWT | Upload a cover image. Accepts `multipart/form-data` with `file` field, max 2 MiB. JPEG/PNG/GIF/WebP is determined from magic bytes, then production compresses to WebP. Returns `{ coverKey }`. |
+| `POST` | `/api/covers/import` | JWT | Import an HTTPS metadata-provider cover from the strict host allowlist. Redirects, magic bytes, and maximum size are validated before R2 persistence. Returns `{ coverKey }`. |
 | `GET` | `/api/covers/:key` | JWT | Serve a cover image. Validates ownership (key must belong to the authenticated user's books or wishlist). Returns a 302 redirect to a signed R2 URL (production) or streams directly (local dev). |
 
 ---
@@ -95,19 +97,7 @@ Base path: `/api/metadata`
 
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
-| `POST` | `/api/metadata/douban` | JWT | Parse a Douban subject URL. Body: `{ url }`. Returns normalized `BookMetadata`. |
-| `POST` | `/api/metadata/openlib` | JWT | Look up a checksum-valid ISBN through OpenLibrary. Body: `{ isbn }`. |
 | `POST` | `/api/metadata/isbn` | JWT | ISBN metadata waterfall for PWA entry: Douban ISBN search first, then OpenLibrary. Body: `{ isbn }`; returns 404 when neither source has a result. |
-
----
-
-## Prices Routes / 价格路由
-
-Base path: `/api/prices`
-
-| Method | Path | Auth Required | Description |
-|--------|------|:---:|---|
-| `GET` | `/api/prices?isbn=<isbn>` | JWT | Read-only price cache lookup by ISBN. Written by the desktop client; consumed by the PWA. Returns cached `PriceCacheEntry[]` or empty array if not cached. |
 
 ---
 
@@ -118,6 +108,15 @@ Base path: `/api/sync`
 | Method | Path | Auth Required | Description |
 |--------|------|:---:|---|
 | `GET` | `/api/sync/status` | JWT | Returns the latest `updated_at` timestamp per table for the authenticated user. Used by the desktop client to decide whether to pull incremental changes. Response: `{ books: ISO, wishlist: ISO, readingStates: ISO }`. |
+
+## Native Price Cache Routes / 原生价格缓存路由
+
+Base path: `/api/price-cache`
+
+| Method | Path | Auth Required | Description |
+|--------|------|:---:|---|
+| `GET` | `/api/price-cache?page_size=250` | JWT | Owner-scoped stable pagination of channel quotes for macOS/iOS shared display. |
+| `PUT` | `/api/price-cache` | JWT | LWW upsert of one macOS-produced quote. Enforces channel/status, positive price, length limits, HTTPS URL and owner-derived ID. |
 
 ---
 

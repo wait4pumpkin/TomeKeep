@@ -13,10 +13,19 @@
 - `./standards/coding-standards.md`
 - `./standards/testing-standards.md`
 
+### I want to understand the Apple native migration
+- `./product-specs/apple-native-clients.md`
+- `./design-docs/apple-native-architecture.md`
+- `./design-docs/apple-native-feature-matrix.md`
+- `./design-docs/adr-macos-legacy-data-access.md`
+- `./exec-plans/active/apple-native-unification.md`
+
 ### I want to understand constraints
 - `./standards/`
 - `./security/`
 - `./operations/reliability.md`
+- `./operations/production-sync-deployment.md`
+- `./operations/apple-device-signing.md`
 
 ### I want the latest technical surface
 - `./generated/api-surface.md`

@@ -27,6 +27,12 @@ readingStates.get('/', async (c) => {
   const { sub } = c.var.user
   const since = c.req.query('since')
   const profileId = c.req.query('profile_id') ?? null   // null means "all"
+  const requestedPageSize = Number(c.req.query('page_size'))
+  const pageSize = Number.isInteger(requestedPageSize) && requestedPageSize > 0
+    ? Math.min(requestedPageSize, 500)
+    : null
+  const pageUpdatedAt = c.req.query('page_updated_at')
+  const pageAfter = c.req.query('page_after')
 
   const params: unknown[] = [sub]
   let filter = 'WHERE user_id = ?'
@@ -39,6 +45,31 @@ readingStates.get('/', async (c) => {
   if (since) {
     filter += ' AND updated_at >= ?'
     params.push(since)
+  }
+
+  const rowKey = "COALESCE(profile_id, '') || char(31) || book_id"
+  if (pageSize && pageUpdatedAt && pageAfter) {
+    filter += ` AND (updated_at > ? OR (updated_at = ? AND ${rowKey} > ?))`
+    params.push(pageUpdatedAt, pageUpdatedAt, pageAfter)
+  }
+
+  if (pageSize) {
+    params.push(pageSize + 1)
+    const page = await dbAll<ReadingStateRow>(
+      c.env.DB,
+      `SELECT * FROM reading_states ${filter} ORDER BY updated_at ASC, ${rowKey} ASC LIMIT ?`,
+      ...params,
+    )
+    const hasMore = page.length > pageSize
+    const items = page.slice(0, pageSize)
+    const last = items.at(-1)
+    return c.json({
+      items,
+      next_cursor: hasMore && last ? {
+        updated_at: last.updated_at,
+        after: `${last.profile_id ?? ''}\u001f${last.book_id}`,
+      } : null,
+    })
   }
 
   const order = since ? 'ORDER BY updated_at ASC' : 'ORDER BY updated_at DESC'
@@ -66,6 +97,16 @@ readingStates.put('/', async (c) => {
     return c.json({ error: 'invalid_status' }, 400)
   }
 
+  // A reading-state row must never point at a book owned by another account.
+  // Query by both id and owner so the response does not disclose whether a
+  // foreign book id exists.
+  const book = await dbFirst<{ id: string }>(
+    c.env.DB,
+    'SELECT id FROM books WHERE id = ? AND owner_id = ? AND deleted_at IS NULL',
+    body.book_id, sub,
+  )
+  if (!book) return c.json({ error: 'book_not_found' }, 404)
+
   // If a profile_id is supplied, verify it belongs to this user
   const profileId = body.profile_id ?? null
   if (profileId) {
@@ -78,16 +119,29 @@ readingStates.put('/', async (c) => {
 
   const completedAt = body.status === 'read' ? (body.completed_at ?? new Date().toISOString()) : null
 
-  await dbRun(
-    c.env.DB,
-    `INSERT INTO reading_states (user_id, book_id, profile_id, status, completed_at)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, book_id, profile_id) DO UPDATE SET
-       status = excluded.status,
-       completed_at = excluded.completed_at,
-       updated_at = datetime('now')`,
-    sub, body.book_id, profileId, body.status, completedAt,
-  )
+  if (profileId) {
+    await dbRun(
+      c.env.DB,
+      `INSERT INTO reading_states (user_id, book_id, profile_id, status, completed_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, book_id, profile_id) DO UPDATE SET
+         status = excluded.status,
+         completed_at = excluded.completed_at,
+         updated_at = datetime('now')`,
+      sub, body.book_id, profileId, body.status, completedAt,
+    )
+  } else {
+    await dbRun(
+      c.env.DB,
+      `INSERT INTO reading_states (user_id, book_id, profile_id, status, completed_at)
+       VALUES (?, ?, NULL, ?, ?)
+       ON CONFLICT(user_id, book_id) WHERE profile_id IS NULL DO UPDATE SET
+         status = excluded.status,
+         completed_at = excluded.completed_at,
+         updated_at = datetime('now')`,
+      sub, body.book_id, body.status, completedAt,
+    )
+  }
 
   return c.json({ ok: true })
 })

@@ -58,8 +58,36 @@ The token file path was computed at module load, before `app.setPath('userData',
 - trace propagation where applicable
 - dashboards for critical flows
 
+## Reading-State Default-Profile Repair (2026-09)
+
+Migration `0004_reading_state_default_uniqueness.sql` repairs a SQLite NULL
+uniqueness gap introduced when `profile_id` was added. Before creating a
+partial unique index, it keeps the most recently updated account-level row for
+each `(user_id, book_id)` pair and removes older duplicate rows. Subsequent
+`profile_id IS NULL` writes use the partial index as their upsert target.
+
+## Profile Tombstones (2026-09)
+
+Migration `0005_profile_tombstones.sql` adds durable profile deletion markers.
+Apply it before deploying native clients that request `include_deleted=1`.
+Profile deletion uses one D1 batch to write the tombstone and remove that
+profile's reading states; the API refuses deletion of the last active profile.
+
+Migration `0006_price_cache_sync.sql` adds cache key, descriptive fields,
+expiry/message data and `updated_at` to legacy quote rows. Native macOS writes
+each channel with an owner-derived id and client timestamp; D1 only accepts an
+equal-or-newer update. Native clients page the owner-scoped rows and merge them
+back into local `PriceCacheEntry` values; iOS never runs retailer scraping.
+Migration `0007_price_cache_backfill.sql` derives a stable legacy cache key
+from ISBN (or row id) and supplies title/expiry defaults so pre-native rows can
+be decoded without discarding historical prices.
+
 ## Required Runbooks
 - deployment rollback
 - queue backlog response
 - dependency outage response
 - incident escalation
+
+## Apple Preview Signing
+
+原生 iOS 预览版的双机安装、Personal Team 到期检查、自动重签和失败恢复见 [`apple-device-signing.md`](./apple-device-signing.md)。重签不承担数据备份职责；跨设备数据安全依赖已发布的生产同步服务，发布门禁见 [`production-sync-deployment.md`](./production-sync-deployment.md)。
