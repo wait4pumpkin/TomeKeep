@@ -31,6 +31,10 @@ final class NativeSyncCoordinator {
     private var pendingOperation: (@MainActor () async throws -> SyncResult)?
     private var pendingTrigger: NativeSyncTrigger?
 
+    var canAccessApplication: Bool {
+        accountState == .signedIn
+    }
+
     @discardableResult
     func synchronize(
         context: ModelContext,

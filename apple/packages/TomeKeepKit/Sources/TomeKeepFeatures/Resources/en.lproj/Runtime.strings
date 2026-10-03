@@ -376,6 +376,9 @@
 "已从剪贴板解析豆瓣链接。" = "Imported the Douban link from the clipboard.";
 "豆瓣链接解析失败，仍可手工录入。" = "Could not parse the Douban link. You can still enter the details manually.";
 "已从剪贴板填入书名。" = "Filled the title from the clipboard.";
-"未登录：数据仅保存在本机。登录后会自动同步。" = "Not signed in: data is stored only on this device. Sign in to sync automatically.";
-"前往设置" = "Open Settings";
 "无法读取登录状态；本机数据仍可正常使用。" = "The sign-in state could not be read. Local data remains available.";
+"正在检查登录状态…" = "Checking sign-in status…";
+"登录后使用书库，并在设备间自动同步。" = "Sign in to use your library and sync automatically across devices.";
+"正在登录…" = "Signing In…";
+"高级设置" = "Advanced Settings";
+"正式服务已预设；仅本地开发时需要修改。" = "The production service is preconfigured; change this only for local development.";

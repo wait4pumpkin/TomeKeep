@@ -41,13 +41,22 @@ public struct NativeMigrationRootView: View {
             .environment(\.locale, Locale(identifier: languageCode))
             .environment(syncCoordinator)
             .task {
-                syncCoordinator.refreshAccountState()
-                await importStagedLegacyDataIfPresent()
-                await synchronizeIfPossible(trigger: .launch)
+                await restoreApplicationSession()
+                if syncCoordinator.canAccessApplication {
+                    await importStagedLegacyDataIfPresent()
+                    await synchronizeIfPossible(trigger: .launch)
+                }
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
                 Task { await synchronizeIfPossible(trigger: .foreground) }
+            }
+            .onChange(of: syncCoordinator.accountState) { previous, current in
+                guard previous == .signedOut, current == .signedIn else { return }
+                Task {
+                    await importStagedLegacyDataIfPresent()
+                    await synchronizeIfPossible(trigger: .login)
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.syncRequested)) { _ in
                 Task { await synchronizeIfPossible(trigger: .localChange) }
@@ -74,11 +83,18 @@ public struct NativeMigrationRootView: View {
 
     @ViewBuilder
     private var platformContent: some View {
-        VStack(spacing: 0) {
-            if syncCoordinator.accountState == .signedOut {
-                signedOutBanner
-            }
-            Group {
+        switch syncCoordinator.accountState {
+        case .unknown:
+            authenticationLoadingView
+        case .signedOut:
+            AuthenticationGateView()
+        case .signedIn:
+            authenticatedPlatformContent
+        }
+    }
+
+    @ViewBuilder
+    private var authenticatedPlatformContent: some View {
         switch platform {
         case .iOS:
             TabView(selection: $iosSelection) {
@@ -163,32 +179,16 @@ public struct NativeMigrationRootView: View {
             EmptyView()
 #endif
         }
-            }
-        }
     }
 
-    private var signedOutBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "icloud.slash")
-                .foregroundStyle(.orange)
-            Text(verbatim: tkLocalized("未登录：数据仅保存在本机。登录后会自动同步。"))
+    private var authenticationLoadingView: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+            Text(verbatim: tkLocalized("正在检查登录状态…"))
                 .font(.callout)
-                .lineLimit(2)
-            Spacer(minLength: 8)
-            Button(tkLocalized("前往设置")) {
-                switch platform {
-                case .iOS: iosSelection = .settings
-                case .macOS: macSelection = .settings
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.10))
-        .overlay(alignment: .bottom) { Divider() }
-        .accessibilityElement(children: .combine)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var appearanceSymbol: String {
@@ -208,8 +208,35 @@ public struct NativeMigrationRootView: View {
     }
 
     @MainActor
-    private func synchronizeIfPossible(trigger: NativeSyncTrigger) async {
+    private func restoreApplicationSession() async {
         syncCoordinator.refreshAccountState()
+        guard syncCoordinator.accountState == .signedIn else {
+            if syncCoordinator.accountState == .unknown {
+                syncCoordinator.markSignedOut()
+            }
+            return
+        }
+        guard let baseURL = automaticSyncBaseURL else {
+            syncCoordinator.markSignedOut()
+            return
+        }
+
+        do {
+            guard let user = try await AuthenticationService(baseURL: baseURL).restoredUser() else {
+                syncCoordinator.markSignedOut()
+                return
+            }
+            ProfileAccountContext.currentID = user.id
+            syncCoordinator.markSignedIn()
+        } catch {
+            // A previously authenticated device remains usable offline. The
+            // following sync attempt exposes the network failure in Settings.
+            syncCoordinator.markSignedIn()
+        }
+    }
+
+    @MainActor
+    private func synchronizeIfPossible(trigger: NativeSyncTrigger) async {
         guard syncCoordinator.accountState == .signedIn,
               let baseURL = automaticSyncBaseURL
         else { return }
@@ -4450,6 +4477,176 @@ private struct PriceHistoryView: View {
         } catch {
             errorMessage = tkLocalized("无法更新价格来源标记。")
         }
+    }
+}
+
+private struct AuthenticationGateView: View {
+    @Environment(NativeSyncCoordinator.self) private var syncCoordinator
+    @AppStorage("tomekeep.apiBaseURL") private var apiBaseURL = "https://tomekeep.pages.dev/api/"
+    @State private var username = ""
+    @State private var password = ""
+    @State private var isWorking = false
+    @State private var errorMessage: String?
+    @State private var isRegistering = false
+    @State private var showsAdvancedSettings = false
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                VStack(spacing: 10) {
+                    Image(systemName: "books.vertical.fill")
+                        .font(.system(size: 46, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+                    Text("TomeKeep")
+                        .font(.largeTitle.weight(.bold))
+                    Text(verbatim: tkLocalized("登录后使用书库，并在设备间自动同步。"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                VStack(spacing: 14) {
+                    TextField(tkLocalized("用户名"), text: $username)
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .textContentType(.username)
+                        .autocorrectionDisabled()
+#endif
+                    SecureField(tkLocalized("密码"), text: $password)
+#if os(iOS)
+                        .textContentType(.password)
+                        .submitLabel(.go)
+#endif
+                        .onSubmit { submitLogin() }
+
+                    if let errorMessage {
+                        Label {
+                            Text(verbatim: errorMessage)
+                        } icon: {
+                            Image(systemName: "exclamationmark.circle")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Button {
+                        submitLogin()
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isWorking { ProgressView().controlSize(.small) }
+                            Text(verbatim: tkLocalized(isWorking ? "正在登录…" : "登录"))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canSubmit)
+
+                    Button(tkLocalized("使用邀请码注册")) {
+                        isRegistering = true
+                    }
+                    .disabled(isWorking || validatedBaseURL == nil)
+
+                    DisclosureGroup(
+                        tkLocalized("高级设置"),
+                        isExpanded: $showsAdvancedSettings
+                    ) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(tkLocalized("API 地址"), text: $apiBaseURL)
+#if os(iOS)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.URL)
+                                .autocorrectionDisabled()
+#endif
+                            Text(verbatim: tkLocalized("正式服务已预设；仅本地开发时需要修改。"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.callout)
+                }
+                .textFieldStyle(.roundedBorder)
+                .padding(22)
+                .background(.regularMaterial, in: .rect(cornerRadius: 18))
+            }
+            .frame(maxWidth: 390)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 48)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color.accentColor.opacity(0.035))
+        .sheet(isPresented: $isRegistering) {
+            if let baseURL = validatedBaseURL {
+                RegistrationView(baseURL: baseURL) { user in
+                    completeAuthentication(user)
+                }
+            }
+        }
+    }
+
+    private var canSubmit: Bool {
+        !isWorking &&
+        !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !password.isEmpty &&
+        validatedBaseURL != nil
+    }
+
+    private func submitLogin() {
+        guard canSubmit else { return }
+        Task { await login() }
+    }
+
+    @MainActor
+    private func login() async {
+        guard let baseURL = validatedBaseURL else {
+            errorMessage = tkLocalized("同步地址无效。")
+            return
+        }
+        isWorking = true
+        errorMessage = nil
+        defer { isWorking = false }
+        do {
+            let user = try await AuthenticationService(baseURL: baseURL).login(
+                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                password: password
+            )
+            password = ""
+            completeAuthentication(user)
+        } catch {
+            errorMessage = authenticationErrorDescription(error)
+        }
+    }
+
+    private func completeAuthentication(_ user: AuthUser) {
+        ProfileAccountContext.currentID = user.id
+        syncCoordinator.markSignedIn()
+    }
+
+    private var validatedBaseURL: URL? {
+        guard let url = URL(string: apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(), let host = url.host,
+              scheme == "https" || (scheme == "http" && isLocalDevelopmentHost(host))
+        else { return nil }
+        return url.absoluteString.hasSuffix("/") ? url : URL(string: url.absoluteString + "/")
+    }
+
+    private func isLocalDevelopmentHost(_ host: String) -> Bool {
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return true }
+        if host.hasPrefix("192.168.") || host.hasPrefix("10.") { return true }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        return parts.count == 4 && parts[0] == 172 && (16...31).contains(parts[1])
+    }
+
+    private func authenticationErrorDescription(_ error: Error) -> String {
+        if case APIClientError.rejected(statusCode: 401, message: _) = error {
+            return tkLocalized("用户名或密码不正确。")
+        }
+        if case APIClientError.rejected(statusCode: 429, message: _) = error {
+            return tkLocalized("尝试次数过多，请稍后再试。")
+        }
+        return tkErrorDescription(error, fallback: "无法连接同步服务。")
     }
 }
 

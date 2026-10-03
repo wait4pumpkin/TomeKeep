@@ -59,12 +59,15 @@ struct NativeSyncCoordinatorTests {
     func tracksAccountState() {
         let coordinator = NativeSyncCoordinator()
         #expect(coordinator.accountState == .unknown)
+        #expect(!coordinator.canAccessApplication)
 
         coordinator.markSignedIn()
         #expect(coordinator.accountState == .signedIn)
+        #expect(coordinator.canAccessApplication)
 
         coordinator.markSignedOut()
         #expect(coordinator.accountState == .signedOut)
+        #expect(!coordinator.canAccessApplication)
     }
 }
 
