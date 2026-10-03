@@ -43,3 +43,9 @@ import TomeKeepDomain
 @Test func bookTagsTrimWhitespaceAndKeepTheFirstUniqueValue() {
     #expect(normalizedBookTags([" CBB ", "", "CBB", "大宝", "  BGG"]) == ["CBB", "大宝", "BGG"])
 }
+
+@Test func savingEditorIncludesPendingTagsWithoutDuplicates() {
+    #expect(committedEditorTagsText(existing: ["文学"], pending: " 文学，已签名、小说 ") == "文学，已签名，小说")
+    #expect(committedEditorTagsText(existing: ["文学"], pending: "  ") == "文学")
+    #expect(committedEditorTagsText(existing: [], pending: "文学,小说") == "文学，小说")
+}
