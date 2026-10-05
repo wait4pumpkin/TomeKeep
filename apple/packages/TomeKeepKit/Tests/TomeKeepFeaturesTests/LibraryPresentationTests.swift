@@ -3,6 +3,20 @@ import Testing
 import TomeKeepDomain
 @testable import TomeKeepFeatures
 
+@Test func retiredWishlistPrioritySortRestoresRecentOrder() {
+    #expect(wishlistSortWithoutPriority("priority") == "recentlyAdded")
+    for value in ["recentlyAdded", "title", "author", "pendingBuy"] {
+        #expect(wishlistSortWithoutPriority(value) == value)
+    }
+}
+
+@Test func readingProgressBreathingHonorsMotionPreferenceAndForeground() {
+    #expect(shouldBreatheReadingProgress(reduceMotion: false, isActive: true))
+    #expect(!shouldBreatheReadingProgress(reduceMotion: true, isActive: true))
+    #expect(!shouldBreatheReadingProgress(reduceMotion: false, isActive: false))
+    #expect(!shouldBreatheReadingProgress(reduceMotion: true, isActive: false))
+}
+
 @Test func compactControlsUseSeparateCollapseAndRestoreThresholds() {
     #expect(!compactTopControls(scrollOffset: 0, wasCompact: false))
     #expect(!compactTopControls(scrollOffset: 80, wasCompact: false))

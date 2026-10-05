@@ -7,6 +7,26 @@ import TomeKeepPersistence
 @MainActor
 struct LibraryRepositoriesTests {
     @Test
+    func editingWishlistMetadataPreservesLegacyPriority() throws {
+        let repository = WishlistRepository(context: try makeContext())
+        let instant = Date(timeIntervalSince1970: 1_700_000_000)
+        let original = WishlistItem(
+            id: "legacy-priority", title: "原书名", author: "作者",
+            priority: .high, addedAt: instant, updatedAt: instant
+        )
+        try repository.add(original)
+        var edited = try #require(repository.items().first)
+        edited.title = "更新书名"
+        edited.tags = ["文学"]
+        edited.updatedAt = instant.addingTimeInterval(10)
+        try repository.update(edited)
+        let saved = try #require(repository.items().first)
+        #expect(saved.priority == .high)
+        #expect(saved.title == "更新书名")
+        #expect(saved.tags == ["文学"])
+    }
+
+    @Test
     func wishlistCRUDAndMoveToLibraryAreAtomic() throws {
         let context = try makeContext()
         let wishlist = WishlistRepository(context: context)

@@ -588,7 +588,6 @@ private enum LibraryDisplayMode: String, CaseIterable {
 
 private enum WishlistSort: String, CaseIterable {
     case recentlyAdded
-    case priority
     case title
     case author
     case pendingBuy
@@ -596,7 +595,6 @@ private enum WishlistSort: String, CaseIterable {
     var label: String {
         switch self {
         case .recentlyAdded: tkLocalized("最近添加")
-        case .priority: tkLocalized("优先级")
         case .title: tkLocalized("书名")
         case .author: tkLocalized("作者")
         case .pendingBuy: tkLocalized("待购买优先")
@@ -606,7 +604,6 @@ private enum WishlistSort: String, CaseIterable {
     var symbol: String {
         switch self {
         case .recentlyAdded: "calendar"
-        case .priority: "exclamationmark.circle"
         case .title: "text.bubble"
         case .author: "person"
         case .pendingBuy: "cart"
@@ -1436,6 +1433,7 @@ private struct LibraryView: View {
                 VStack(spacing: 7) {
                     ProgressView(value: readingProgress)
                         .tint(.accentColor)
+                        .modifier(ReadingProgressBreathing())
                         .accessibilityLabel("阅读进度")
                         .accessibilityValue("\(readCount) / \(filteredBooks.count) 已读")
                     HStack(spacing: 6) {
@@ -2742,6 +2740,11 @@ private struct WishlistView: View {
         }
         .task {
             selectedTags = decodeStoredTags(storedSelectedTags).subtracting([untaggedFilterToken])
+            let key = "native.wishlist.sort"
+            if let previous = UserDefaults.standard.string(forKey: key), previous == "priority" {
+                UserDefaults.standard.set(wishlistSortWithoutPriority(previous), forKey: key)
+                sortDirection = .descending
+            }
             reload()
         }
         .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.syncCompleted)) { _ in
@@ -3076,11 +3079,10 @@ private struct WishlistView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                             HStack(spacing: 8) {
-                                Label(tkLocalized(item.priority.label), systemImage: item.priority.symbol)
                                 if item.pendingBuy { Label("待购买", systemImage: "cart") }
                             }
                             .font(.caption)
-                            .foregroundStyle(item.priority.tint)
+                            .foregroundStyle(.secondary)
                             if !item.tags.isEmpty {
                                 TagBadgeRow(tags: item.tags)
                             }
@@ -3257,12 +3259,6 @@ private struct WishlistView: View {
         switch sort {
         case .recentlyAdded:
             return lhs.addedAt == rhs.addedAt ? .orderedSame : (lhs.addedAt < rhs.addedAt ? .orderedAscending : .orderedDescending)
-        case .priority:
-            let rank: [WishlistPriority: Int] = [.high: 0, .medium: 1, .low: 2]
-            guard rank[lhs.priority] != rank[rhs.priority] else {
-                return lhs.title.localizedStandardCompare(rhs.title)
-            }
-            return (rank[lhs.priority] ?? 1) < (rank[rhs.priority] ?? 1) ? .orderedAscending : .orderedDescending
         case .title:
             return lhs.title.localizedStandardCompare(rhs.title)
         case .author:
@@ -3599,12 +3595,12 @@ private struct IOSCompactWishlistCard: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .multilineTextAlignment(.leading)
-                HStack(spacing: 4) {
-                    Image(systemName: item.priority.symbol)
-                    Text(tkLocalized(item.priority.label))
+                if !item.author.isEmpty {
+                    Text(item.author)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .font(.caption)
-                .foregroundStyle(item.priority.tint)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
@@ -3711,9 +3707,6 @@ private struct DetailedWishlistCard: View {
             } else {
                 HStack(spacing: 4) {
                     isbnBadge
-                    Label(tkLocalized(item.priority.label), systemImage: item.priority.symbol)
-                        .foregroundStyle(item.priority.tint)
-                        .lineLimit(1)
                     Spacer(minLength: 6)
                     if let bestQuote {
                         Link(destination: bestQuote.url) {
@@ -3891,7 +3884,7 @@ private struct WishlistCard: View {
         .contentShape(.rect)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("wishlist.book.card.\(item.id)")
-        .accessibilityLabel("\(item.title), \(item.author), \(tkLocalized(item.priority.label))")
+        .accessibilityLabel("\(item.title), \(item.author)")
         .accessibilityHint(tkLocalized(isExpanded ? "收起详细卡片" : "展开详细卡片"))
     }
 
@@ -4116,11 +4109,6 @@ private struct WishlistEditorView: View {
                     EditorTagInput(tagsText: $draft.tagsText, input: $pendingTag)
                 }
                 Section("购买计划") {
-                    Picker("优先级", selection: $draft.priority) {
-                        ForEach(WishlistPriority.allCases, id: \.self) { value in
-                            Text(value.label).tag(value)
-                        }
-                    }
                     Toggle("标记为待购买", isOn: $draft.pendingBuy)
                 }
                 if let validationMessage {
@@ -4921,86 +4909,44 @@ private struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(NativeSyncCoordinator.self) private var syncCoordinator
     @AppStorage("tomekeep.apiBaseURL") private var apiBaseURL = "https://tomekeep.pages.dev/api/"
-    @State private var username = ""
-    @State private var password = ""
     @State private var currentUser: AuthUser?
     @State private var isWorking = false
     @State private var message: String?
     @State private var messageIsError = false
     @State private var isManagingInvites = false
-    @State private var isRegistering = false
+    @State private var isShowingServiceSettings = false
     @State private var isShowingMigration = false
     let platform: TomeKeepPlatform
 
     var body: some View {
         Form {
-            Section("同步服务") {
-                TextField("API 地址", text: $apiBaseURL)
-#if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-#endif
-                Text("正式服务默认使用 TomeKeep Cloud；本地开发可填写 Mac 的局域网地址和 `/api/` 路径。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                syncStatus
-            }
-
             Section("账户") {
                 if let currentUser {
-                    LabeledContent("当前账户", value: currentUser.username)
                     LabeledContent("用户名", value: currentUser.username)
                     if currentUser.isAdmin {
-                        Label("管理员", systemImage: "checkmark.shield.fill")
-                            .foregroundStyle(.blue)
                         Button("管理邀请码", systemImage: "ticket") { isManagingInvites = true }
                     }
-                    Button {
-                        Task { await synchronize() }
-                    } label: {
-                        if syncCoordinator.isSyncing { ProgressView().controlSize(.small) }
-                        else { Label("立即同步", systemImage: "arrow.triangle.2.circlepath") }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isWorking || syncCoordinator.isSyncing)
-                    Button("退出登录", role: .destructive) { logout() }
-                } else {
-                    TextField("用户名", text: $username)
-#if os(iOS)
-                        .textInputAutocapitalization(.never)
-#endif
-                    SecureField("密码", text: $password)
-                    Button {
-                        Task { await login() }
-                    } label: {
-                        if isWorking { ProgressView().controlSize(.small) }
-                        else { Text("登录") }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isWorking || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-                    Button("使用邀请码注册") { isRegistering = true }
                 }
-                if let message {
+                Button("退出登录", role: .destructive) { logout() }
+                if let message, messageIsError {
                     Text(message)
                         .font(.caption)
-                        .foregroundStyle(messageIsError ? Color.red : Color.secondary)
+                        .foregroundStyle(.red)
                 }
             }
 
-            Section("本机数据") {
-                LabeledContent("存储方式", value: tkLocalized("SwiftData，本地优先"))
-                LabeledContent("凭据", value: tkLocalized("系统钥匙串"))
-                Text("登录和同步不会改变 Electron/PWA 的旧数据目录。网络不可用时，本机录入仍可继续。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Section(tkLocalized("同步")) {
+                syncStatus
                 Button {
-                    isShowingMigration = true
+                    Task { await synchronize() }
                 } label: {
-                    Label(platform == .iOS ? "从 Mac 转移数据" : "数据迁移", systemImage: "externaldrive.badge.plus")
+                    Label("立即同步", systemImage: "arrow.triangle.2.circlepath")
                 }
+                .disabled(isWorking || syncCoordinator.isSyncing)
             }
+
 #if os(iOS)
-            Section("更多功能") {
+            Section(tkLocalized("书籍管理")) {
                 NavigationLink {
                     ReadingProfilesView()
                 } label: {
@@ -5011,27 +4957,20 @@ private struct SettingsView: View {
                 } label: {
                     Label("价格记录", systemImage: "tag")
                 }
-                Text("阅读档案和历史价格保留完整能力，但不占用主要标签栏。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 #endif
+
+            Section {
+                DisclosureGroup(tkLocalized("高级设置")) {
+                    Button(tkLocalized("服务设置"), systemImage: "network") { isShowingServiceSettings = true }
+                    Button("数据迁移", systemImage: "externaldrive.badge.plus") { isShowingMigration = true }
+                }
+            }
         }
         .formStyle(.grouped)
         .navigationTitle(Text(verbatim: tkLocalized("设置")))
 #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-#endif
-#if os(macOS)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(tkLocalized("数据迁移"), systemImage: "externaldrive.badge.plus") {
-                    isShowingMigration = true
-                }
-                .labelStyle(.iconOnly)
-                .help(Text(verbatim: tkLocalized("数据迁移")))
-            }
-        }
 #endif
         .task { await restoreSession() }
         .sheet(isPresented: $isManagingInvites) {
@@ -5039,25 +4978,8 @@ private struct SettingsView: View {
                 AdminInvitesView(baseURL: baseURL)
             }
         }
-        .sheet(isPresented: $isRegistering) {
-            if let baseURL = validatedBaseURL {
-                RegistrationView(baseURL: baseURL) { user in
-                    currentUser = user
-                    syncCoordinator.markSignedIn()
-                    ProfileAccountContext.currentID = user.id
-                    username = ""
-                    password = ""
-                    messageIsError = false
-                    message = tkLocalized("注册并登录成功，正在同步数据。")
-                    Task { await synchronize(trigger: .login) }
-                }
-            } else {
-                ContentUnavailableView(
-                    "同步地址无效",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text("请先关闭此窗口，并在设置中填写有效的 API 地址。")
-                )
-            }
+        .sheet(isPresented: $isShowingServiceSettings) {
+            ServiceConfigurationView(apiBaseURL: $apiBaseURL)
         }
         .sheet(isPresented: $isShowingMigration) {
             NavigationStack { LegacyMigrationView() }
@@ -5110,44 +5032,6 @@ private struct SettingsView: View {
     }
 
     @MainActor
-    private func login() async {
-        guard let baseURL = validatedBaseURL else {
-            message = tkLocalized("请输入有效的 HTTPS 地址；本地调试允许 localhost、127.0.0.1 或局域网 HTTP 地址。")
-            return
-        }
-        isWorking = true
-        message = nil
-        messageIsError = false
-        defer { isWorking = false }
-        do {
-            currentUser = try await AuthenticationService(baseURL: baseURL).login(
-                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
-                password: password
-            )
-            syncCoordinator.markSignedIn()
-            ProfileAccountContext.currentID = currentUser?.id
-            password = ""
-            let result = await syncCoordinator.synchronize(
-                context: modelContext,
-                baseURL: baseURL,
-                uploadsPriceCache: platform == .macOS,
-                trigger: .login
-            )
-            if let result {
-                message = tkLocalizedFormat("登录并同步完成：接收 %lld 条，发送 %lld 条。", result.pulled, result.pushed)
-            } else if let error = syncCoordinator.lastError {
-                messageIsError = true
-                message = tkLocalizedFormat("登录成功，但%@", error)
-            } else {
-                message = tkLocalized("登录成功；同步请求已加入队列。")
-            }
-        } catch {
-            messageIsError = true
-            message = localizedAuthenticationError(error)
-        }
-    }
-
-    @MainActor
     private func restoreSession() async {
         guard let baseURL = validatedBaseURL else { return }
         isWorking = true
@@ -5169,11 +5053,6 @@ private struct SettingsView: View {
 
     @MainActor
     private func synchronize() async {
-        await synchronize(trigger: .manual)
-    }
-
-    @MainActor
-    private func synchronize(trigger: NativeSyncTrigger) async {
         guard let baseURL = validatedBaseURL else {
             messageIsError = true
             message = tkLocalized("同步地址无效。")
@@ -5181,20 +5060,12 @@ private struct SettingsView: View {
         }
         message = nil
         messageIsError = false
-        let result = await syncCoordinator.synchronize(
+        _ = await syncCoordinator.synchronize(
             context: modelContext,
             baseURL: baseURL,
             uploadsPriceCache: platform == .macOS,
-            trigger: trigger
+            trigger: .manual
         )
-        if let result {
-            message = tkLocalizedFormat("同步完成：接收 %lld 条，发送 %lld 条。", result.pulled, result.pushed)
-        } else if let error = syncCoordinator.lastError {
-            messageIsError = true
-            message = error
-        } else {
-            message = tkLocalized("同步请求已加入队列。")
-        }
     }
 
     private func logout() {
@@ -5206,7 +5077,10 @@ private struct SettingsView: View {
             syncCoordinator.clearSessionStatus()
             message = nil
             messageIsError = false
-        } catch { message = tkLocalized("无法从钥匙串移除登录信息。") }
+        } catch {
+            messageIsError = true
+            message = tkLocalized("无法从钥匙串移除登录信息。")
+        }
     }
 
     private var validatedBaseURL: URL? {
@@ -5222,16 +5096,6 @@ private struct SettingsView: View {
         if host.hasPrefix("192.168.") || host.hasPrefix("10.") { return true }
         let parts = host.split(separator: ".").compactMap { Int($0) }
         return parts.count == 4 && parts[0] == 172 && (16...31).contains(parts[1])
-    }
-
-    private func localizedAuthenticationError(_ error: Error) -> String {
-        if case APIClientError.rejected(statusCode: 401, message: _) = error {
-            return tkLocalized("用户名或密码不正确。")
-        }
-        if case APIClientError.rejected(statusCode: 429, message: _) = error {
-            return tkLocalized("尝试次数过多，请稍后再试。")
-        }
-        return tkErrorDescription(error, fallback: "无法连接同步服务。")
     }
 }
 
@@ -5500,15 +5364,6 @@ private struct AdminInvitesView: View {
             message = tkErrorDescription(error, fallback: "无法删除邀请码。")
         }
     }
-}
-
-private extension WishlistPriority {
-    var label: String {
-        let key = switch self { case .high: "高"; case .medium: "中"; case .low: "低" }
-        return tkLocalized(key)
-    }
-    var symbol: String { switch self { case .high: "exclamationmark.circle.fill"; case .medium: "circle.fill"; case .low: "arrow.down.circle.fill" } }
-    var tint: Color { switch self { case .high: .red; case .medium: .orange; case .low: .secondary } }
 }
 
 private extension ReadingStatus {

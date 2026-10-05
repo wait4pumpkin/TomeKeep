@@ -8,6 +8,39 @@ func compactTopControls(scrollOffset: CGFloat, wasCompact: Bool) -> Bool {
     wasCompact ? scrollOffset > 16 : scrollOffset > 80
 }
 
+func wishlistSortWithoutPriority(_ rawValue: String) -> String {
+    rawValue == "priority" ? "recentlyAdded" : rawValue
+}
+
+func shouldBreatheReadingProgress(reduceMotion: Bool, isActive: Bool) -> Bool {
+    !reduceMotion && isActive
+}
+
+struct ReadingProgressBreathing: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var pulse = false
+
+    private var animates: Bool {
+        shouldBreatheReadingProgress(reduceMotion: reduceMotion, isActive: scenePhase == .active)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(pulse ? 0.78 : 1)
+            .task(id: animates) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { pulse = false }
+                guard animates else { return }
+                // Brightness only: never animate the reading value or layout.
+                withAnimation(.timingCurve(0.77, 0, 0.175, 1, duration: 1.6).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            }
+    }
+}
+
 #if os(iOS)
 struct IOSScrollDensityObserver: ViewModifier {
     @Binding var isCompact: Bool
@@ -109,26 +142,11 @@ struct ReadingProfileMenu: View {
 
 struct SyncActivityIndicator: View {
     @Environment(NativeSyncCoordinator.self) private var coordinator
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var pulse = false
-
-    private var animates: Bool { coordinator.isSyncing && !reduceMotion && scenePhase == .active }
 
     var body: some View {
         Circle()
             .fill(coordinator.lastError != nil ? Color.orange : (coordinator.isSyncing ? Color.accentColor : Color.secondary))
             .frame(width: 7, height: 7)
-            .opacity(pulse ? 0.4 : 1)
             .accessibilityLabel(tkLocalized(coordinator.lastError != nil ? "同步失败" : (coordinator.isSyncing ? "同步中" : "同步空闲")))
-            .task(id: animates) {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { pulse = false }
-                guard animates else { return }
-                withAnimation(.timingCurve(0.77, 0, 0.175, 1, duration: 1.6).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
-            }
     }
 }
