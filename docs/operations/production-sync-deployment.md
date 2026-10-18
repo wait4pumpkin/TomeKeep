@@ -2,7 +2,7 @@
 title: "Production Sync Deployment"
 owner: platform-team
 status: active
-last_reviewed: 2026-10-03
+last_reviewed: 2026-10-18
 review_cycle_days: 30
 ---
 
@@ -44,7 +44,17 @@ iPhone / Mac local edit
 
 网络或服务端失败时，本地写入保留为 pending；后续启动、前台、登录、本地变更或手动同步会重试。设置页必须显示最近一次同步结果或失败原因。
 
-## 回滚
+## 2026-10-18 首次同步故障
+
+iPhone 13 的迁移副本可见不等同于云同步通过。两台 iPhone 的账户及 API 一致时，iPhone 16 实际脱敏诊断为 `books / items.Index 96.detailUrl` 响应解析失败：旧关联网址由 Swift `URL.Decodable` 严格解析时使整页失败。原生已改为先接收字符串，仅将有效 HTTP(S) 地址映射为可打开链接；无效可选地址不阻断记录，不修改服务端原值或旧端契约。
+
+只读 D1 核验进一步确认：旧记录同时包含 ISO 毫秒日期（如 `2026-03-26T15:59:55.461Z`）与 SQLite UTC 日期（如 `2026-04-11 15:13:19`），且存在 5 个空关联网址。旧客户端只解析 ISO，`compactMap` 跳过日期无法解析的记录后仍推进游标，是修正 URL 后仍同步空库的第二原因。已兼容 SQLite UTC 日期，书籍/愿望遇到无法解析的必需日期时明确失败、不推进该页游标。每个账户/设备通过 `native.sync.sqliteDateReplay.<accountID>` 标记成功完成一次全量重拉，以恢复已被错误游标跳过的记录；复用 LWW 合并，不清库、不改变 pending 规则，成功后恢复增量同步。
+
+设置页现在显示具体网络原因或响应接口/字段；`native.sync.lastError`、`native.sync.lastAttemptAt` 在本机 Preferences 保存最近失败的脱敏说明和时间，成功或退出时清除错误；不保存 Token、响应正文或字段值。排障可在用户授权后导出应用 Preferences，不要读取钥匙串。首次同步应验证一台无迁移副本的设备，而非只验证已迁移设备能打开列表。
+
+本轮验证：59 项 Swift 回归测试、macOS 构建、iOS 签名构建及两机覆盖安装通过；iPhone 13 已回读确认 `native.sync.sqliteDateReplay.<accountID>` 成功标记且无失败记录。iPhone 16 最终修复版本因锁屏无法启动，实际首次下载与记录数验证尚未完成，需解锁打开后继续；不得以“没有 lastError”替代记录数核验。
+
+## 回滚步骤
 
 - Pages：回滚到上一成功部署。
 - 客户端：API 保持向后兼容，旧 PWA/Electron 在原生验收前继续保留。

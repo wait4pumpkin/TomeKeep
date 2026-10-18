@@ -70,15 +70,18 @@ public final class NativeSyncEngine {
             // native price-cache sync yet. Core data sync must still proceed.
             priceSync = SyncResult(pulled: 0, pushed: 0)
         }
-        let pulled = try await pull(repository: repository, token: token)
+        let replayKey = "native.sync.sqliteDateReplay.\(user.id)"
+        let needsDateReplay = !UserDefaults.standard.bool(forKey: replayKey)
+        let pulled = try await pull(repository: repository, token: token, replayAll: needsDateReplay)
         let pushed = try await push(repository: repository, token: token)
+        UserDefaults.standard.set(true, forKey: replayKey)
         return SyncResult(
             pulled: pulled + remoteProfiles.count + priceSync.pulled,
             pushed: pushed + profilePushes + priceSync.pushed
         )
     }
 
-    private func pull(repository: LocalSyncRepository, token: String) async throws -> Int {
+    private func pull(repository: LocalSyncRepository, token: String, replayAll: Bool) async throws -> Int {
         let cursors = try repository.cursors()
         let status = try await client.request(SyncStatusResponse.self, path: "sync/status", bearerToken: token)
         var count = 0
@@ -90,19 +93,19 @@ public final class NativeSyncEngine {
         count += try await pullBooks(
             repository: repository,
             token: token,
-            since: cursors.books,
+            since: replayAll ? "" : cursors.books,
             finalCursor: status.books
         )
         count += try await pullWishlist(
             repository: repository,
             token: token,
-            since: cursors.wishlist,
+            since: replayAll ? "" : cursors.wishlist,
             finalCursor: status.wishlist
         )
         count += try await pullReadingStates(
             repository: repository,
             token: token,
-            since: cursors.readingStates,
+            since: replayAll ? "" : cursors.readingStates,
             finalCursor: status.readingStates
         )
         await downloadMissingBookCovers(repository: repository, token: token)
@@ -271,7 +274,10 @@ public final class NativeSyncEngine {
                 path: pagedPath("books", since: since, pageCursor: pageCursor),
                 bearerToken: token
             )
-            let records = page.items.compactMap(\.syncRecord)
+            let records = try page.items.map { row in
+                guard let record = row.syncRecord else { throw NativeSyncError.invalidRecordDate }
+                return record
+            }
             try repository.mergeBooks(records, cursor: nil)
             total += records.count
             pageCursor = page.nextCursor
@@ -349,7 +355,10 @@ public final class NativeSyncEngine {
                 path: pagedPath("wishlist", since: since, pageCursor: pageCursor),
                 bearerToken: token
             )
-            let records = page.items.compactMap(\.syncRecord)
+            let records = try page.items.map { row in
+                guard let record = row.syncRecord else { throw NativeSyncError.invalidRecordDate }
+                return record
+            }
             try repository.mergeWishlist(records, cursor: nil)
             total += records.count
             pageCursor = page.nextCursor
@@ -401,7 +410,13 @@ public final class NativeSyncEngine {
 
 public enum NativeSyncError: LocalizedError, Equatable, Sendable {
     case notAuthenticated
-    public var errorDescription: String? { "请先登录同步账户。" }
+    case invalidRecordDate
+    public var errorDescription: String? {
+        switch self {
+        case .notAuthenticated: "请先登录同步账户。"
+        case .invalidRecordDate: "服务器记录的日期格式无效，同步进度未推进。"
+        }
+    }
 }
 
 private struct SyncStatusResponse: Decodable, Sendable {
@@ -433,14 +448,14 @@ private struct APIPagedCursor: Decodable, Sendable {
     var after: String
 }
 
-private struct APIBook: Decodable, Sendable {
+struct APIBook: Decodable, Sendable {
     var id: String
     var title: String
     var author: String
     var isbn: String?
     var publisher: String?
     var coverKey: String?
-    var detailUrl: URL?
+    var detailUrl: String?
     var tags: [String]
     var addedAt: String
     var updatedAt: String
@@ -451,7 +466,7 @@ private struct APIBook: Decodable, Sendable {
         return BookSyncRecord(
             book: Book(
                 id: id, title: title, author: author, isbn: isbn, publisher: publisher,
-                coverKey: coverKey, detailURL: detailUrl, tags: tags,
+                coverKey: coverKey, detailURL: remoteDetailURL(detailUrl), tags: tags,
                 addedAt: addedAt, updatedAt: updatedAt, syncStatus: .synced
             ),
             deletedAt: deletedAt.flatMap(Self.date)
@@ -460,18 +475,23 @@ private struct APIBook: Decodable, Sendable {
 
     static func date(_ value: String) -> Date? {
         if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(value) { return date }
-        return try? Date.ISO8601FormatStyle().parse(value)
+        if let date = try? Date.ISO8601FormatStyle().parse(value) { return date }
+        // D1 datetime('now') is UTC but uses a space and omits the timezone.
+        guard value.range(of: #"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$"#, options: .regularExpression) != nil else { return nil }
+        let normalized = value.replacingOccurrences(of: " ", with: "T") + "Z"
+        return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(normalized))
+            ?? (try? Date.ISO8601FormatStyle().parse(normalized))
     }
 }
 
-private struct APIWishlistItem: Decodable, Sendable {
+struct APIWishlistItem: Decodable, Sendable {
     var id: String
     var title: String
     var author: String
     var isbn: String?
     var publisher: String?
     var coverKey: String?
-    var detailUrl: URL?
+    var detailUrl: String?
     var tags: [String]
     var priority: String
     var pendingBuy: Bool
@@ -484,13 +504,25 @@ private struct APIWishlistItem: Decodable, Sendable {
         return WishlistSyncRecord(
             item: WishlistItem(
                 id: id, title: title, author: author, isbn: isbn, publisher: publisher,
-                coverKey: coverKey, detailURL: detailUrl, tags: tags,
+                coverKey: coverKey, detailURL: remoteDetailURL(detailUrl), tags: tags,
                 priority: WishlistPriority(rawValue: priority) ?? .medium,
                 pendingBuy: pendingBuy, addedAt: addedAt, updatedAt: updatedAt, syncStatus: .synced
             ),
             deletedAt: deletedAt.flatMap(APIBook.date)
         )
     }
+}
+
+// An optional legacy link must not make a whole page of books undecodable.
+// Retain the server record unchanged; only expose usable web links to the UI.
+func remoteDetailURL(_ rawValue: String?) -> URL? {
+    guard let rawValue,
+          !rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          let url = URL(string: rawValue.trimmingCharacters(in: .whitespacesAndNewlines)),
+          let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+          let host = url.host, !host.isEmpty
+    else { return nil }
+    return url
 }
 
 private struct APIReadingState: Decodable, Sendable {

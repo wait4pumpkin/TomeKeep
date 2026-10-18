@@ -2,7 +2,7 @@
 title: "Apple Device Development Signing"
 owner: engineering
 status: active
-last_reviewed: 2026-10-03
+last_reviewed: 2026-10-18
 review_cycle_days: 30
 ---
 
@@ -72,11 +72,13 @@ launchctl kickstart -k gui/$(id -u)/com.tomekeep.renew
 ./scripts/install-device.sh L2BT252BF2 --refresh
 ```
 
-## 当前签名状态（2026-10-03）
+## 当前签名状态（2026-10-18）
 
-- Xcode Accounts 重新登录后，`--refresh` 已真实生成 UUID `d2b350bb-e3f7-46e7-a5f5-a94d616f50ba` 的双设备描述文件，有效至 2026-10-10 18:38（Asia/Shanghai）。
+- 10 月 16—18 日后台日志持续出现 `No Accounts` / Xcode Keychain 凭据缺失，另有设备锁定导致准备超时；定时任务存在，但续签没有成功。
+- Xcode Accounts 重新登录后，`--refresh` 已真实生成 UUID `7a2f3e5e-a293-4797-af32-88c44295ffd4` 的双设备描述文件，有效至 2026-10-25 22:37（Asia/Shanghai）。
 - 同一构建已覆盖安装到 iPhone 16 Pro 与 iPhone 13 Pro；数据容器 UUID 分别仍为 `EE67CFEA-4F00-432C-BE41-FA83CC1907EF` 与 `C9BFA6C7-1FFD-4787-AD09-CF4B29FB73E3`，本机数据未被清空。
-- launchd 已安装，续签源快照已随本次部署刷新；到期前 48 小时会自动重签并在设备可达时再次覆盖安装。
+- iPhone 13 Pro 已通过设备工具启动验证；iPhone 16 Pro 安装成功，但启动验证被锁屏阻止，需解锁后手动打开。
+- launchd 续签源快照已刷新；手工触发后台检查后退出码为 0，日志确认有效期超过 48 小时并跳过重装。该检查验证调度与描述文件读取，不等同于验证未来到期时的完整后台刷新链路；Xcode 凭据和设备可达性仍须保持有效。
 
 ## 能力边界
 

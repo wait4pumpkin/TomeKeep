@@ -78,7 +78,7 @@ public actor APIClient {
             bearerToken: bearerToken,
             body: try JSONEncoder.tomeKeep.encode(body)
         )
-        return try JSONDecoder.tomeKeep.decode(Response.self, from: data)
+        return try decode(Response.self, from: data, path: path)
     }
 
     public func request<Response: Decodable>(
@@ -87,7 +87,33 @@ public actor APIClient {
         bearerToken: String?
     ) async throws -> Response {
         let responseData = try await data(for: path, bearerToken: bearerToken)
-        return try JSONDecoder.tomeKeep.decode(Response.self, from: responseData)
+        return try decode(Response.self, from: responseData, path: path)
+    }
+
+    private func decode<Response: Decodable>(_ type: Response.Type, from data: Data, path: String) throws -> Response {
+        do {
+            return try JSONDecoder.tomeKeep.decode(type, from: data)
+        } catch let error as DecodingError {
+            throw APIResponseDecodingError(path: path, error: error)
+        }
+    }
+}
+
+/// Safe response diagnostics: endpoint and schema field only, never response values or tokens.
+public struct APIResponseDecodingError: Error, Sendable, Equatable {
+    public let endpoint: String
+    public let field: String
+
+    public init(path: String, error: DecodingError) {
+        endpoint = path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
+        let keys: [any CodingKey]
+        switch error {
+        case let .keyNotFound(key, context): keys = context.codingPath + [key]
+        case let .typeMismatch(_, context), let .valueNotFound(_, context), let .dataCorrupted(context):
+            keys = context.codingPath
+        @unknown default: keys = []
+        }
+        field = keys.map(\.stringValue).joined(separator: ".")
     }
 }
 

@@ -80,6 +80,7 @@ final class NativeSyncCoordinator {
                 lastResult = result
                 lastSuccessAt = .now
                 lastError = nil
+                UserDefaults.standard.removeObject(forKey: "native.sync.lastError")
                 NotificationCenter.default.post(
                     name: TomeKeepAppNotification.syncCompleted,
                     object: nil
@@ -89,7 +90,10 @@ final class NativeSyncCoordinator {
                     try? KeychainTokenStore().delete()
                     accountState = .signedOut
                 }
-                lastError = tkErrorDescription(error, fallback: "同步失败；本机数据没有丢失。")
+                lastError = tkLocalizedFormat("同步失败：%@", tkErrorDescription(error, fallback: "请重试；若持续失败，请联系支持。"))
+                // Persist only the safe user-facing diagnostic, not request/response payloads.
+                UserDefaults.standard.set(lastError, forKey: "native.sync.lastError")
+                UserDefaults.standard.set(Date.now, forKey: "native.sync.lastAttemptAt")
             }
             nextOperation = pendingOperation
             nextTrigger = pendingTrigger
@@ -118,6 +122,8 @@ final class NativeSyncCoordinator {
     }
 
     func clearSessionStatus() {
+        UserDefaults.standard.removeObject(forKey: "native.sync.lastError")
+        UserDefaults.standard.removeObject(forKey: "native.sync.lastAttemptAt")
         lastResult = nil
         lastSuccessAt = nil
         lastError = nil

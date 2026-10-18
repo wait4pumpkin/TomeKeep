@@ -1,5 +1,9 @@
 # API Surface
 
+原生客户端响应诊断（2026-10-18）：共享 Swift `APIClient.request` 将 JSON 解码失败包装为 `APIResponseDecodingError(endpoint, field)`，只包含去除查询参数的接口与字段路径，不包含响应值或令牌。HTTP 路由、认证和响应契约不变；原生书籍/愿望关联 URL 对旧空值和无效网址采取可选映射，不再因可选链接使整页下载失败。
+
+原生同步兼容旧 `datetime('now')` UTC 时间与 ISO 时间；书籍/愿望必需日期异常时返回明确错误，不再静默跳过并推进游标。客户端按账户/设备重拉一次恢复历史遗漏，不修改服务端时间格式或数据。
+
 > This file is generated or maintained from code and should reflect current public API behavior.
 
 ## Endpoints / Interfaces

@@ -43,6 +43,19 @@ func tkLocalizedFormat(_ key: String, _ arguments: CVarArg...) -> String {
 }
 
 func tkErrorDescription(_ error: Error, fallback: String) -> String {
+    if let decoding = error as? APIResponseDecodingError {
+        return tkLocalizedFormat("服务器数据格式不兼容（%@，字段 %@）。", decoding.endpoint, decoding.field.isEmpty ? "root" : decoding.field)
+    }
+    if let network = error as? URLError {
+        switch network.code {
+        case .notConnectedToInternet: return tkLocalized("无法连接网络，请检查网络连接后重试。")
+        case .timedOut: return tkLocalized("连接服务器超时，请稍后重试。")
+        case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+            return tkLocalized("无法连接同步服务器，请检查网络和服务地址。")
+        case .networkConnectionLost: return tkLocalized("网络连接已中断，请重试。")
+        default: return tkLocalizedFormat("网络请求失败（错误 %lld）。", network.code.rawValue)
+        }
+    }
     if let keychain = error as? KeychainError {
         return tkLocalizedFormat("无法访问钥匙串（%d）。", keychain.status)
     }
@@ -51,7 +64,8 @@ func tkErrorDescription(_ error: Error, fallback: String) -> String {
         return message.map { tkLocalized($0) } ?? tkLocalizedFormat("请求失败（HTTP %lld）。", statusCode)
     }
     guard let description = (error as? LocalizedError)?.errorDescription else {
-        return tkLocalized(fallback)
+        let underlying = error as NSError
+        return tkLocalizedFormat("%@（%@，错误 %lld）。", tkLocalized(fallback), underlying.domain, underlying.code)
     }
     return tkLocalized(description)
 }

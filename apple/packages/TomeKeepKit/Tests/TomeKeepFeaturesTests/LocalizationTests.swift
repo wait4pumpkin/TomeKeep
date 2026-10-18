@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TomeKeepNetworking
 @testable import TomeKeepFeatures
 
 @Test func englishResourcesLocalizeStaticAndFormattedInterfaceCopy() {
@@ -32,3 +33,16 @@ import Testing
 private struct ExternalErrorStub: LocalizedError {
     var errorDescription: String? { "服务器返回了无法识别的响应。" }
 }
+
+@Test func networkFailuresExposeActionableReasonsInsteadOfDataLossReassurance() {
+    let description = tkErrorDescription(URLError(.notConnectedToInternet), fallback: "同步失败；本机数据没有丢失。")
+    #expect(description == tkLocalized("无法连接网络，请检查网络连接后重试。"))
+    let missing = DecodingError.keyNotFound(TestSyncKey.field, .init(codingPath: [], debugDescription: "private value"))
+    let decoding = APIResponseDecodingError(path: "books?private=value", error: missing)
+    let message = tkErrorDescription(decoding, fallback: "error")
+    #expect(message.contains("books"))
+    #expect(message.contains("field"))
+    #expect(!message.contains("private value"))
+}
+
+private enum TestSyncKey: String, CodingKey { case field }

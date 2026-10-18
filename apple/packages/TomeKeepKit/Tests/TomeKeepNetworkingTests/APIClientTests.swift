@@ -75,6 +75,22 @@ struct APIClientTests {
         #expect(try await userAuth.restoredUser() == user)
     }
 
+    @Test
+    func decodingFailuresIdentifyEndpointAndFieldWithoutLeakingValues() async throws {
+        let session = makeSession { request in
+            let body = Data(#"{"id":"u1","username":42}"#.utf8)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let client = APIClient(baseURL: URL(string: "https://example.test/api/")!, session: session)
+        do {
+            _ = try await client.request(AuthUser.self, path: "auth/me?private=value", bearerToken: "secret")
+            Issue.record("Expected a decoding error")
+        } catch let error as APIResponseDecodingError {
+            #expect(error.endpoint == "auth/me")
+            #expect(error.field == "username")
+        }
+    }
+
     private func makeSession(
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> URLSession {
