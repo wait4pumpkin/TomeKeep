@@ -52,13 +52,21 @@ public func parseClipboardBookSeed(_ input: String) -> ClipboardBookSeed? {
     guard !value.isEmpty else { return nil }
 
     if let components = URLComponents(string: value),
-       components.host?.lowercased() == "book.douban.com" {
+       let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme) {
         let parts = components.path.split(separator: "/")
-        if parts.count >= 2,
-           parts[0].lowercased() == "subject",
-           !parts[1].isEmpty,
-           parts[1].allSatisfy(\.isNumber),
-           let url = URL(string: "https://book.douban.com/subject/\(parts[1])/") {
+        let host = components.host?.lowercased()
+        let subjectID: Substring?
+        if host == "book.douban.com", parts.count >= 2, parts[0].lowercased() == "subject" {
+            subjectID = parts[1]
+        } else if ["www.douban.com", "douban.com"].contains(host ?? ""),
+                  parts.count == 4, parts[0] == "doubanapp", parts[1] == "dispatch", parts[2] == "book" {
+            subjectID = parts[3]
+        } else {
+            subjectID = nil
+        }
+        if let subjectID, !subjectID.isEmpty,
+           subjectID.utf8.allSatisfy({ (48...57).contains($0) }),
+           let url = URL(string: "https://book.douban.com/subject/\(subjectID)/") {
             return .doubanURL(url)
         }
     }

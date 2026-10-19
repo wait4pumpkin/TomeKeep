@@ -36,6 +36,7 @@ TomeKeep 的正式客户端面向 macOS 与 iOS。两端使用 SwiftUI 原生实
 - 标签、搜索、排序和筛选。
 - ISBN 校验、规范化与语义展示。
 - 新增书库或愿望时可从剪贴板识别豆瓣详情 URL、ISBN 或书名；macOS 可自动检查豆瓣 URL，iOS 只在用户明确点击导入后读取剪贴板。
+- 豆瓣图书 App 分享地址 `https://www.douban.com/doubanapp/dispatch/book/<id>?...`（含无 www 形式）与标准 `book.douban.com/subject/<id>/` 共用导入流程，统一为 HTTPS 详情地址并丢弃分享参数；仅识别可信域名、HTTP(S) 与数字图书 ID，不扩展为任意跳转或其他内容类型。
 - 豆瓣/OpenLibrary/isbnsearch 元数据瀑布流。
 - 豆瓣标题/作者搜索和候选关联。
 - 封面下载、校验、缓存、上传和修复。

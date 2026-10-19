@@ -12,6 +12,31 @@ import Testing
 }
 
 struct MetadataParserTests {
+    @Test(arguments: [
+        "https://www.douban.com/doubanapp/dispatch/book/35379215?dt_dapp=1",
+        "https://douban.com/doubanapp/dispatch/book/35379215/",
+        " https://www.douban.com/doubanapp/dispatch/book/35379215?dt_dapp=1&from=share#fragment ",
+        "https://book.douban.com/subject/35379215/?from=share"
+    ])
+    func appShareLinksUseTheCanonicalBookPage(_ input: String) throws {
+        #expect(parseClipboardBookSeed(input) == .doubanURL(
+            try #require(URL(string: "https://book.douban.com/subject/35379215/"))
+        ))
+    }
+
+    @Test(arguments: [
+        "https://www.douban.com/doubanapp/dispatch/movie/35379215?dt_dapp=1",
+        "https://www.douban.com/doubanapp/dispatch/book/not-a-number",
+        "https://www.douban.com/doubanapp/dispatch/book/",
+        "https://www.douban.com.evil.test/doubanapp/dispatch/book/35379215",
+        "https://www.douban.com@evil.test/doubanapp/dispatch/book/35379215",
+        "file://www.douban.com/doubanapp/dispatch/book/35379215",
+        "https://www.douban.com/doubanapp/dispatch/book/３５３７９２１５"
+    ])
+    func unrelatedOrUnsafeShareLinksDoNotTriggerBookLookup(_ input: String) {
+        #expect(parseClipboardBookSeed(input) == .title(input))
+    }
+
     @Test
     func isbnSemanticsAndPublisherAreDerivedWithoutNetworkAccess() throws {
         let isbn = try #require(ISBN("9787115428028"))
@@ -99,6 +124,20 @@ struct MetadataParserTests {
         #expect(result.metadata.publisher == "Litwin Books")
         #expect(result.metadata.coverURL?.absoluteString == "https://covers.openlibrary.org/b/id/5546156-L.jpg")
         #expect(result.metadata.detailURL?.absoluteString == "https://openlibrary.org/works/OL13694821W")
+
+        // Reuse this test's session sequentially; the URLProtocol handler is shared.
+        MetadataURLProtocolStub.handler = { request in
+            #expect(request.url?.absoluteString == "https://book.douban.com/subject/35379215/")
+            let html = #"<h1><span property="v:itemreviewed">Shared book</span></h1>"#
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data(html.utf8)
+            )
+        }
+        let share = try #require(URL(string: "https://www.douban.com/doubanapp/dispatch/book/35379215?dt_dapp=1"))
+        let shared = try await MetadataLookupService(session: session).lookupDoubanURL(share)
+        #expect(shared.metadata.title == "Shared book")
+        #expect(shared.metadata.detailURL?.absoluteString == "https://book.douban.com/subject/35379215/")
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["TOMEKEEP_RUN_LIVE_METADATA_TESTS"] == "1"))
