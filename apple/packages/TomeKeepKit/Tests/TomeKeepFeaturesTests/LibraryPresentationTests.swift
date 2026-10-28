@@ -3,6 +3,16 @@ import Testing
 import TomeKeepDomain
 @testable import TomeKeepFeatures
 
+@Test func commonTagsCountDistinctRecordsExcludeSelectionAndRankStably() {
+    let groups = [[" 常用 ", "常用", "Alpha", ""], ["常用", "Beta"], ["Alpha", "Beta"], ["常用"]]
+    #expect(commonBookTags(in: groups, excluding: []) == ["常用", "Alpha", "Beta"])
+    #expect(commonBookTags(in: groups, excluding: [" 常用 "]) == ["Alpha", "Beta"])
+    #expect(commonBookTags(in: groups, excluding: [], matching: " ALP ") == ["Alpha"])
+    #expect(commonBookTags(in: groups, excluding: [], limit: 1) == ["常用"])
+    #expect(commonBookTags(in: groups, excluding: [], limit: 0).isEmpty)
+    #expect(commonBookTags(in: [], excluding: []).isEmpty)
+}
+
 @Test func retiredWishlistPrioritySortRestoresRecentOrder() {
     #expect(wishlistSortWithoutPriority("priority") == "recentlyAdded")
     for value in ["recentlyAdded", "title", "author", "pendingBuy"] {

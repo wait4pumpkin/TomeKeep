@@ -2,7 +2,7 @@
 title: "Apple Native Client Unification"
 owner: engineering
 status: active
-last_reviewed: 2026-10-01
+last_reviewed: 2026-10-28
 review_cycle_days: 14
 ---
 
@@ -316,6 +316,10 @@ Electron 导入器必须：
 - 未使用接口和部署绑定清理。
 
 ## 9. 验证命令与证据
+
+2026-10-28 快捷标签及待购买：书库/愿望的标签编辑共用本机已有标签建议，按覆盖记录数降序、同频稳定排序，排除已选，保留手输；Mac 卡片新增标签也支持同一建议。iOS 详细列表与封面视图增加独立待购买按钮，不触发编辑，复用既有保存/pending/同步路径；保留滑动和表单操作。无数据库/API/依赖变更，不修改旧 Electron/PWA。补充标签排序、排重和待购买持久化回归，再构建双端并尝试覆盖安装。
+
+本轮验证：全量 Swift 测试通过（含标签计频/去重/排除/输入筛选/数量限制、待购买往返切换持久化及元数据保留、中英文状态文案）；iOS Simulator、签名 iOS 与最终 macOS 构建通过，最终版本已覆盖安装到两台 iPhone 并刷新自动重签源码快照。按 `ui-ux-pro-max` 核对 44 pt 触控区、8 pt 标签间距、独立编辑/切换区域及读屏标签；长标签布局限制在可用宽度内，Mac Escape 不提交输入。真机实际点击是否误开表单、大字号/横屏与深浅色视觉尚待使用验收，不以编译测试替代视觉证明。
 
 2026-10-19 剪贴板分享链接兼容：共享解析器将 `https://www.douban.com/doubanapp/dispatch/book/<id>?...` 及无 www 的同域形式规范化为 `https://book.douban.com/subject/<id>/`，书库/愿望和 iOS/Mac 复用。保留点击读取与原有 ISBN/书名行为；新增标准链接、分享参数、路径/域名/协议负向回归，无新增依赖或服务端代理。
 

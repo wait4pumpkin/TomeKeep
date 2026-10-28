@@ -2,7 +2,7 @@
 title: "Apple Native Clients"
 owner: product-engineering
 status: active
-last_reviewed: 2026-10-05
+last_reviewed: 2026-10-28
 review_cycle_days: 30
 ---
 
@@ -34,6 +34,8 @@ TomeKeep 的正式客户端面向 macOS 与 iOS。两端使用 SwiftUI 原生实
 - 愿望单不提供优先级编辑、排序或展示；迁移期仍原样保留旧端 priority 字段用于数据与协议兼容。
 - 多档案与独立阅读状态。
 - 标签、搜索、排序和筛选。
+- 书库/愿望的新增、编辑标签可点选本机已有的常用标签：合并两类记录，按使用记录数降序，同频按标签稳定排序；过滤已选和空值，输入时可筛选建议，仍可手输新标签。建议默认最多 12 个，保存前只修改草稿；Mac 卡片标签弹出编辑复用建议，选择后立即按现有标签保存流程同步。
+- iOS 愿望详细列表及封面视图均提供独立待购买按钮，不进入表单；选中使用实心购物车与状态读屏反馈，可再次点击取消，保留滑动和编辑表单入口；持久化与自动同步复用原有逻辑。
 - ISBN 校验、规范化与语义展示。
 - 新增书库或愿望时可从剪贴板识别豆瓣详情 URL、ISBN 或书名；macOS 可自动检查豆瓣 URL，iOS 只在用户明确点击导入后读取剪贴板。
 - 豆瓣图书 App 分享地址 `https://www.douban.com/doubanapp/dispatch/book/<id>?...`（含无 www 形式）与标准 `book.douban.com/subject/<id>/` 共用导入流程，统一为 HTTPS 详情地址并丢弃分享参数；仅识别可信域名、HTTP(S) 与数字图书 ID，不扩展为任意跳转或其他内容类型。

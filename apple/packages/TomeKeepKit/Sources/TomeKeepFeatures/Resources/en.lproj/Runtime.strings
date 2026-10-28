@@ -1,6 +1,12 @@
 "%@ · %@" = "%1$@ · %2$@";
 "%@ · %lld 个标签" = "%1$@ · %2$lld tags";
 "%lld 个标签" = "%lld tags";
+"常用标签" = "Frequently Used Tags";
+"添加标签 %@" = "Add tag %@";
+"无法读取常用标签，仍可手动输入。" = "Unable to load suggested tags. You can still type a tag.";
+"取消《%@》的待购买标记" = "Remove “%@” from pending purchases";
+"将《%@》标记为待购买" = "Mark “%@” for purchase";
+"未标记为待购买" = "Not marked for purchase";
 "服务器数据格式不兼容（%@，字段 %@）。" = "The server returned incompatible data (%1$@, field %2$@).";
 "无法连接网络，请检查网络连接后重试。" = "No internet connection. Check your connection and retry.";
 "连接服务器超时，请稍后重试。" = "The server connection timed out. Please retry.";

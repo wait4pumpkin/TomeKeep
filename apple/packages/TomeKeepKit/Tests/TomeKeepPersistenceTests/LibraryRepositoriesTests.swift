@@ -7,6 +7,33 @@ import TomeKeepPersistence
 @MainActor
 struct LibraryRepositoriesTests {
     @Test
+    func quickPendingTogglePersistsAndKeepsBookMetadata() throws {
+        let repository = WishlistRepository(context: try makeContext())
+        let instant = Date(timeIntervalSince1970: 1_700_000_000)
+        let original = WishlistItem(
+            id: "quick-pending", title: "书", author: "作者", isbn: "9780306406157",
+            coverFileName: "keep.jpg", tags: ["文学"], priority: .high,
+            pendingBuy: false, addedAt: instant, updatedAt: instant, syncStatus: .synced
+        )
+        try repository.add(original)
+        var updated = try #require(repository.items().first)
+        updated.pendingBuy.toggle()
+        updated.updatedAt = instant.addingTimeInterval(10)
+        try repository.update(updated)
+        let saved = try #require(repository.items().first)
+        #expect(saved.pendingBuy)
+        #expect(saved.syncStatus == .pending)
+        #expect(saved.title == original.title)
+        #expect(saved.tags == original.tags)
+        #expect(saved.isbn == original.isbn)
+        #expect(saved.coverFileName == original.coverFileName)
+        updated = saved
+        updated.pendingBuy.toggle()
+        try repository.update(updated)
+        #expect(try repository.items().first?.pendingBuy == false)
+    }
+
+    @Test
     func editingWishlistMetadataPreservesLegacyPriority() throws {
         let repository = WishlistRepository(context: try makeContext())
         let instant = Date(timeIntervalSince1970: 1_700_000_000)

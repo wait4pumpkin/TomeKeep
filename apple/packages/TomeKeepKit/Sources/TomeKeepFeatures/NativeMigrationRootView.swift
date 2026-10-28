@@ -621,7 +621,7 @@ private enum WishlistPurchaseFilter: String, CaseIterable {
 
 private let untaggedFilterToken = "__untagged__"
 
-private enum TagPalette {
+enum TagPalette {
     // Mirrors the old client's violet/blue/emerald/amber/rose/sky/fuchsia/teal palette.
     static let colors: [Color] = [
         Color(red: 0.55, green: 0.36, blue: 0.96),
@@ -1941,7 +1941,7 @@ private extension View {
 
 #endif
 
-private struct CompactTagFlowLayout: Layout {
+struct CompactTagFlowLayout: Layout {
     var spacing: CGFloat = 4
 
     func sizeThatFits(
@@ -1956,7 +1956,7 @@ private struct CompactTagFlowLayout: Layout {
         var totalHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: maximumWidth.isFinite ? maximumWidth : nil, height: nil))
             if rowWidth > 0, rowWidth + spacing + size.width > maximumWidth {
                 totalWidth = max(totalWidth, rowWidth)
                 totalHeight += rowHeight + spacing
@@ -1978,7 +1978,7 @@ private struct CompactTagFlowLayout: Layout {
         var point = bounds.origin
         var rowHeight: CGFloat = 0
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
             if point.x > bounds.minX, point.x + size.width > bounds.maxX {
                 point.x = bounds.minX
                 point.y += rowHeight + spacing
@@ -2050,8 +2050,7 @@ private struct InlineBookTagEditor: View {
             ForEach(tags, id: \.self) { tag in
                 let color = TagPalette.color(for: tag)
                 HStack(spacing: 2) {
-                    Text(tag)
-                        .lineLimit(1)
+                    Text(tag).lineLimit(1)
                     TagRemoveButton(tag: tag, color: color) {
                         onChange(tags.filter { $0 != tag })
                     }
@@ -2064,53 +2063,41 @@ private struct InlineBookTagEditor: View {
                 .background(color.opacity(0.12), in: .capsule)
                 .overlay { Capsule().stroke(color.opacity(0.24), lineWidth: 0.5) }
             }
-
-            if isAdding {
-                TextField("标签", text: $input)
-                    .textFieldStyle(.plain)
-                    .font(.caption2)
-                    .padding(.horizontal, 7)
-                    .frame(width: 82, height: 18)
-                    .background(Color(nsColor: .textBackgroundColor), in: .capsule)
-                    .overlay { Capsule().stroke(Color.accentColor.opacity(0.7), lineWidth: 1) }
-                    .background {
-                        OutsideClickMonitor {
-                            guard inputIsFocused else { return }
-                            inputIsFocused = false
+            TagAddButton { isAdding = true }
+                .popover(isPresented: $isAdding, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextField(tkLocalized("新增标签"), text: $input)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($inputIsFocused)
+                            .onSubmit(commitInput)
+                            .onExitCommand {
+                                input = ""
+                                isAdding = false
+                            }
+                        CommonBookTagSuggestions(selected: tags, query: input) { tag in
+                            input = ""
+                            onChange(normalizedBookTags(tags + [tag]))
+                        }
+                        HStack {
+                            Spacer()
+                            Button(tkLocalized("完成")) { isAdding = false }
                         }
                     }
-                    .focused($inputIsFocused)
-                    .onSubmit(commitInput)
-                    .onExitCommand(perform: cancelInput)
-                    .accessibilityLabel(tkLocalized("新增标签"))
-            } else {
-                TagAddButton {
-                    isAdding = true
-                    Task {
-                        await Task.yield()
-                        inputIsFocused = true
-                    }
+                    .padding(16)
+                    .frame(width: 300)
+                    .task { inputIsFocused = true }
                 }
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: inputIsFocused) { wasFocused, isFocused in
-            if wasFocused, !isFocused { commitInput() }
+        .onChange(of: isAdding) { previous, current in
+            if previous, !current { commitInput() }
         }
     }
 
     private func commitInput() {
-        guard isAdding else { return }
         let updated = normalizedBookTags(tags + [input])
         input = ""
-        isAdding = false
         if updated != tags { onChange(updated) }
-    }
-
-    private func cancelInput() {
-        inputIsFocused = false
-        input = ""
-        isAdding = false
     }
 }
 
@@ -2877,9 +2864,11 @@ private struct WishlistView: View {
                             spacing: 12
                         ) {
                             ForEach(filteredItems) { item in
-                                IOSCompactWishlistCard(item: item, coverURL: localCoverURL(item.coverFileName)) {
-                                    presentEdit(item)
-                                }
+                                IOSCompactWishlistCard(
+                                    item: item, coverURL: localCoverURL(item.coverFileName),
+                                    action: { presentEdit(item) },
+                                    onTogglePending: { togglePendingBuy(item) }
+                                )
                                 .contextMenu { wishlistContextMenu(for: item) }
                             }
                         }
@@ -3069,6 +3058,8 @@ private struct WishlistView: View {
 
     private var wishlistList: some View {
         List(filteredItems) { item in
+                HStack(spacing: 8) {
+                    Button { presentEdit(item) } label: {
                     HStack(spacing: 12) {
                         TomeKeepBookCover(fileURL: localCoverURL(item.coverFileName))
                             .frame(width: 44, height: 66)
@@ -3078,16 +3069,24 @@ private struct WishlistView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                            HStack(spacing: 8) {
-                                if item.pendingBuy { Label("待购买", systemImage: "cart") }
+                            if item.pendingBuy {
+                                Label("待购买", systemImage: "cart")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                             if !item.tags.isEmpty {
                                 TagBadgeRow(tags: item.tags)
                             }
                         }
                         Spacer()
+                    }
+                    .contentShape(.rect)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(tkLocalized("打开编辑表单"))
+                    WishlistPendingButton(title: item.title, isPending: item.pendingBuy) { togglePendingBuy(item) }
+                        .accessibilityIdentifier("wishlist.book.pending.\(item.id)")
 #if os(macOS)
                         Button("比价", systemImage: "tag") { pricingItem = item }
                             .buttonStyle(.bordered)
@@ -3099,7 +3098,6 @@ private struct WishlistView: View {
                     }
                     .padding(.vertical, 2)
                     .contentShape(.rect)
-                    .onTapGesture { presentEdit(item) }
                     .contextMenu {
                         wishlistContextMenu(for: item)
                     }
@@ -3131,6 +3129,7 @@ private struct WishlistView: View {
     @ViewBuilder
     private func wishlistContextMenu(for item: WishlistItem) -> some View {
         Button("编辑", systemImage: "pencil") { presentEdit(item) }
+        Button(tkLocalized(item.pendingBuy ? "取消待购买" : "标记为待购买"), systemImage: "cart") { togglePendingBuy(item) }
         if let detailURL = item.detailURL {
             Link(destination: detailURL) { Label("打开关联页面", systemImage: "link") }
         }
@@ -3571,6 +3570,7 @@ private struct IOSCompactWishlistCard: View {
     let item: WishlistItem
     let coverURL: URL?
     let action: () -> Void
+    let onTogglePending: () -> Void
 
     var body: some View {
         Button(action: action) {
@@ -3580,15 +3580,6 @@ private struct IOSCompactWishlistCard: View {
                         .aspectRatio(2.0 / 3.0, contentMode: .fit)
                         .clipShape(.rect(cornerRadius: 7))
                         .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
-                    if item.pendingBuy {
-                        Image(systemName: "cart.fill")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 24, height: 24)
-                            .background(.orange, in: .circle)
-                            .padding(6)
-                            .accessibilityLabel(tkLocalized("待购买"))
-                    }
                 }
                 Text(item.title)
                     .font(.subheadline.weight(.semibold))
@@ -3607,6 +3598,11 @@ private struct IOSCompactWishlistCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(tkLocalized("打开编辑表单"))
+        .overlay(alignment: .topTrailing) {
+            WishlistPendingButton(title: item.title, isPending: item.pendingBuy, action: onTogglePending)
+                .accessibilityIdentifier("wishlist.book.pending.\(item.id)")
+                .padding(4)
+        }
     }
 }
 #endif
@@ -3999,6 +3995,10 @@ private struct EditorTagInput: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            CommonBookTagSuggestions(selected: tags, query: input) { tag in
+                tagsText = normalizedBookTags(tags + [tag]).joined(separator: "，")
+                input = ""
             }
         }
     }
