@@ -46,6 +46,11 @@ struct RetailerRenderingTests {
         let structured = #"<html><body><script type="application/ld+json">[{"@graph":[{"offers":[{"price":"21.50"}]}]}]</script></body></html>"#
         let product = try await renderFixture(structured, waitForOffer: false)
         #expect(product.productPrice == 21.5)
+        let dangdang = try await renderFixture(#"<html><body><ul><li><p class="name"><a href="https://product.dangdang.com/123.html" title="批判性思维">批判性思维</a></p><span class="price_n">￥79.30</span></li></ul></body></html>"#, waitForOffer: true)
+        #expect(dangdang.offers.first?.price == 79.3)
+        #expect(dangdang.offers.first?.title == "批判性思维")
+        let jd = try await renderFixture(#"<html><body><li><div class="p-name"><a href="https://item.jd.com/456.html" title="批判性思维">批判性思维</a></div><div class="p-price">￥62.00</div></li></body></html>"#, waitForOffer: true)
+        #expect(jd.offers.first?.price == 62)
     }
 
     @Test @MainActor func cancelledRendererStopsBeforeReturningAQuote() async {

@@ -24,6 +24,7 @@ struct ManualPriceCaptureView: View {
     @State private var requestedURL: URL?
     @State private var captureTask: Task<Void, Never>?
     @State private var captureIdentity = UUID()
+    @State private var renderedSearchPage: RetailerPageSnapshot?
 
     var body: some View {
         NavigationSplitView {
@@ -44,6 +45,7 @@ struct ManualPriceCaptureView: View {
                         captureIdentity = UUID()
                         isAutoCapturing = false
                         detectedPrice = nil
+                        renderedSearchPage = nil
                         priceText = ""
                         currentURL = nil
                         browserError = nil
@@ -100,7 +102,8 @@ struct ManualPriceCaptureView: View {
                 allowedProductHosts: channel.productHosts,
                 currentURL: $currentURL,
                 detectedPrice: $detectedPrice,
-                loadError: $browserError
+                loadError: $browserError,
+                renderedSearchPage: $renderedSearchPage
             )
             .id(browserIdentity)
         }
@@ -180,7 +183,8 @@ struct ManualPriceCaptureView: View {
                 channel: requestedChannel,
                 title: item.title,
                 author: item.author.nilIfEmpty,
-                existingQuote: existing
+                existingQuote: existing,
+                renderedSearchPage: renderedSearchPage
             )
             try Task.checkCancellation()
             guard captureIdentity == identity, channel == requestedChannel else { return }
@@ -242,12 +246,14 @@ private struct RetailerBrowserView: NSViewRepresentable {
     @Binding var currentURL: URL?
     @Binding var detectedPrice: Double?
     @Binding var loadError: String?
+    @Binding var renderedSearchPage: RetailerPageSnapshot?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             currentURL: $currentURL,
             detectedPrice: $detectedPrice,
             loadError: $loadError,
+            renderedSearchPage: $renderedSearchPage,
             allowedProductHosts: allowedProductHosts,
             channel: channel
         )
@@ -259,14 +265,14 @@ private struct RetailerBrowserView: NSViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         context.coordinator.requestedURL = url
-        webView.load(URLRequest(url: RetailerBrowserPolicy.normalizedURL(url) ?? url))
+        webView.load(RetailerBrowserPolicy.request(RetailerBrowserPolicy.normalizedURL(url) ?? url))
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.requestedURL != url else { return }
         context.coordinator.requestedURL = url
-        webView.load(URLRequest(url: RetailerBrowserPolicy.normalizedURL(url) ?? url))
+        webView.load(RetailerBrowserPolicy.request(RetailerBrowserPolicy.normalizedURL(url) ?? url))
     }
 
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -281,6 +287,7 @@ private struct RetailerBrowserView: NSViewRepresentable {
         @Binding private var currentURL: URL?
         @Binding private var detectedPrice: Double?
         @Binding private var loadError: String?
+        @Binding private var renderedSearchPage: RetailerPageSnapshot?
         private let allowedProductHosts: Set<String>
         private let channel: PriceChannel
         var requestedURL: URL?
@@ -291,12 +298,14 @@ private struct RetailerBrowserView: NSViewRepresentable {
             currentURL: Binding<URL?>,
             detectedPrice: Binding<Double?>,
             loadError: Binding<String?>,
+            renderedSearchPage: Binding<RetailerPageSnapshot?>,
             allowedProductHosts: Set<String>,
             channel: PriceChannel
         ) {
             _currentURL = currentURL
             _detectedPrice = detectedPrice
             _loadError = loadError
+            _renderedSearchPage = renderedSearchPage
             self.allowedProductHosts = allowedProductHosts
             self.channel = channel
         }
@@ -306,14 +315,14 @@ private struct RetailerBrowserView: NSViewRepresentable {
             responseError = nil
             priceTask?.cancel()
             detectedPrice = nil
+            renderedSearchPage = nil
             currentURL = webView.url
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
             loadError = responseError
             currentURL = webView.url
-            guard let url = webView.url, let host = url.host?.lowercased(), allowedProductHosts.contains(host),
-                  PricingHTMLParser.productID(channel: channel, url: url) != nil else {
+            guard let url = webView.url, RetailerBrowserPolicy.normalizedURL(url) != nil else {
                 detectedPrice = nil
                 return
             }
@@ -330,7 +339,8 @@ private struct RetailerBrowserView: NSViewRepresentable {
                         guard !Task.isCancelled, webView.url == pageURL else { return }
                         if let json = value as? String, let data = json.data(using: .utf8), let pageURL {
                             let page = try JSONDecoder().decode(RenderedRetailerSnapshot.self, from: data).page(url: pageURL, channel: channel)
-                            if let price = page.productPrice {
+                            if !page.offers.isEmpty { renderedSearchPage = page }
+                            if PricingHTMLParser.productID(channel: channel, url: pageURL) != nil, let price = page.productPrice {
                                 detectedPrice = price
                                 stable = price == lastPrice ? stable + 1 : 0
                                 lastPrice = price

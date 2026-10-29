@@ -3,6 +3,13 @@ import TomeKeepDomain
 import TomeKeepPricing
 
 enum RetailerBrowserPolicy {
+    static func request(_ url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if url.host?.hasSuffix("bookschina.com") == true, url.path.hasPrefix("/book_find2") {
+            request.setValue("https://www.bookschina.com/", forHTTPHeaderField: "Referer")
+        }
+        return request
+    }
     static func normalizedURL(_ url: URL) -> URL? {
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
               url.user == nil, url.password == nil,
@@ -81,7 +88,7 @@ enum RetailerPageScripts {
         return null;
       };
       const selectors = ['#jd-price', '#dd-price', '.p-price .price', '.p-price',
-        '[class*="_price_"]', '.search_now_price', '.sellPrice',
+        '[class*="_price_"]', '.search_now_price', '.price_n', '.sellPrice',
         '[class*="price-now"]', '[class*="now-price"]'];
       const offers = [], seen = new Set();
       const add = (url, card) => {
@@ -102,8 +109,8 @@ enum RetailerPageScripts {
         const sku = card.getAttribute('data-sku');
         if (/^\d{1,24}$/.test(sku || '')) add('https://item.jd.com/' + sku + '.html', card);
       }
-      for (const link of document.querySelectorAll('a[href*="product.dangdang.com/"], a[href*="bookschina.com/"]')) {
-        const card = link.closest('li, .bookItem, .book-item, .item');
+      for (const link of document.querySelectorAll('a[href*="item.jd.com/"], a[href*="product.dangdang.com/"], a[href*="bookschina.com/"]')) {
+        const card = link.closest('[data-sku], li, .bookItem, .book-item, .item, [class*="_item_"], [class*="_card_"]');
         if (card) add(link.href, card);
       }
       let productPrice = priceIn(document, selectors);
@@ -221,7 +228,7 @@ final class RetailerPageRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
             try Task.checkCancellation()
             try await withCheckedThrowingContinuation { continuation in
                 navigation = continuation
-                webView?.load(URLRequest(url: url))
+                webView?.load(RetailerBrowserPolicy.request(url))
             }
         } onCancel: {
             Task { @MainActor [weak self] in self?.finish(CancellationError()) }

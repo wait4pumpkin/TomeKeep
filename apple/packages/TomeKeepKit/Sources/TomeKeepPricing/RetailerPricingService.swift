@@ -80,10 +80,11 @@ public actor RetailerPricingService {
         channel: PriceChannel,
         title: String,
         author: String?,
-        existingQuote: PriceQuote? = nil
+        existingQuote: PriceQuote? = nil,
+        renderedSearchPage: RetailerPageSnapshot? = nil
     ) async throws -> PriceQuote {
         try Task.checkCancellation()
-        if let existingQuote, PricingHTMLParser.productID(channel: channel, url: existingQuote.url) != nil {
+        if renderedSearchPage == nil, let existingQuote, PricingHTMLParser.productID(channel: channel, url: existingQuote.url) != nil {
             do {
                 let page = try await fetch(existingQuote.url, channel: channel)
                 if let price = page.productPrice ?? PricingHTMLParser.productPrice(channel: channel, html: page.html),
@@ -98,7 +99,9 @@ public actor RetailerPricingService {
         }
 
         let searchURL = Self.searchURL(channel: channel, title: title)
-        let page = try await fetch(searchURL, channel: channel)
+        let page: RetailerPageSnapshot
+        if let renderedSearchPage { page = renderedSearchPage }
+        else { page = try await fetch(searchURL, channel: channel) }
         let offers = (page.offers.isEmpty ? PricingHTMLParser.offers(channel: channel, html: page.html, limit: 8) : page.offers)
             .filter { $0.priceCNY.isFinite && $0.priceCNY > 0 && PricingHTMLParser.productID(channel: channel, url: $0.url) != nil }
         let matches = await PriceOfferMatchingService().filter(offers, title: title, author: author)
@@ -185,7 +188,8 @@ public actor RetailerPricingService {
         switch channel {
         case .jd: return host == "passport.jd.com" || host.hasSuffix(".passport.jd.com") || host == "cfe.m.jd.com"
         case .dangdang: return host == "login.dangdang.com" || host.hasSuffix(".login.dangdang.com")
-        case .bookschina: return host == "login.bookschina.com" || host.hasSuffix(".login.bookschina.com")
+        case .bookschina: return host == "login.bookschina.com" || host.hasSuffix(".login.bookschina.com") ||
+            (["www.bookschina.com", "bookschina.com"].contains(host) && url.path.lowercased().hasPrefix("/reguser/login"))
         }
     }
 }
