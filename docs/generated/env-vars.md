@@ -41,3 +41,7 @@ For production, use:
 wrangler secret put JWT_SECRET
 wrangler secret put ADMIN_SETUP_TOKEN
 ```
+
+## Native retailer diagnostic tests
+
+`TOMEKEEP_RUN_LIVE_RETAILER_TESTS=1` opts into read-only live retailer tests (`swift test --filter RetailerRenderingTests` for the Mac WebKit search check). Defaults to disabled. It is a test-only process flag, not a production configuration variable. Tests do not save quotes or bypass login/verification; site restrictions, network failures, or a locked desktop can require a later manual check.

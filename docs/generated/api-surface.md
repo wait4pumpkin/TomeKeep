@@ -1,5 +1,9 @@
 # API Surface
 
+原生封面排序（2026-10-29）：新增 `CoverCollection`、`CoverDownloadJob` 和 main-actor `CoverDownloadPriority` 展示提示接口，按当前集合、可见 ID 与列表顺序选择下一项；`NativeSyncEngine.init` 新增默认兼容的 `coverPriority` 和 `onLocalDataChanged` 注入点。`LocalSyncRepository.missingBookCovers(coversDirectory:)` / `missingWishlistCovers(coversDirectory:)` 增加可选目录参数，检查文件存在性并采用稳定添加时间/ID 顺序；`attachDownloadedCover(_:fileName:isWishlist:)` 校验记录活动状态及相同封面键。`TomeKeepBookCover.cacheDidChange` 通知支持同 URL 的缺失文件补下载后重载。仅缓存附件改变，不改变业务时间或 outbox；HTTP API、服务端 Schema 与旧客户端契约不变。
+
+原生本机采价（2026-10-29）：`RetailerPricingService.init(session:pageLoader:)` 新增可选 `RetailerPageLoader` 异步注入点，接收 URL/渠道并返回 Sendable `RetailerPageSnapshot(url, html, offers, productPrice)`；Mac 在 Feature 层提供同本机 WebKit 会话的动态渲染，Pricing 层继续执行同书匹配、可信商品域名/路径及正有限价格校验。默认 URLSession 路径保留。`searchURL` 的当当中文参数采用 GBK 兼容 GB18030 百分号编码；可复用 `requiresVerificationURL` 判断真实登录/风控域名，不把普通页面的验证脚本链接当成风控。HTTP 服务端 API、数据库和同步契约不变。
+
 原生剪贴板识别（2026-10-19）：`parseClipboardBookSeed` 支持豆瓣 App 的 `www.douban.com` / `douban.com` 下 `/doubanapp/dispatch/book/<数字ID>` HTTP(S) 地址，规范化到 `https://book.douban.com/subject/<ID>/`；不访问分享跳转页或第三方域名，原 HTTP API 不变。
 
 原生客户端响应诊断（2026-10-18）：共享 Swift `APIClient.request` 将 JSON 解码失败包装为 `APIResponseDecodingError(endpoint, field)`，只包含去除查询参数的接口与字段路径，不包含响应值或令牌。HTTP 路由、认证和响应契约不变；原生书籍/愿望关联 URL 对旧空值和无效网址采取可选映射，不再因可选链接使整页下载失败。
@@ -398,9 +402,10 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET`  | `/api/books?since=<ISO>` | Logged in | Legacy array response containing books updated at or after the inclusive cursor. Native clients add `page_size` (max 500) and receive `{ items, next_cursor }`; continue with `page_updated_at` and `page_after`. |
-| `POST` | `/api/books` | Logged in | Create a book. ISBN is optional; when present it is checksum-validated, normalized to ISBN-13, and checked against the owner's active books. Returns 400 `invalid_isbn`, 409 `duplicate_isbn`, or 201 with the created row. |
-| `PUT`  | `/api/books/:id` | Logged in | Update an existing book. ISBN follows the same validation, normalization, and active-record duplicate rules. Returns 404 `{ error: 'not_found' }` if no book with that id exists. Returns 403 if the book belongs to another user. |
-| `DELETE` | `/api/books/:id` | Logged in | Soft-delete a book (sets `deleted_at`). Returns 404/403 as above. |
+| `GET` | `/api/books/:id` | Logged in | Fetch the caller's book including tombstones and integer `revision`; missing or foreign ID returns 404. |
+| `POST` | `/api/books` | Logged in | Create a book. ISBN is optional; when present it is checksum-validated, normalized to ISBN-13, and atomically guarded against a second active book for the owner. Returns 400 `invalid_isbn`, 409 `{ error: 'duplicate_isbn', id: <owned book ID> }`, or 201 with the created row and `revision`. Legacy ISBN-10 rows are recognized without rewriting. |
+| `PUT`  | `/api/books/:id` | Logged in | Partial update; existing fields and legacy behavior preserved. Optional positive integer `expected_revision` conditions the write; mismatch returns 409 `{ error: 'stale_book', id }`. `added_at` may be supplied for a confirmed merge. ISBN and restore are guarded against active duplicates; 400 `invalid_revision`/`invalid_isbn`, 409 `duplicate_isbn`, 404/403 as before. Successful writes bump `revision`. |
+| `DELETE` | `/api/books/:id` | Logged in | Soft-delete a book (sets `deleted_at`, bumps `revision`). Keeps the R2 cover object referenced by the tombstone or another record. Returns 404/403 as above. |
 
 ### Web/PWA API endpoints (wishlist)
 
@@ -409,8 +414,8 @@ WMO code mapping: 0=clear, 1-3=partly-cloudy, 4-49=cloudy/fog, 50-59=drizzle, 60
 | `GET`  | `/api/wishlist?since=<ISO>` | Logged in | Legacy array response containing wishlist items at or after the inclusive cursor. Native pagination uses `page_size`, `page_updated_at`, and `page_after`. |
 | `POST` | `/api/wishlist` | Logged in | Create a wishlist item. ISBN is optional; when present it is checksum-validated, normalized to ISBN-13, and checked against active wishlist items. Returns 400/409 or 201. |
 | `PUT`  | `/api/wishlist/:id` | Logged in | Update an existing wishlist item. ISBN follows the same validation, normalization, and duplicate rules. Returns 404/403 as above. |
-| `DELETE` | `/api/wishlist/:id` | Logged in | Soft-delete a wishlist item. |
-| `POST` | `/api/wishlist/:id/move-to-inventory` | Logged in | Atomically delete a wishlist item and create a new book from it. Returns 201 `{ bookId, title }`. |
+| `DELETE` | `/api/wishlist/:id` | Logged in | Soft-delete a wishlist item. Cover objects are retained for tombstone recovery and shared book references. |
+| `POST` | `/api/wishlist/:id/move-to-inventory` | Logged in | Atomically delete a wishlist item and create a new book from it. Normalizes legacy ISBN-10 and returns 409 `duplicate_isbn` if an active book already exists; otherwise 201 `{ bookId, title }`. |
 
 ### Web/PWA API endpoints (ISBN entry support)
 

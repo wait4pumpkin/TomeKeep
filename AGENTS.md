@@ -58,6 +58,11 @@ Update docs when changing:
 - user-facing behavior
 - architectural boundaries
 
+## macOS Native Delivery
+- After macOS changes pass relevant tests, run `./scripts/install-mac.sh` to build, sign, validate and install the native preview into `/Applications/TomeKeep Next.app`.
+- Never replace `/Applications/TomeKeep.app` (the retained Electron version). Preserve native app backups and user data; do not force-quit a running app. Report when a restart is needed.
+- See `docs/operations/macos-native-delivery.md` for installation and recovery details.
+
 ## If Unsure
 Prefer:
 1. existing specs

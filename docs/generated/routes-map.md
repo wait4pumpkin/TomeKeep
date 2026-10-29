@@ -31,7 +31,8 @@ Base path: `/api/books`
 | `GET` | `/api/books` | JWT | List all books for the authenticated user, ordered by `added_at DESC`. |
 | `GET` | `/api/books?since=<ISO>` | JWT | Inclusive incremental sync. Add `page_size` (max 500) for `{ items, next_cursor }`; continue with `page_updated_at` and `page_after`. Without it, preserves the legacy array response. |
 | `POST` | `/api/books` | JWT | Create a book. Accepts caller-supplied `id`. Required: `title`. Optional ISBN is checksum-validated, normalized to ISBN-13, and must be unique among active books; invalid input returns 400 and a duplicate returns 409. Returns 201. |
-| `PUT` | `/api/books/:id` | JWT | Update an existing book. Partial update; ISBN uses the same normalization and duplicate rules as create. Returns 404 if not found, 403 if not owner. |
+| `GET` | `/api/books/:id` | JWT | Owner-scoped book and tombstone lookup with `revision`; foreign IDs return 404. |
+| `PUT` | `/api/books/:id` | JWT | Partial update; optional `expected_revision` gives 409 `stale_book` on mismatch; optional `added_at` supports confirmed merges. ISBN duplicates give 409 `duplicate_isbn`; returns 404 if not found, 403 if not owner. |
 | `DELETE` | `/api/books/:id` | JWT | Soft-delete a book (sets `deleted_at`, bumps `updated_at`). Soft deletes propagate via incremental sync. Returns 404/403 as above. |
 
 ---

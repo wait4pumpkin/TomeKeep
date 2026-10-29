@@ -53,11 +53,14 @@ struct ContinuousISBNImportView: View {
     @State private var records: [ContinuousImportRecord] = []
     @State private var queue: [UUID] = []
     @State private var existingISBNs: Set<String> = []
+    @State private var existingBooksByISBN: [String: Book] = [:]
+    @State private var bookToOpen: String?
     @State private var isProcessing = false
     @State private var acceptsScans = true
     @State private var finishRequested = false
 
     let onFinished: () -> Void
+    let onOpenExisting: (String) -> Void
 
     private let metadataService = MetadataLookupService()
     private let coverService = CoverCacheService()
@@ -153,6 +156,15 @@ struct ContinuousISBNImportView: View {
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 0)
+                        if record.state == .duplicate,
+                           let book = existingBooksByISBN[record.isbn] {
+                            Button(tkLocalized("打开已有书籍")) {
+                                bookToOpen = book.id
+                                requestFinish()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
+                        }
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -170,15 +182,19 @@ struct ContinuousISBNImportView: View {
 
     private func loadExistingISBNs() {
         let books = (try? BookRepository(context: modelContext).books()) ?? []
-        existingISBNs = Set(books.compactMap(\.isbn))
+        existingBooksByISBN = Dictionary(books.compactMap { book in
+            book.isbn.flatMap { ISBN($0)?.isbn13 }.map { ($0, book) }
+        }, uniquingKeysWith: { first, _ in first })
+        existingISBNs = Set(existingBooksByISBN.keys)
     }
 
     private func accept(_ isbn: String) {
         guard acceptsScans else { return }
-        if existingISBNs.contains(isbn) {
+        let normalized = ISBN(isbn)?.isbn13 ?? isbn
+        if existingISBNs.contains(normalized) {
             records.append(ContinuousImportRecord(
-                isbn: isbn,
-                title: nil,
+                isbn: normalized,
+                title: existingBooksByISBN[normalized]?.title,
                 detail: tkLocalized("书库中已经存在"),
                 state: .duplicate
             ))
@@ -186,9 +202,9 @@ struct ContinuousISBNImportView: View {
             return
         }
 
-        existingISBNs.insert(isbn)
+        existingISBNs.insert(normalized)
         let record = ContinuousImportRecord(
-            isbn: isbn,
+            isbn: normalized,
             title: nil,
             detail: tkLocalized("等待查询资料"),
             state: .waiting
@@ -242,6 +258,7 @@ struct ContinuousISBNImportView: View {
 
         do {
             try BookRepository(context: modelContext).add(book)
+            existingBooksByISBN[isbn] = book
             updateRecord(id: id) { record in
                 record.title = book.title
                 record.state = metadataUnavailable ? .importedWithoutMetadata : .imported
@@ -252,6 +269,7 @@ struct ContinuousISBNImportView: View {
             }
             requestTomeKeepSync()
         } catch BookRepositoryError.duplicateISBN {
+            loadExistingISBNs()
             updateRecord(id: id) {
                 $0.state = .duplicate
                 $0.detail = tkLocalized("书库中已经存在")
@@ -290,6 +308,7 @@ struct ContinuousISBNImportView: View {
 
     private func finish() {
         onFinished()
+        if let bookToOpen { onOpenExisting(bookToOpen) }
         dismiss()
     }
 }

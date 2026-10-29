@@ -2,13 +2,17 @@
 title: "Apple Native Architecture"
 owner: engineering
 status: proposed
-last_reviewed: 2026-09-23
+last_reviewed: 2026-10-29
 review_cycle_days: 30
 ---
 
 # Apple 原生架构设计
 
 ## 1. 决策
+
+封面下载调度（2026-10-29）：Features 通过当前页面的排序/筛选 ID 序列及实际 viewport 相交状态向 Sync 的 `CoverDownloadPriority` 提供纯展示提示。Sync 每张请求之间重新选择下一项，保持一个在途请求；默认仓储顺序为添加时间降序、ID 升序。拉取记录后及每张封面挂接后发出本地刷新通知，不依赖整轮上传成功（例如未解决的 ISBN 409）才显示封面。Persistence 只在未删除且 coverKey 仍相同时挂接文件名，不修改业务更新时间/待同步状态。登出使调度 sessionRevision 失效，旧请求不能挂接到后续账户会话。UI 优先级不包含令牌、图片正文或跨模块 SwiftData 对象；失败项下一轮同步重试，现有业务同步的串行事务边界不变。
+
+ISBN 身份冲突（2026-10-29）：校验/规范化规则移至 Domain，Metadata 保留兼容 typealias，Persistence 与 Sync 可共用同一规则。服务端 D1 `0008` 为书籍增加版本及原子防重触发器；原生客户端通过版本条件 PUT 归并。账户 ID 哈希命名的 `BookConflictStore` 在本机保存原始候选、阅读状态、版本和确认选择；日志先于 SwiftData 事务落盘，崩溃后同步重放。仅确认别名 ID 未在云端存在才退休本机别名，不发服务器 DELETE。人工选择入口位于设置，网络/鉴权错误仍向外报告。封面对象按引用保留，暂不运行自动垃圾回收。
 
 TomeKeep 采用单仓库、单 Xcode 工程、iOS/macOS 两个 App Target、一个本地 Swift Package 的架构。Swift Package 内使用多个 Target 表达真正的编译边界，不为每个目录创建独立 Package。
 
@@ -58,6 +62,8 @@ API DTO、URLSession、Keychain 会话、请求错误和契约编码。第三方
 ISBN、豆瓣、OpenLibrary、isbnsearch、封面判断和共享 fixtures。WebKit 窗口呈现留在 App Target。
 
 ### TomeKeepFeatures
+
+Mac 零售商渲染由 Feature 层 MainActor WebKit 加载器实现，以 `RetailerPageSnapshot`/`RetailerPageLoader` 注入 Foundation-only 的 Pricing 服务。WebKit 负责同会话网站加载、动态等待和取消，Pricing 负责可信商品校验、同书匹配与报价构造；不将 Cookie、账号信息或 WebKit 引入共享领域层，不使用 TomeKeep 服务端代理。
 
 可共享功能状态和复用价值明确的 SwiftUI 内容组件。导航、窗口、菜单和扫码等平台 Shell 不放入共享模块。
 

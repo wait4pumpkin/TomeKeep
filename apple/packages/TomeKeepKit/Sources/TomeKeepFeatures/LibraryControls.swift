@@ -12,6 +12,20 @@ func wishlistSortWithoutPriority(_ rawValue: String) -> String {
     rawValue == "priority" ? "recentlyAdded" : rawValue
 }
 
+func wishlistMatchesFilters(_ item: WishlistItem, query: String, tags: Set<String>, pendingOnly: Bool) -> Bool {
+    let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    return (!pendingOnly || item.pendingBuy) && tags.isSubset(of: Set(item.tags)) &&
+        (query.isEmpty || item.title.localizedCaseInsensitiveContains(query) ||
+         item.author.localizedCaseInsensitiveContains(query) ||
+         (item.isbn?.localizedCaseInsensitiveContains(query) ?? false))
+}
+
+func bookIntroductionURL(_ url: URL?) -> URL? {
+    guard let url, let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+          let host = url.host, !host.isEmpty, url.user == nil, url.password == nil else { return nil }
+    return url
+}
+
 func shouldBreatheReadingProgress(reduceMotion: Bool, isActive: Bool) -> Bool {
     !reduceMotion && isActive
 }
@@ -42,6 +56,27 @@ struct ReadingProgressBreathing: ViewModifier {
 }
 
 #if os(iOS)
+/// Keeps the introduction and edit actions in separate hit regions, without nested buttons.
+struct IOSBookIntroductionLink<Content: View>: View {
+    let url: URL?
+    let edit: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Group {
+            if let url = bookIntroductionURL(url) {
+                Link(destination: url, label: content)
+                    .accessibilityHint(tkLocalized("打开关联页面"))
+            } else {
+                Button(action: edit, label: content)
+                    .accessibilityHint(tkLocalized("打开编辑表单"))
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+    }
+}
+
 struct IOSScrollDensityObserver: ViewModifier {
     @Binding var isCompact: Bool
 

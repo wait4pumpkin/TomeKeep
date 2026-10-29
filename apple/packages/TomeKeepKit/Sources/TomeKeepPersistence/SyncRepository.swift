@@ -44,7 +44,7 @@ public struct ProfileSyncRecord: Equatable, Sendable {
 
 @MainActor
 public struct LocalSyncRepository {
-    private let context: ModelContext
+    let context: ModelContext
 
     public init(context: ModelContext) {
         self.context = context
@@ -118,10 +118,13 @@ public struct LocalSyncRepository {
         return SyncCursors(books: state.bookCursor, wishlist: state.wishlistCursor, readingStates: state.readingStateCursor)
     }
 
-    public func markBookSynced(id: String) throws {
+    public func markBookSynced(id: String, expectedUpdatedAt: Date? = nil) throws {
         var descriptor = FetchDescriptor<StoredBook>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
-        try context.fetch(descriptor).first?.syncStatusRawValue = SyncStatus.synced.rawValue
+        if let book = try context.fetch(descriptor).first,
+           expectedUpdatedAt == nil || book.updatedAt == expectedUpdatedAt {
+            book.syncStatusRawValue = SyncStatus.synced.rawValue
+        }
         try context.save()
     }
 
@@ -154,10 +157,11 @@ public struct LocalSyncRepository {
         try context.save()
     }
 
-    public func missingBookCovers() throws -> [LocalCoverReference] {
-        try context.fetch(FetchDescriptor<StoredBook>()).compactMap { stored in
+    public func missingBookCovers(coversDirectory: URL? = nil) throws -> [LocalCoverReference] {
+        let directory = try coversDirectory ?? NativeStorageLocations.covers()
+        return try context.fetch(FetchDescriptor<StoredBook>(sortBy: [SortDescriptor(\.addedAt, order: .reverse), SortDescriptor(\.id)])).compactMap { stored in
             guard stored.deletedAt == nil,
-                  stored.coverFileName == nil,
+                  stored.coverFileName.map({ !FileManager.default.fileExists(atPath: directory.appending(path: $0).path) }) ?? true,
                   let key = stored.coverKey,
                   !key.isEmpty
             else { return nil }
@@ -165,10 +169,11 @@ public struct LocalSyncRepository {
         }
     }
 
-    public func missingWishlistCovers() throws -> [LocalCoverReference] {
-        try context.fetch(FetchDescriptor<StoredWishlistItem>()).compactMap { stored in
+    public func missingWishlistCovers(coversDirectory: URL? = nil) throws -> [LocalCoverReference] {
+        let directory = try coversDirectory ?? NativeStorageLocations.covers()
+        return try context.fetch(FetchDescriptor<StoredWishlistItem>(sortBy: [SortDescriptor(\.addedAt, order: .reverse), SortDescriptor(\.id)])).compactMap { stored in
             guard stored.deletedAt == nil,
-                  stored.coverFileName == nil,
+                  stored.coverFileName.map({ !FileManager.default.fileExists(atPath: directory.appending(path: $0).path) }) ?? true,
                   let key = stored.coverKey,
                   !key.isEmpty
             else { return nil }
@@ -180,6 +185,21 @@ public struct LocalSyncRepository {
         var descriptor = FetchDescriptor<StoredBook>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
         try context.fetch(descriptor).first?.coverFileName = fileName
+        try context.save()
+    }
+
+    /// Cache attachment must not resurrect a deleted record or attach a superseded image.
+    public func attachDownloadedCover(_ reference: LocalCoverReference, fileName: String, isWishlist: Bool) throws {
+        let id = reference.recordID
+        if isWishlist {
+            let record = try context.fetch(FetchDescriptor<StoredWishlistItem>(predicate: #Predicate { $0.id == id })).first
+            guard let record, record.deletedAt == nil, record.coverKey == reference.coverKey else { return }
+            record.coverFileName = fileName
+        } else {
+            let record = try context.fetch(FetchDescriptor<StoredBook>(predicate: #Predicate { $0.id == id })).first
+            guard let record, record.deletedAt == nil, record.coverKey == reference.coverKey else { return }
+            record.coverFileName = fileName
+        }
         try context.save()
     }
 

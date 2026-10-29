@@ -28,6 +28,7 @@ public struct TomeKeepCoverPlaceholder: View {
 }
 
 public struct TomeKeepBookCover: View {
+    public static let cacheDidChange = Notification.Name("TomeKeep.coverCache.changed")
     private let fileURL: URL?
     @State private var image: Image?
 #if os(macOS)
@@ -58,6 +59,10 @@ public struct TomeKeepBookCover: View {
         }
         .clipShape(.rect(cornerRadius: TomeKeepTheme.coverCornerRadius))
         .task(id: fileURL) {
+            image = fileURL.flatMap(Self.loadImage)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Self.cacheDidChange)) { _ in
+            // A missing file can be repaired without changing its URL.
             image = fileURL.flatMap(Self.loadImage)
         }
     }

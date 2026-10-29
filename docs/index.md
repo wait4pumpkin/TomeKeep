@@ -18,6 +18,7 @@
 - `./design-docs/apple-native-architecture.md`
 - `./design-docs/apple-native-feature-matrix.md`
 - `./design-docs/adr-macos-legacy-data-access.md`
+- `./design-docs/cross-device-book-conflicts.md`（多端重复扫码与冲突归并方案，执行中）
 - `./exec-plans/active/apple-native-unification.md`
 
 ### I want to understand constraints
@@ -26,6 +27,7 @@
 - `./operations/reliability.md`
 - `./operations/production-sync-deployment.md`
 - `./operations/apple-device-signing.md`
+- `./operations/macos-native-delivery.md`
 
 ### I want the latest technical surface
 - `./generated/api-surface.md`

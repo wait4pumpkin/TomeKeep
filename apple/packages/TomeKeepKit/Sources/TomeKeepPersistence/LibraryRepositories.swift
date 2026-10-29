@@ -64,11 +64,9 @@ public struct WishlistRepository {
         guard let stored = try storedItem(id: id) else {
             throw WishlistRepositoryError.missingItem
         }
-        if let isbn = stored.isbn {
-            let descriptor = FetchDescriptor<StoredBook>(
-                predicate: #Predicate { $0.isbn == isbn && $0.deletedAt == nil }
-            )
-            if try !context.fetch(descriptor).isEmpty {
+        if let isbn = stored.isbn.flatMap({ ISBN($0)?.isbn13 }) {
+            let descriptor = FetchDescriptor<StoredBook>(predicate: #Predicate { $0.deletedAt == nil })
+            if try context.fetch(descriptor).contains(where: { $0.isbn.flatMap { ISBN($0)?.isbn13 } == isbn }) {
                 throw WishlistRepositoryError.duplicateISBN
             }
         }
@@ -100,12 +98,26 @@ public struct WishlistRepository {
         return try context.fetch(descriptor).first
     }
 
+    /// Explicitly confirmed purchase of a book already in the library. Keep
+    /// the wishlist tombstone (and its original metadata) for sync/recovery.
+    public func completePurchaseUsingExistingBook(id: String, at instant: Date = .now) throws -> Book {
+        guard let item = try storedItem(id: id), item.deletedAt == nil,
+              let isbn = item.isbn.flatMap({ ISBN($0)?.isbn13 }),
+              let existing = try context.fetch(FetchDescriptor<StoredBook>(predicate: #Predicate { $0.deletedAt == nil }))
+                .first(where: { $0.isbn.flatMap { ISBN($0)?.isbn13 } == isbn }) else { throw WishlistRepositoryError.missingItem }
+        try context.transaction {
+            for tag in item.tags where !existing.tags.contains(tag) { existing.tags.append(tag) }
+            existing.updatedAt = instant; existing.syncStatusRawValue = "pending"
+            item.deletedAt = instant; item.updatedAt = instant; item.syncStatusRawValue = "pending"
+            try context.save()
+        }
+        return existing.snapshot()
+    }
+
     private func ensureISBNIsAvailable(_ isbn: String?, excluding excludedID: String?) throws {
-        guard let isbn, !isbn.isEmpty else { return }
-        let descriptor = FetchDescriptor<StoredWishlistItem>(
-            predicate: #Predicate { $0.isbn == isbn && $0.deletedAt == nil }
-        )
-        if try context.fetch(descriptor).contains(where: { $0.id != excludedID }) {
+        guard let isbn, let identity = ISBN(isbn)?.isbn13 else { return }
+        let descriptor = FetchDescriptor<StoredWishlistItem>(predicate: #Predicate { $0.deletedAt == nil })
+        if try context.fetch(descriptor).contains(where: { $0.id != excludedID && $0.isbn.flatMap { ISBN($0)?.isbn13 } == identity }) {
             throw WishlistRepositoryError.duplicateISBN
         }
     }

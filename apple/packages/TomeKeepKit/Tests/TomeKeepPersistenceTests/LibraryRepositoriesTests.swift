@@ -64,7 +64,11 @@ struct LibraryRepositoriesTests {
             title: "想读的书",
             author: "作者",
             isbn: "9780306406157",
+            publisher: "出版社",
+            coverURL: URL(string: "https://example.com/cover.jpg"),
+            coverKey: "covers/wish-1.jpg",
             coverFileName: "wish-1.jpg",
+            detailURL: URL(string: "https://book.douban.com/subject/35379215/"),
             tags: ["文学"],
             priority: .high,
             pendingBuy: true,
@@ -83,6 +87,17 @@ struct LibraryRepositoriesTests {
         let moved = try wishlist.moveToLibrary(id: item.id, at: instant.addingTimeInterval(60))
         #expect(moved.title == item.title)
         #expect(moved.coverFileName == item.coverFileName)
+        #expect(moved.author == item.author)
+        #expect(moved.isbn == item.isbn)
+        #expect(moved.publisher == item.publisher)
+        #expect(moved.coverURL == item.coverURL)
+        #expect(moved.coverKey == item.coverKey)
+        #expect(moved.detailURL == item.detailURL)
+        #expect(moved.tags == item.tags)
+        #expect(moved.syncStatus == .pending)
+        let tombstone = try #require(context.fetch(FetchDescriptor<StoredWishlistItem>()).first)
+        #expect(tombstone.deletedAt == instant.addingTimeInterval(60))
+        #expect(tombstone.syncStatusRawValue == SyncStatus.pending.rawValue)
         #expect(try wishlist.items().isEmpty)
         #expect(try books.books() == [moved])
     }

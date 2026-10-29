@@ -3,14 +3,43 @@ import Testing
 import TomeKeepDomain
 @testable import TomeKeepFeatures
 
+@Test func wishlistPendingFilterCombinesWithQueryAndTags() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let item = WishlistItem(id: "wish", title: "Dune", author: "Frank Herbert", isbn: "9780306406157", tags: ["科幻", "BGG"], priority: .medium, pendingBuy: true, addedAt: now, updatedAt: now)
+    #expect(wishlistMatchesFilters(item, query: " dune ", tags: ["科幻"], pendingOnly: true))
+    #expect(wishlistMatchesFilters(item, query: "herbert", tags: [], pendingOnly: true))
+    #expect(wishlistMatchesFilters(item, query: "978030", tags: ["科幻", "BGG"], pendingOnly: true))
+    #expect(!wishlistMatchesFilters(item, query: "other", tags: [], pendingOnly: true))
+    #expect(!wishlistMatchesFilters(item, query: "", tags: ["缺失"], pendingOnly: true))
+    var unmarked = item
+    unmarked.pendingBuy = false
+    #expect(!wishlistMatchesFilters(unmarked, query: "", tags: [], pendingOnly: true))
+    #expect(wishlistMatchesFilters(unmarked, query: "", tags: [], pendingOnly: false))
+}
+
+@Test func introductionLinksOnlyOpenValidWebURLs() {
+    let url = URL(string: "https://book.douban.com/subject/35379215/")!
+    #expect(bookIntroductionURL(url) == url)
+    #expect(bookIntroductionURL(URL(string: "https://openlibrary.org/books/OL1M")) != nil)
+    #expect(bookIntroductionURL(nil) == nil)
+    for raw in ["file:///private/library", "javascript:alert(1)", "https://user:pass@example.com/", "relative/path", "https:"] {
+        #expect(bookIntroductionURL(URL(string: raw)) == nil)
+    }
+}
+
 @Test func commonTagsCountDistinctRecordsExcludeSelectionAndRankStably() {
     let groups = [[" 常用 ", "常用", "Alpha", ""], ["常用", "Beta"], ["Alpha", "Beta"], ["常用"]]
     #expect(commonBookTags(in: groups, excluding: []) == ["常用", "Alpha", "Beta"])
     #expect(commonBookTags(in: groups, excluding: [" 常用 "]) == ["Alpha", "Beta"])
-    #expect(commonBookTags(in: groups, excluding: [], matching: " ALP ") == ["Alpha"])
-    #expect(commonBookTags(in: groups, excluding: [], limit: 1) == ["常用"])
-    #expect(commonBookTags(in: groups, excluding: [], limit: 0).isEmpty)
     #expect(commonBookTags(in: [], excluding: []).isEmpty)
+}
+
+@Test func compactTagPickerOffersEveryExistingTagWithoutSearchOrPagination() {
+    let tags = (1...20).map { "Tag \($0)" }
+    let suggestions = commonBookTags(in: [tags], excluding: [tags[0]])
+    #expect(suggestions.count == 19)
+    #expect(Set(suggestions) == Set(tags.dropFirst()))
+    #expect(commonBookTags(in: [tags], excluding: tags).isEmpty)
 }
 
 @Test func retiredWishlistPrioritySortRestoresRecentOrder() {
@@ -82,4 +111,11 @@ import TomeKeepDomain
     #expect(committedEditorTagsText(existing: ["文学"], pending: " 文学，已签名、小说 ") == "文学，已签名，小说")
     #expect(committedEditorTagsText(existing: ["文学"], pending: "  ") == "文学")
     #expect(committedEditorTagsText(existing: [], pending: "文学,小说") == "文学，小说")
+}
+
+@Test func inlineTagSubmissionPreservesSelectionsAndPendingManualInput() {
+    let selected = normalizedBookTags(["文学", "小说", "文学"])
+    #expect(committedEditorTagsText(existing: selected, pending: " 已签名，小说 ") == "文学，小说，已签名")
+    #expect(commonBookTags(in: [["文学", "小说", "已签名"]], excluding: selected) == ["已签名"])
+    #expect(committedEditorTagsText(existing: selected, pending: "") == "文学，小说")
 }

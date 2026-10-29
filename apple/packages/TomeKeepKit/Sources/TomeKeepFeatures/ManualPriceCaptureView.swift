@@ -21,6 +21,9 @@ struct ManualPriceCaptureView: View {
     @State private var isAutoCapturing = false
     @State private var verification: PriceVerificationTarget?
     @State private var browserIdentity = UUID()
+    @State private var requestedURL: URL?
+    @State private var captureTask: Task<Void, Never>?
+    @State private var captureIdentity = UUID()
 
     var body: some View {
         NavigationSplitView {
@@ -37,11 +40,15 @@ struct ManualPriceCaptureView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: channel) { _, _ in
+                        captureTask?.cancel()
+                        captureIdentity = UUID()
+                        isAutoCapturing = false
                         detectedPrice = nil
                         priceText = ""
                         currentURL = nil
                         browserError = nil
                         browserIdentity = UUID()
+                        requestedURL = nil
                     }
                 }
 
@@ -52,13 +59,19 @@ struct ManualPriceCaptureView: View {
                         .textSelection(.enabled)
                         .lineLimit(4)
                     TextField("价格（元）", text: $priceText)
+                    Button(tkLocalized("重新加载"), systemImage: "arrow.clockwise") {
+                        requestedURL = currentURL ?? searchURL
+                        browserError = nil
+                        browserIdentity = UUID()
+                    }
+                    .disabled(isAutoCapturing)
                     if let detectedPrice {
                         Button("使用识别价格 ¥\(detectedPrice.formatted(.number.precision(.fractionLength(2))))") {
                             priceText = detectedPrice.formatted(.number.precision(.fractionLength(2)))
                         }
                     }
                     Button {
-                        Task { await autoCapture() }
+                        captureTask = Task { await autoCapture() }
                     } label: {
                         if isAutoCapturing { ProgressView().controlSize(.small) }
                         else { Label("自动查询当前渠道", systemImage: "wand.and.stars") }
@@ -82,7 +95,8 @@ struct ManualPriceCaptureView: View {
             .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 400)
         } detail: {
             RetailerBrowserView(
-                url: searchURL,
+                url: requestedURL ?? searchURL,
+                channel: channel,
                 allowedProductHosts: channel.productHosts,
                 currentURL: $currentURL,
                 detectedPrice: $detectedPrice,
@@ -103,38 +117,27 @@ struct ManualPriceCaptureView: View {
             guard priceText.isEmpty, let value else { return }
             priceText = value.formatted(.number.precision(.fractionLength(2)))
         }
+        .onChange(of: currentURL) { previous, current in
+            if previous != current { priceText = "" }
+        }
+        .onDisappear {
+            captureTask?.cancel()
+            captureIdentity = UUID()
+        }
         .sheet(item: $verification) { target in
             WebsiteVerificationView(url: target.url)
         }
     }
 
     private var searchURL: URL {
-        var components: URLComponents
-        switch channel {
-        case .jd:
-            components = URLComponents(string: "https://search.jd.com/Search")!
-            components.queryItems = [
-                URLQueryItem(name: "keyword", value: "书 \(item.title)"),
-                URLQueryItem(name: "wtype", value: "1"),
-                URLQueryItem(name: "enc", value: "utf-8"),
-            ]
-        case .dangdang:
-            components = URLComponents(string: "https://search.dangdang.com/")!
-            components.queryItems = [URLQueryItem(name: "key", value: item.title)]
-        case .bookschina:
-            components = URLComponents(string: "https://www.bookschina.com/book_find2/")!
-            components.queryItems = [
-                URLQueryItem(name: "stp", value: item.title),
-                URLQueryItem(name: "sCate", value: "1"),
-            ]
-        }
-        return components.url!
+        RetailerPricingService.searchURL(channel: channel, title: item.title)
     }
 
     private func save() {
         message = nil
         messageIsError = true
-        guard let url = currentURL, let host = url.host?.lowercased(), channel.productHosts.contains(host) else {
+        guard let url = currentURL, let host = url.host?.lowercased(), channel.productHosts.contains(host),
+              PricingHTMLParser.productID(channel: channel, url: url) != nil else {
             message = tkLocalizedFormat("请先在右侧进入 %@ 的商品详情页。", tkLocalized(channel.captureLabel))
             return
         }
@@ -151,7 +154,7 @@ struct ManualPriceCaptureView: View {
                 fetchedAt: .now,
                 status: .ok,
                 priceCNY: price,
-                productID: Self.productID(from: url, channel: channel),
+                productID: PricingHTMLParser.productID(channel: channel, url: url),
                 source: .manual
             )
             try store(quote)
@@ -163,29 +166,38 @@ struct ManualPriceCaptureView: View {
 
     @MainActor
     private func autoCapture() async {
+        let identity = UUID()
+        captureIdentity = identity
+        let requestedChannel = channel
         isAutoCapturing = true
         message = nil
         messageIsError = false
-        defer { isAutoCapturing = false }
+        defer { if captureIdentity == identity { isAutoCapturing = false } }
         do {
             let repository = PriceCacheRepository(context: modelContext)
             let existing = try repository.entry(key: Self.priceKey(for: item))?.quotes.first { $0.channel == channel }
-            let quote = try await RetailerPricingService().capture(
-                channel: channel,
+            let quote = try await makeNativeRetailerPricingService().capture(
+                channel: requestedChannel,
                 title: item.title,
                 author: item.author.nilIfEmpty,
                 existingQuote: existing
             )
+            try Task.checkCancellation()
+            guard captureIdentity == identity, channel == requestedChannel else { return }
             try store(quote)
-            currentURL = quote.url
+            requestedURL = quote.url
             detectedPrice = quote.priceCNY
             priceText = quote.priceCNY?.formatted(.number.precision(.fractionLength(2))) ?? ""
             message = tkLocalizedFormat("已保存 %@ 的自动采价结果。", tkLocalized(channel.captureLabel))
+        } catch is CancellationError {
+            // Closing the sheet or switching channels must not save a stale quote.
         } catch RetailerPricingError.verificationRequired(let url) {
+            guard captureIdentity == identity, channel == requestedChannel else { return }
             verification = PriceVerificationTarget(url: url)
             messageIsError = true
             message = tkLocalized("请完成登录或验证码，关闭网页后再次自动查询。")
         } catch {
+            guard captureIdentity == identity, channel == requestedChannel else { return }
             messageIsError = true
             message = tkErrorDescription(error, fallback: "自动采价失败；可继续在网页中手工选择。")
         }
@@ -216,10 +228,6 @@ struct ManualPriceCaptureView: View {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     }
 
-    private static func productID(from url: URL, channel: PriceChannel) -> String? {
-        let name = url.deletingPathExtension().lastPathComponent
-        return name.allSatisfy(\.isNumber) ? name : nil
-    }
 }
 
 private struct PriceVerificationTarget: Identifiable {
@@ -229,6 +237,7 @@ private struct PriceVerificationTarget: Identifiable {
 
 private struct RetailerBrowserView: NSViewRepresentable {
     let url: URL
+    let channel: PriceChannel
     let allowedProductHosts: Set<String>
     @Binding var currentURL: URL?
     @Binding var detectedPrice: Double?
@@ -239,96 +248,149 @@ private struct RetailerBrowserView: NSViewRepresentable {
             currentURL: $currentURL,
             detectedPrice: $detectedPrice,
             loadError: $loadError,
-            allowedProductHosts: allowedProductHosts
+            allowedProductHosts: allowedProductHosts,
+            channel: channel
         )
     }
 
     func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = RetailerWebConfiguration.makeWebView()
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
-        webView.load(URLRequest(url: url))
+        context.coordinator.requestedURL = url
+        webView.load(URLRequest(url: RetailerBrowserPolicy.normalizedURL(url) ?? url))
         return webView
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {}
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.requestedURL != url else { return }
+        context.coordinator.requestedURL = url
+        webView.load(URLRequest(url: RetailerBrowserPolicy.normalizedURL(url) ?? url))
+    }
+
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.priceTask?.cancel()
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+    }
 
     @MainActor
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         @Binding private var currentURL: URL?
         @Binding private var detectedPrice: Double?
         @Binding private var loadError: String?
         private let allowedProductHosts: Set<String>
+        private let channel: PriceChannel
+        var requestedURL: URL?
+        var priceTask: Task<Void, Never>?
+        private var responseError: String?
 
         init(
             currentURL: Binding<URL?>,
             detectedPrice: Binding<Double?>,
             loadError: Binding<String?>,
-            allowedProductHosts: Set<String>
+            allowedProductHosts: Set<String>,
+            channel: PriceChannel
         ) {
             _currentURL = currentURL
             _detectedPrice = detectedPrice
             _loadError = loadError
             self.allowedProductHosts = allowedProductHosts
+            self.channel = channel
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
             loadError = nil
+            responseError = nil
+            priceTask?.cancel()
+            detectedPrice = nil
             currentURL = webView.url
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
-            loadError = nil
+            loadError = responseError
             currentURL = webView.url
-            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
-                for cookie in cookies { HTTPCookieStorage.shared.setCookie(cookie) }
-            }
-            guard let host = webView.url?.host?.lowercased(), allowedProductHosts.contains(host) else {
+            guard let url = webView.url, let host = url.host?.lowercased(), allowedProductHosts.contains(host),
+                  PricingHTMLParser.productID(channel: channel, url: url) != nil else {
                 detectedPrice = nil
                 return
             }
-            webView.evaluateJavaScript(Self.priceScript) { [weak self] value, _ in
-                Task { @MainActor in
-                    if let number = value as? NSNumber { self?.detectedPrice = number.doubleValue }
-                    else if let text = value as? String { self?.detectedPrice = Double(text) }
+            priceTask?.cancel()
+            priceTask = Task { @MainActor [weak self, weak webView] in
+                guard let self, let webView else { return }
+                let pageURL = webView.url
+                var lastPrice: Double?
+                var stable = 0
+                for _ in 0..<30 {
+                    guard !Task.isCancelled, webView.url == pageURL else { return }
+                    do {
+                        let value = try await webView.evaluateJavaScript(RetailerPageScripts.snapshot)
+                        guard !Task.isCancelled, webView.url == pageURL else { return }
+                        if let json = value as? String, let data = json.data(using: .utf8), let pageURL {
+                            let page = try JSONDecoder().decode(RenderedRetailerSnapshot.self, from: data).page(url: pageURL, channel: channel)
+                            if let price = page.productPrice {
+                                detectedPrice = price
+                                stable = price == lastPrice ? stable + 1 : 0
+                                lastPrice = price
+                                if stable >= 2 { return }
+                            }
+                        }
+                        try await Task.sleep(for: .milliseconds(500))
+                    } catch is CancellationError { return }
+                    catch { return }
                 }
             }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation?, withError error: Error) {
-            reportLoadFailure(webView)
+            reportLoadFailure(webView, error: error)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?, withError error: Error) {
-            reportLoadFailure(webView)
+            reportLoadFailure(webView, error: error)
         }
 
-        private func reportLoadFailure(_ webView: WKWebView) {
+        private func reportLoadFailure(_ webView: WKWebView, error: Error) {
+            if (error as NSError).code == NSURLErrorCancelled { return }
+            priceTask?.cancel()
             currentURL = webView.url
             detectedPrice = nil
-            loadError = tkLocalized("无法打开书店页面。请检查网络后重试。")
+            loadError = RetailerBrowserPolicy.errorMessage(error)
         }
 
-        private static let priceScript = #"""
-        (() => {
-          const selectors = ['#dd-price', '#jd-price', '.search_now_price', '.sellPrice', '.p-price', '[class*="price-now"]', '[class*="now-price"]'];
-          for (const selector of selectors) {
-            const node = document.querySelector(selector);
-            const match = node?.textContent?.replace(/,/g, '').match(/([0-9]+(?:\.[0-9]{1,2})?)/);
-            if (match && Number(match[1]) > 0) return Number(match[1]);
-          }
-          for (const node of document.querySelectorAll('script[type="application/ld+json"]')) {
-            try {
-              const value = JSON.parse(node.textContent || '{}');
-              const price = value?.offers?.price ?? value?.price;
-              if (Number(price) > 0) return Number(price);
-            } catch (_) {}
-          }
-          return null;
-        })()
-        """#
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+            guard action.targetFrame?.isMainFrame != false else { return .allow }
+            guard let original = action.request.url, let normalized = RetailerBrowserPolicy.normalizedURL(original) else {
+                reportLoadFailure(webView, error: URLError(.unsupportedURL))
+                return .cancel
+            }
+            if normalized != original {
+                webView.load(URLRequest(url: normalized))
+                return .cancel
+            }
+            return .allow
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+            if response.isForMainFrame, let http = response.response as? HTTPURLResponse, http.statusCode >= 400 {
+                responseError = RetailerBrowserPolicy.errorMessage(NSError(domain: "TomeKeep.RetailerHTTP", code: http.statusCode))
+                loadError = responseError
+            }
+            return .allow
+        }
+
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if action.targetFrame == nil, let url = action.request.url, let normalized = RetailerBrowserPolicy.normalizedURL(url) {
+                webView.load(URLRequest(url: normalized))
+            }
+            return nil
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            reportLoadFailure(webView, error: URLError(.networkConnectionLost))
+        }
     }
 }
 

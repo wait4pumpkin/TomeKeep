@@ -3,6 +3,7 @@ import Foundation
 enum TomeKeepAppNotification {
     static let syncCompleted = Notification.Name("TomeKeep.sync.completed")
     static let syncRequested = Notification.Name("TomeKeep.sync.requested")
+    static let localCoversChanged = Notification.Name("TomeKeep.covers.changed")
     static let activeProfileChanged = Notification.Name("TomeKeep.activeProfileChanged")
     static let openPriceHistory = Notification.Name("TomeKeep.openPriceHistory")
 }

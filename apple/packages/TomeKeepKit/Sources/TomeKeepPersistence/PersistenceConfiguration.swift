@@ -536,13 +536,9 @@ public struct BookRepository {
     }
 
     private func ensureISBNIsAvailable(_ isbn: String?, excluding excludedID: String?) throws {
-        guard let isbn, !isbn.isEmpty else { return }
-        let descriptor = FetchDescriptor<StoredBook>(
-            predicate: #Predicate {
-                $0.isbn == isbn && $0.deletedAt == nil
-            }
-        )
-        if try context.fetch(descriptor).contains(where: { $0.id != excludedID }) {
+        guard let isbn, let identity = ISBN(isbn)?.isbn13 else { return }
+        let descriptor = FetchDescriptor<StoredBook>(predicate: #Predicate { $0.deletedAt == nil })
+        if try context.fetch(descriptor).contains(where: { $0.id != excludedID && $0.isbn.flatMap { ISBN($0)?.isbn13 } == identity }) {
             throw BookRepositoryError.duplicateISBN
         }
     }

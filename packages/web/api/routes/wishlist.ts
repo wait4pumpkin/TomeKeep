@@ -5,7 +5,6 @@ import { Hono } from 'hono'
 import type { HonoEnv } from '../lib/types.ts'
 import { authMiddleware } from '../middleware/auth.ts'
 import { dbAll, dbFirst, dbRun } from '../lib/db.ts'
-import { r2Delete } from '../lib/r2.ts'
 import { canonicalizeIsbn } from '@tomekeep/shared'
 
 const wishlist = new Hono<HonoEnv>()
@@ -194,15 +193,8 @@ wishlist.put('/:id', async (c) => {
 
   await dbRun(c.env.DB, `UPDATE wishlist SET ${fields.join(', ')} WHERE id = ?`, ...values)
 
-  // If the cover was replaced with a different key, delete the old R2 object.
-  // Fire-and-forget: cover cleanup is best-effort and must not block the response.
-  if (
-    body.cover_key !== undefined &&
-    existing.cover_key &&
-    existing.cover_key !== body.cover_key
-  ) {
-    void r2Delete(c.env.COVERS, existing.cover_key).catch(() => undefined)
-  }
+  // Old cover keys may still be referenced by conflict snapshots or a book
+  // created from this wish; cleanup needs a separate reference-aware policy.
 
   const updated = await dbFirst<WishlistRow>(c.env.DB, 'SELECT * FROM wishlist WHERE id = ?', id)
   return c.json(parseItem(updated!))
@@ -225,11 +217,7 @@ wishlist.delete('/:id', async (c) => {
     id,
   )
 
-  // Delete the R2 cover object if one exists.
-  // Fire-and-forget: cover cleanup is best-effort and must not block the response.
-  if (existing.cover_key) {
-    void r2Delete(c.env.COVERS, existing.cover_key).catch(() => undefined)
-  }
+  // Retain the tombstone's cover object for recovery and shared references.
 
   return c.json({ ok: true })
 })
@@ -245,27 +233,33 @@ wishlist.post('/:id/move-to-inventory', async (c) => {
   if (!item) return c.json({ error: 'not_found' }, 404)
   if (item.deleted_at) return c.json({ error: 'already_deleted' }, 409)
 
-  if (item.isbn) {
-    const duplicate = await dbFirst<{ id: string }>(
-      c.env.DB,
-      'SELECT id FROM books WHERE owner_id = ? AND isbn = ? AND deleted_at IS NULL LIMIT 1',
-      sub, item.isbn,
-    )
+  const normalizedISBN = item.isbn ? canonicalizeIsbn(item.isbn) : null
+  if (item.isbn && !normalizedISBN) return c.json({ error: 'invalid_isbn' }, 400)
+  if (normalizedISBN) {
+    const rows = await dbAll<{ id: string; isbn: string }>(c.env.DB,
+      'SELECT id, isbn FROM books WHERE owner_id = ? AND deleted_at IS NULL AND isbn IS NOT NULL', sub)
+    const duplicate = rows.find(row => canonicalizeIsbn(row.isbn) === normalizedISBN)
     if (duplicate) return c.json({ error: 'duplicate_isbn', id: duplicate.id }, 409)
   }
 
   const bookId = crypto.randomUUID()
 
   // Use a batch to run both statements atomically
-  await c.env.DB.batch([
+  try { await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO books (id, owner_id, title, author, isbn, publisher, cover_key, detail_url, tags)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(bookId, sub, item.title, item.author, item.isbn, item.publisher, item.cover_key, item.detail_url, item.tags),
+    ).bind(bookId, sub, item.title, item.author, normalizedISBN, item.publisher, item.cover_key, item.detail_url, item.tags),
     c.env.DB.prepare(
       "UPDATE wishlist SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
     ).bind(wishId),
-  ])
+  ]) } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('duplicate_isbn')) throw error
+    const rows = await dbAll<{ id: string; isbn: string }>(c.env.DB,
+      'SELECT id, isbn FROM books WHERE owner_id = ? AND deleted_at IS NULL AND isbn IS NOT NULL', sub)
+    const duplicate = rows.find(row => canonicalizeIsbn(row.isbn) === normalizedISBN)
+    return c.json({ error: 'duplicate_isbn', id: duplicate?.id }, 409)
+  }
 
   const book = await dbFirst<{
     id: string; owner_id: string; title: string; author: string;

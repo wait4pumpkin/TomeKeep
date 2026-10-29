@@ -4,6 +4,55 @@ import TomeKeepDomain
 @testable import TomeKeepPricing
 
 struct PricingTests {
+    @Test func dangdangSearchUsesLegacyChineseBytesAndEscapesDelimiters() {
+        let url = RetailerPricingService.searchURL(channel: .dangdang, title: "康熙的红票")
+        #expect(url.absoluteString.contains("key=%BF%B5%CE%F5%B5%C4%BA%EC%C6%B1"))
+        #expect(url.absoluteString.contains("category_path=01.00.00.00.00.00"))
+        let special = RetailerPricingService.searchURL(channel: .dangdang, title: "A&B+#")
+        #expect(special.absoluteString.contains("key=%41%26%42%2B%23"))
+        #expect(URLComponents(url: special, resolvingAgainstBaseURL: false)?.queryItems?.filter { $0.name == "key" }.count == 1)
+    }
+
+    @Test func productIdentityRejectsImpostorHostsAndUnsupportedNavigation() {
+        #expect(PricingHTMLParser.productID(channel: .jd, url: URL(string: "https://item.jd.com/123.html")!) == "123")
+        for raw in ["https://evil.test/item.jd.com/123.html", "https://item.jd.com.evil.test/123.html", "https://u:p@item.jd.com/123.html", "https://item.jd.com:999/123.html"] {
+            #expect(PricingHTMLParser.productID(channel: .jd, url: URL(string: raw)!) == nil)
+        }
+    }
+
+    @Test func verificationAssetsDoNotMakeOrdinaryPagesLookBlocked() {
+        let ordinary = #"<script src="/verify.js"></script><a href="/captcha-help">帮助</a>"#
+        #expect(!RetailerPricingService.requiresVerification(url: URL(string: "https://search.jd.com/Search")!, html: ordinary, channel: .jd))
+        #expect(RetailerPricingService.requiresVerificationURL(URL(string: "https://cfe.m.jd.com/privatedomain/risk_handler/1/")!, channel: .jd))
+        #expect(RetailerPricingService.requiresVerification(url: URL(string: "https://search.jd.com/Search")!, html: "请完成验证", channel: .jd))
+    }
+
+    @Test func renderedProductPriceRefreshesExistingQuoteWithoutStaticHTML() async throws {
+        let url = URL(string: "https://item.jd.com/123.html")!
+        let old = PriceQuote(channel: .jd, currency: "CNY", url: url, fetchedAt: .distantPast, status: .ok, priceCNY: 90, productID: "123", source: .manual)
+        let service = RetailerPricingService(pageLoader: { requested, channel in
+            #expect(requested == url)
+            #expect(channel == .jd)
+            return RetailerPageSnapshot(url: url, html: "<div style='display:none'>安全验证</div>", productPrice: 42.5)
+        })
+        let quote = try await service.capture(channel: .jd, title: "康熙的红票", author: nil, existingQuote: old)
+        #expect(quote.priceCNY == 42.5)
+        #expect(quote.url == url)
+        #expect(quote.source == .manual)
+    }
+
+    @Test func renderedVerificationUsesActualRiskURLAndCancellationDoesNotSearchAgain() async {
+        let risk = URL(string: "https://cfe.m.jd.com/privatedomain/risk_handler/1/")!
+        let blocked = RetailerPricingService(pageLoader: { _, _ in RetailerPageSnapshot(url: risk, html: "") })
+        await #expect(throws: RetailerPricingError.verificationRequired(risk)) {
+            try await blocked.capture(channel: .jd, title: "三体", author: nil)
+        }
+        let cancelled = RetailerPricingService(pageLoader: { _, _ in throw CancellationError() })
+        await #expect(throws: CancellationError.self) {
+            try await cancelled.capture(channel: .jd, title: "三体", author: nil)
+        }
+    }
+
     @Test
     func pricingErrorsProvideEnglishDescriptions() {
         let english = Locale(identifier: "en")

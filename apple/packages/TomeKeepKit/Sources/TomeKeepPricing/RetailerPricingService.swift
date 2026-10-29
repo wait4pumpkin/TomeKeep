@@ -1,5 +1,24 @@
 import Foundation
+import CoreFoundation
 import TomeKeepDomain
+
+/// A bounded snapshot from a client-side renderer. No cookies or credentials
+/// cross this boundary; matching and quote creation remain in this module.
+public struct RetailerPageSnapshot: Sendable {
+    public let url: URL
+    public let html: String
+    public let offers: [PriceOffer]
+    public let productPrice: Double?
+
+    public init(url: URL, html: String, offers: [PriceOffer] = [], productPrice: Double? = nil) {
+        self.url = url
+        self.html = html
+        self.offers = offers
+        self.productPrice = productPrice
+    }
+}
+
+public typealias RetailerPageLoader = @Sendable (URL, PriceChannel) async throws -> RetailerPageSnapshot
 
 public struct PriceOffer: Equatable, Sendable {
     public var url: URL
@@ -50,9 +69,11 @@ public enum RetailerPricingError: LocalizedError, Equatable, Sendable {
 /// Direct client-side retailer lookup. This never uses a TomeKeep server proxy.
 public actor RetailerPricingService {
     private let session: URLSession
+    private let pageLoader: RetailerPageLoader?
 
-    public init(session: URLSession = .shared) {
+    public init(session: URLSession = .shared, pageLoader: RetailerPageLoader? = nil) {
         self.session = session
+        self.pageLoader = pageLoader
     }
 
     public func capture(
@@ -61,20 +82,27 @@ public actor RetailerPricingService {
         author: String?,
         existingQuote: PriceQuote? = nil
     ) async throws -> PriceQuote {
-        if let existingQuote, existingQuote.productID != nil {
+        try Task.checkCancellation()
+        if let existingQuote, PricingHTMLParser.productID(channel: channel, url: existingQuote.url) != nil {
             do {
-                let html = try await fetch(existingQuote.url, channel: channel)
-                if let price = PricingHTMLParser.productPrice(channel: channel, html: html) {
-                    return quote(channel: channel, url: existingQuote.url, price: price, source: existingQuote.source ?? .auto)
+                let page = try await fetch(existingQuote.url, channel: channel)
+                if let price = page.productPrice ?? PricingHTMLParser.productPrice(channel: channel, html: page.html),
+                   price.isFinite, price > 0,
+                   PricingHTMLParser.productID(channel: channel, url: page.url) != nil {
+                    try Task.checkCancellation()
+                    return quote(channel: channel, url: page.url, price: price, source: existingQuote.source ?? .auto)
                 }
-            } catch RetailerPricingError.verificationRequired { throw RetailerPricingError.verificationRequired(existingQuote.url) }
+            } catch let error as CancellationError { throw error }
+            catch RetailerPricingError.verificationRequired(let url) { throw RetailerPricingError.verificationRequired(url) }
             catch { /* Fall through to a fresh search. */ }
         }
 
         let searchURL = Self.searchURL(channel: channel, title: title)
-        let html = try await fetch(searchURL, channel: channel)
-        let offers = PricingHTMLParser.offers(channel: channel, html: html, limit: 8)
+        let page = try await fetch(searchURL, channel: channel)
+        let offers = (page.offers.isEmpty ? PricingHTMLParser.offers(channel: channel, html: page.html, limit: 8) : page.offers)
+            .filter { $0.priceCNY.isFinite && $0.priceCNY > 0 && PricingHTMLParser.productID(channel: channel, url: $0.url) != nil }
         let matches = await PriceOfferMatchingService().filter(offers, title: title, author: author)
+        try Task.checkCancellation()
         guard let best = matches.min(by: { $0.priceCNY < $1.priceCNY }) else {
             throw RetailerPricingError.notFound
         }
@@ -93,7 +121,10 @@ public actor RetailerPricingService {
             ]
         case .dangdang:
             components = URLComponents(string: "https://search.dangdang.com/")!
-            components.queryItems = [URLQueryItem(name: "key", value: title)]
+            let encoding = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+            let bytes = title.trimmingCharacters(in: .whitespacesAndNewlines).data(using: encoding) ?? Data(title.utf8)
+            let key = bytes.map { String(format: "%%%02X", $0) }.joined()
+            components.percentEncodedQuery = "key=\(key)&act=input&category_path=01.00.00.00.00.00&medium=01&type=01.00.00.00.00.00"
         case .bookschina:
             components = URLComponents(string: "https://www.bookschina.com/book_find2/")!
             components.queryItems = [URLQueryItem(name: "stp", value: title), URLQueryItem(name: "sCate", value: "1")]
@@ -101,7 +132,17 @@ public actor RetailerPricingService {
         return components.url!
     }
 
-    private func fetch(_ url: URL, channel: PriceChannel) async throws -> String {
+    private func fetch(_ url: URL, channel: PriceChannel) async throws -> RetailerPageSnapshot {
+        if let pageLoader {
+            let page = try await pageLoader(url, channel)
+            try Task.checkCancellation()
+            let hasOffers = page.offers.contains { $0.priceCNY.isFinite && $0.priceCNY > 0 && PricingHTMLParser.productID(channel: channel, url: $0.url) != nil }
+            let hasProductPrice = page.productPrice.map { $0.isFinite && $0 > 0 } == true && PricingHTMLParser.productID(channel: channel, url: page.url) != nil
+            if Self.requiresVerificationURL(page.url, channel: channel) || (!hasOffers && !hasProductPrice && Self.requiresVerification(url: page.url, html: page.html, channel: channel)) {
+                throw RetailerPricingError.verificationRequired(page.url)
+            }
+            return page
+        }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -115,7 +156,7 @@ public actor RetailerPricingService {
         if Self.requiresVerification(url: response.url ?? url, html: html, channel: channel) {
             throw RetailerPricingError.verificationRequired(response.url ?? url)
         }
-        return html
+        return RetailerPageSnapshot(url: response.url ?? url, html: html)
     }
 
     private func quote(channel: PriceChannel, url: URL, price: Double, source: PriceQuoteSource) -> PriceQuote {
@@ -132,11 +173,17 @@ public actor RetailerPricingService {
     }
 
     static func requiresVerification(url: URL, html: String, channel: PriceChannel) -> Bool {
-        let text = "\(url.absoluteString) \(html.prefix(80_000))".lowercased()
-        if text.contains("captcha") || text.contains("verify") || text.contains("验证") { return true }
+        if requiresVerificationURL(url, channel: channel) { return true }
+        let text = String(html.prefix(80_000)).lowercased()
+        return ["请完成验证", "安全验证", "访问过于频繁", "验证您的身份", "id=\"captcha\"", "id='captcha'"].contains { text.contains($0) }
+    }
+
+    /// Identify retailer-owned login/risk pages without treating an ordinary
+    /// page's login links or verification script assets as a blocking wall.
+    public static func requiresVerificationURL(_ url: URL, channel: PriceChannel) -> Bool {
         let host = url.host?.lowercased() ?? ""
         switch channel {
-        case .jd: return host == "passport.jd.com" || host.hasSuffix(".passport.jd.com") || text.contains("安全验证")
+        case .jd: return host == "passport.jd.com" || host.hasSuffix(".passport.jd.com") || host == "cfe.m.jd.com"
         case .dangdang: return host == "login.dangdang.com" || host.hasSuffix(".login.dangdang.com")
         case .bookschina: return host == "login.bookschina.com" || host.hasSuffix(".login.bookschina.com")
         }
@@ -283,13 +330,20 @@ public enum PricingHTMLParser {
     }
 
     public static func productID(channel: PriceChannel, url: URL) -> String? {
+        guard url.scheme == "https" || url.scheme == "http", url.user == nil, url.password == nil,
+              url.port == nil || url.port == 443 || url.port == 80 else { return nil }
+        let hosts: Set<String> = switch channel {
+        case .jd: ["item.jd.com"]
+        case .dangdang: ["product.dangdang.com"]
+        case .bookschina: ["www.bookschina.com", "m.bookschina.com", "bookschina.com"]
+        }
+        guard let host = url.host?.lowercased(), hosts.contains(host) else { return nil }
         let pattern: String
         switch channel {
-        case .jd: pattern = #"item\.jd\.com/(\d+)\.html"#
-        case .dangdang: pattern = #"product\.dangdang\.com/(\d+)\.html"#
-        case .bookschina: pattern = #"bookschina\.com/(\d+)\.htm"#
+        case .jd, .dangdang: pattern = #"^/(\d{1,24})\.html$"#
+        case .bookschina: pattern = #"^/(\d{1,24})\.htm$"#
         }
-        return capture(url.absoluteString, pattern: pattern, group: 1)
+        return capture(url.path, pattern: pattern, group: 1)
     }
 
     private static func scan(

@@ -3,6 +3,7 @@ import Observation
 import SwiftData
 import TomeKeepNetworking
 import TomeKeepSync
+import TomeKeepDesignSystem
 
 enum NativeSyncTrigger: String, Sendable {
     case launch
@@ -27,6 +28,7 @@ final class NativeSyncCoordinator {
     private(set) var lastSuccessAt: Date?
     private(set) var lastError: String?
     private(set) var activeTrigger: NativeSyncTrigger?
+    let coverPriority = CoverDownloadPriority()
 
     private var pendingOperation: (@MainActor () async throws -> SyncResult)?
     private var pendingTrigger: NativeSyncTrigger?
@@ -45,7 +47,12 @@ final class NativeSyncCoordinator {
         await perform(trigger: trigger) {
             try await NativeSyncEngine(
                 baseURL: baseURL,
-                uploadsPriceCache: uploadsPriceCache
+                uploadsPriceCache: uploadsPriceCache,
+                coverPriority: self.coverPriority,
+                onLocalDataChanged: {
+                    NotificationCenter.default.post(name: TomeKeepAppNotification.localCoversChanged, object: nil)
+                    NotificationCenter.default.post(name: TomeKeepBookCover.cacheDidChange, object: nil)
+                }
             ).synchronize(context: context)
         }
     }
@@ -88,6 +95,7 @@ final class NativeSyncCoordinator {
             } catch {
                 if case APIClientError.rejected(statusCode: 401, message: _) = error {
                     try? KeychainTokenStore().delete()
+                    coverPriority.cancelSession()
                     accountState = .signedOut
                 }
                 lastError = tkLocalizedFormat("同步失败：%@", tkErrorDescription(error, fallback: "请重试；若持续失败，请联系支持。"))
@@ -118,10 +126,12 @@ final class NativeSyncCoordinator {
     }
 
     func markSignedOut() {
+        coverPriority.cancelSession()
         accountState = .signedOut
     }
 
     func clearSessionStatus() {
+        coverPriority.cancelSession()
         UserDefaults.standard.removeObject(forKey: "native.sync.lastError")
         UserDefaults.standard.removeObject(forKey: "native.sync.lastAttemptAt")
         lastResult = nil

@@ -5,6 +5,25 @@ import Testing
 @Suite(.serialized)
 struct APIClientTests {
     @Test
+    func bookIdentityConflictIsTypedButUnrelatedErrorsRemainErrors() async throws {
+        let session = makeSession { request in
+            return (HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: nil)!,
+                    Data(#"{"error":"duplicate_isbn","id":"owned-book"}"#.utf8))
+        }
+        let client = APIClient(baseURL: URL(string: "https://example.test/api/")!, session: session)
+        do {
+            _ = try await client.data(for: "books", method: "POST", bearerToken: "secret")
+            Issue.record("Expected book identity conflict")
+        } catch let error as APIBookConflictError {
+            #expect(error.id == "owned-book")
+            #expect(error.reason == "duplicate_isbn")
+        }
+        await #expect(throws: APIClientError.rejected(statusCode: 409, message: "duplicate_isbn")) {
+            _ = try await client.data(for: "wishlist", method: "POST", bearerToken: "secret")
+        }
+    }
+
+    @Test
     func sendsBearerAndDecodesSnakeCase() async throws {
         let session = makeSession { request in
             #expect(request.url?.absoluteString == "https://example.test/api/auth/me")

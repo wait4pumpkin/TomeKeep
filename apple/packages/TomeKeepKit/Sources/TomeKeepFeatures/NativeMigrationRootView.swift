@@ -40,6 +40,14 @@ public struct NativeMigrationRootView: View {
         appearanceContent
             .environment(\.locale, Locale(identifier: languageCode))
             .environment(syncCoordinator)
+            .onChange(of: iosSelection, initial: true) { _, selection in
+                guard platform == .iOS else { return }
+                syncCoordinator.coverPriority.activate(selection == .library ? .library : selection == .wishlist ? .wishlist : nil)
+            }
+            .onChange(of: macSelection, initial: true) { _, selection in
+                guard platform == .macOS else { return }
+                syncCoordinator.coverPriority.activate(selection == .library ? .library : selection == .wishlist ? .wishlist : nil)
+            }
             .task {
                 await restoreApplicationSession()
                 if syncCoordinator.canAccessApplication {
@@ -1047,6 +1055,7 @@ private struct LibraryView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 #if os(iOS)
     @State private var isPresentingContinuousScanner = false
+    @State private var scannedExistingBookID: String?
     @State private var isSearchPresented = false
     @State private var isTagsPresented = false
     @State private var isTopControlsCompact = false
@@ -1078,8 +1087,12 @@ private struct LibraryView: View {
                 .frame(minWidth: platform == .macOS ? 480 : nil)
         }
 #if os(iOS)
-        .fullScreenCover(isPresented: $isPresentingContinuousScanner) {
-            ContinuousISBNImportView(onFinished: reload)
+        .fullScreenCover(isPresented: $isPresentingContinuousScanner, onDismiss: {
+            guard let id = scannedExistingBookID else { return }
+            scannedExistingBookID = nil
+            if let book = books.first(where: { $0.id == id }) { presentEdit(book) }
+        }) {
+            ContinuousISBNImportView(onFinished: reload, onOpenExisting: { scannedExistingBookID = $0 })
         }
 #endif
         .overlay {
@@ -1119,6 +1132,9 @@ private struct LibraryView: View {
             reload()
         }
         .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.syncCompleted)) { _ in
+            reload()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.localCoversChanged)) { _ in
             reload()
         }
         .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.activeProfileChanged)) { _ in
@@ -1209,6 +1225,7 @@ private struct LibraryView: View {
                             ForEach(filteredBooks) { book in
                                 IOSCompactBookCard(book: book) { presentEdit(book) }
                                     .contextMenu { iosBookContextMenu(book) }
+                                    .modifier(CoverDownloadVisibility(collection: .library, id: book.id))
                             }
                         }
                         .padding(12)
@@ -1239,8 +1256,10 @@ private struct LibraryView: View {
             }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .modifier(CoverDownloadViewport())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .modifier(CoverDownloadListOrder(collection: .library, ids: filteredBooks.map(\.id)))
     }
 
     @ViewBuilder
@@ -1518,6 +1537,7 @@ private struct LibraryView: View {
                             )
                             .frame(maxWidth: .infinity)
                             .contextMenu { bookContextMenu(for: book, includesISBN: false) }
+                            .modifier(CoverDownloadVisibility(collection: .library, id: book.id))
                         }
                         ForEach(row.count..<compactColumns, id: \.self) { _ in
                             CompactBookPlaceholder()
@@ -1614,6 +1634,7 @@ private struct LibraryView: View {
                     onDelete: { pendingDeletion = book }
                 )
                 .contextMenu { bookContextMenu(for: book, includesISBN: true) }
+                .modifier(CoverDownloadVisibility(collection: .library, id: book.id))
             }
         }
     }
@@ -1668,6 +1689,7 @@ private struct LibraryView: View {
         }
         .buttonStyle(.plain)
         .contextMenu { iosBookContextMenu(book) }
+        .modifier(CoverDownloadVisibility(collection: .library, id: book.id))
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
@@ -1943,6 +1965,7 @@ private extension View {
 
 struct CompactTagFlowLayout: Layout {
     var spacing: CGFloat = 4
+    var rowSpacing: CGFloat?
 
     func sizeThatFits(
         proposal: ProposedViewSize,
@@ -1959,7 +1982,7 @@ struct CompactTagFlowLayout: Layout {
             let size = subview.sizeThatFits(ProposedViewSize(width: maximumWidth.isFinite ? maximumWidth : nil, height: nil))
             if rowWidth > 0, rowWidth + spacing + size.width > maximumWidth {
                 totalWidth = max(totalWidth, rowWidth)
-                totalHeight += rowHeight + spacing
+                totalHeight += rowHeight + (rowSpacing ?? spacing)
                 rowWidth = 0
                 rowHeight = 0
             }
@@ -1981,7 +2004,7 @@ struct CompactTagFlowLayout: Layout {
             let size = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
             if point.x > bounds.minX, point.x + size.width > bounds.maxX {
                 point.x = bounds.minX
-                point.y += rowHeight + spacing
+                point.y += rowHeight + (rowSpacing ?? spacing)
                 rowHeight = 0
             }
             subview.place(at: point, proposal: ProposedViewSize(size))
@@ -2041,12 +2064,23 @@ private final class OutsideClickTrackingView: NSView {
 private struct InlineBookTagEditor: View {
     let tags: [String]
     let onChange: ([String]) -> Void
-    @State private var isAdding = false
     @State private var input = ""
+
+    var body: some View {
+        MacBookTagEditor(tags: tags, input: $input, onChange: onChange)
+    }
+}
+
+private struct MacBookTagEditor: View {
+    let tags: [String]
+    @Binding var input: String
+    let onChange: ([String]) -> Void
+    @State private var isAdding = false
+    @State private var isShowingSuggestions = false
     @FocusState private var inputIsFocused: Bool
 
     var body: some View {
-        CompactTagFlowLayout(spacing: 4) {
+        CompactTagFlowLayout(spacing: 4, rowSpacing: 6) {
             ForEach(tags, id: \.self) { tag in
                 let color = TagPalette.color(for: tag)
                 HStack(spacing: 2) {
@@ -2055,49 +2089,66 @@ private struct InlineBookTagEditor: View {
                         onChange(tags.filter { $0 != tag })
                     }
                 }
-                .font(.caption2.weight(.medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(color)
                 .padding(.leading, 6)
                 .padding(.trailing, 3)
-                .frame(height: 18)
+                .frame(height: 22)
                 .background(color.opacity(0.12), in: .capsule)
                 .overlay { Capsule().stroke(color.opacity(0.24), lineWidth: 0.5) }
             }
-            TagAddButton { isAdding = true }
-                .popover(isPresented: $isAdding, arrowEdge: .bottom) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        TextField(tkLocalized("新增标签"), text: $input)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($inputIsFocused)
-                            .onSubmit(commitInput)
-                            .onExitCommand {
-                                input = ""
-                                isAdding = false
-                            }
-                        CommonBookTagSuggestions(selected: tags, query: input) { tag in
-                            input = ""
+            if isAdding {
+                TextField(tkLocalized("标签名称"), text: $input)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8)
+                    .frame(width: 130, height: 24)
+                    .background(Color.accentColor.opacity(0.1), in: .capsule)
+                    .overlay { Capsule().strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 0.5) }
+                    .focused($inputIsFocused)
+                    .accessibilityLabel(tkLocalized("标签名称"))
+                    .accessibilityIdentifier("mac.tags.input")
+                    .onSubmit {
+                        commitInput()
+                        inputIsFocused = true
+                    }
+                    .onExitCommand {
+                        input = ""
+                        finishAdding()
+                    }
+                    .popover(isPresented: $isShowingSuggestions, arrowEdge: .top) {
+                        MacTagSuggestionsPopover(selected: tags) { tag in
                             onChange(normalizedBookTags(tags + [tag]))
                         }
-                        HStack {
-                            Spacer()
-                            Button(tkLocalized("完成")) { isAdding = false }
-                        }
                     }
-                    .padding(16)
-                    .frame(width: 300)
-                    .task { inputIsFocused = true }
-                }
+                    .background(OutsideClickMonitor { finishAdding() })
+                    .task {
+                        inputIsFocused = true
+                        isShowingSuggestions = true
+                    }
+            } else {
+                TagAddButton { isAdding = true }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: isAdding) { previous, current in
-            if previous, !current { commitInput() }
+        .onChange(of: isShowingSuggestions) { previous, current in
+            if previous, !current { finishAdding() }
         }
     }
 
     private func commitInput() {
-        let updated = normalizedBookTags(tags + [input])
+        let updated = committedEditorTagsText(existing: tags, pending: input)
+            .split(separator: "，").map(String.init)
         input = ""
         if updated != tags { onChange(updated) }
+    }
+
+    private func finishAdding() {
+        guard isAdding else { return }
+        commitInput()
+        isAdding = false
+        isShowingSuggestions = false
+        inputIsFocused = false
     }
 }
 
@@ -2110,8 +2161,8 @@ private struct TagRemoveButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 7, weight: .bold))
-                .frame(width: 12, height: 12)
+                .font(.system(size: 8, weight: .medium))
+                .frame(width: 16, height: 18)
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)
@@ -2130,14 +2181,14 @@ private struct TagAddButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
-                .font(.system(size: 8, weight: .bold))
-                .frame(width: 18, height: 18)
-                .contentShape(.circle)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 26, height: 22)
+                .contentShape(.capsule)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isHovering ? Color.accentColor : Color.secondary.opacity(0.65))
-        .background(isHovering ? Color.accentColor.opacity(0.12) : Color.clear, in: .circle)
-        .overlay { Circle().strokeBorder(isHovering ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.28), style: StrokeStyle(lineWidth: 1, dash: [2])) }
+        .foregroundStyle(Color.accentColor)
+        .background(Color.accentColor.opacity(isHovering ? 0.2 : 0.12), in: .capsule)
+        .overlay { Capsule().strokeBorder(Color.accentColor.opacity(isHovering ? 0.5 : 0.24), lineWidth: 0.5) }
         .onHover { isHovering = $0 }
         .immediateHoverHelp(tkLocalized("新增标签"))
         .accessibilityLabel(tkLocalized("新增标签"))
@@ -2637,10 +2688,12 @@ private struct WishlistView: View {
     @State private var purchaseFilter: WishlistPurchaseFilter = .all
     @AppStorage("native.wishlist.selectedTags") private var storedSelectedTags = ""
     @State private var recentlyDeletedItem: WishlistItem?
+    @State private var existingPurchase: WishlistItem?
 #if os(iOS)
     @State private var isSearchPresented = false
     @State private var isTagsPresented = false
     @State private var isTopControlsCompact = false
+    @State private var purchasedItem: WishlistItem?
 #endif
 #if os(macOS)
     @State private var expandedCompactItemID: String?
@@ -2725,6 +2778,14 @@ private struct WishlistView: View {
         )) { Button("好", role: .cancel) {} } message: {
             Text(errorMessage ?? tkLocalized("未知错误"))
         }
+        .confirmationDialog(tkLocalized("书库中已有此书"), isPresented: Binding(
+            get: { existingPurchase != nil }, set: { if !$0 { existingPurchase = nil } }
+        ), titleVisibility: .visible) {
+            if let item = existingPurchase {
+                Button(tkLocalized("关联已有书籍并完成愿望")) { completeExistingPurchase(item) }
+            }
+            Button(tkLocalized("取消"), role: .cancel) { existingPurchase = nil }
+        }
         .task {
             selectedTags = decodeStoredTags(storedSelectedTags).subtracting([untaggedFilterToken])
             let key = "native.wishlist.sort"
@@ -2735,6 +2796,9 @@ private struct WishlistView: View {
             reload()
         }
         .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.syncCompleted)) { _ in
+            reload()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TomeKeepAppNotification.localCoversChanged)) { _ in
             reload()
         }
         .onChange(of: selectedTags) { _, value in
@@ -2797,7 +2861,22 @@ private struct WishlistView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(.regularMaterial)
+            } else if let purchasedItem {
+                Label(tkLocalizedFormat("《%@》已移入书库", purchasedItem.title), systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .lineLimit(2)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.regularMaterial)
+                    .accessibilityIdentifier("wishlist.purchase.feedback")
             }
+        }
+        .task(id: purchasedItem?.id) {
+            guard let id = purchasedItem?.id else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, purchasedItem?.id == id else { return }
+            purchasedItem = nil
         }
 #endif
     }
@@ -2867,9 +2946,11 @@ private struct WishlistView: View {
                                 IOSCompactWishlistCard(
                                     item: item, coverURL: localCoverURL(item.coverFileName),
                                     action: { presentEdit(item) },
-                                    onTogglePending: { togglePendingBuy(item) }
+                                    onTogglePending: { togglePendingBuy(item) },
+                                    menu: wishlistMoreMenu(for: item)
                                 )
                                 .contextMenu { wishlistContextMenu(for: item) }
+                                .modifier(CoverDownloadVisibility(collection: .wishlist, id: item.id))
                             }
                         }
                         .padding(12)
@@ -2883,8 +2964,10 @@ private struct WishlistView: View {
             }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .modifier(CoverDownloadViewport())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .modifier(CoverDownloadListOrder(collection: .wishlist, ids: filteredItems.map(\.id)))
     }
 
     @ViewBuilder
@@ -2895,7 +2978,7 @@ private struct WishlistView: View {
             ContentUnavailableView(
                 tkLocalized("没有符合筛选条件的愿望"),
                 systemImage: "line.3.horizontal.decrease.circle",
-                description: Text(verbatim: tkLocalized("可取消标签筛选。"))
+                description: Text(verbatim: tkLocalized("可取消标签或待购买筛选。"))
             )
         }
     }
@@ -2948,6 +3031,10 @@ private struct WishlistView: View {
             IOSLibraryControlButton(title: tkLocalized("标签筛选"), symbol: "tag", selected: isTagsPresented || !selectedTags.isEmpty, count: selectedTags.count) {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { isTagsPresented.toggle() }
             }
+            IOSLibraryControlButton(title: tkLocalized("只看待购买"), symbol: purchaseFilter == .pending ? "cart.fill" : "cart", selected: purchaseFilter == .pending) {
+                purchaseFilter = purchaseFilter == .pending ? .all : .pending
+            }
+            .accessibilityIdentifier("wishlist.pending.filter")
             Spacer(minLength: 0)
             wishlistSortMenu
             IOSLibraryControlButton(title: tkLocalized(displayMode == .covers ? "切换到详细视图" : "切换到封面视图"), symbol: displayMode == .covers ? "rectangle.grid.1x2" : "square.grid.2x2") {
@@ -3059,6 +3146,26 @@ private struct WishlistView: View {
     private var wishlistList: some View {
         List(filteredItems) { item in
                 HStack(spacing: 8) {
+#if os(iOS)
+                    Button { presentEdit(item) } label: {
+                        TomeKeepBookCover(fileURL: localCoverURL(item.coverFileName))
+                            .frame(width: 44, height: 66)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(tkLocalized("编辑") + " · " + item.title)
+                    IOSBookIntroductionLink(url: item.detailURL, edit: { presentEdit(item) }) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.title).font(.headline).lineLimit(1)
+                            Text(item.author.isEmpty ? tkLocalized("未知作者") : item.author)
+                                .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                            if !item.tags.isEmpty { TagBadgeRow(tags: item.tags) }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
+                        .contentShape(.rect)
+                    }
+                    .accessibilityIdentifier("wishlist.book.introduction.\(item.id)")
+#else
                     Button { presentEdit(item) } label: {
                     HStack(spacing: 12) {
                         TomeKeepBookCover(fileURL: localCoverURL(item.coverFileName))
@@ -3069,11 +3176,6 @@ private struct WishlistView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                            if item.pendingBuy {
-                                Label("待购买", systemImage: "cart")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
                             if !item.tags.isEmpty {
                                 TagBadgeRow(tags: item.tags)
                             }
@@ -3085,8 +3187,12 @@ private struct WishlistView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint(tkLocalized("打开编辑表单"))
+#endif
                     WishlistPendingButton(title: item.title, isPending: item.pendingBuy) { togglePendingBuy(item) }
                         .accessibilityIdentifier("wishlist.book.pending.\(item.id)")
+#if os(iOS)
+                    wishlistMoreMenu(for: item)
+#endif
 #if os(macOS)
                         Button("比价", systemImage: "tag") { pricingItem = item }
                             .buttonStyle(.bordered)
@@ -3101,6 +3207,7 @@ private struct WishlistView: View {
                     .contextMenu {
                         wishlistContextMenu(for: item)
                     }
+                    .modifier(CoverDownloadVisibility(collection: .wishlist, id: item.id))
 #if os(iOS)
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -3112,7 +3219,7 @@ private struct WishlistView: View {
                         .tint(item.pendingBuy ? .gray : .orange)
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button("移入书库", systemImage: "books.vertical") { moveToLibrary(item) }
+                        Button(tkLocalized("已购买，移入书库"), systemImage: "books.vertical") { moveToLibrary(item) }
                             .tint(.blue)
                         Button("删除", systemImage: "trash", role: .destructive) { delete(item) }
                     }
@@ -3126,14 +3233,35 @@ private struct WishlistView: View {
 #endif
     }
 
+#if os(iOS)
+    private func wishlistMoreMenu(for item: WishlistItem) -> some View {
+        Menu {
+            wishlistContextMenu(for: item)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: .circle)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(tkLocalized("更多操作") + " · " + item.title)
+        .accessibilityIdentifier("wishlist.book.actions.\(item.id)")
+    }
+#endif
+
     @ViewBuilder
     private func wishlistContextMenu(for item: WishlistItem) -> some View {
         Button("编辑", systemImage: "pencil") { presentEdit(item) }
         Button(tkLocalized(item.pendingBuy ? "取消待购买" : "标记为待购买"), systemImage: "cart") { togglePendingBuy(item) }
-        if let detailURL = item.detailURL {
+        if let detailURL = bookIntroductionURL(item.detailURL) {
             Link(destination: detailURL) { Label("打开关联页面", systemImage: "link") }
         }
+#if os(iOS)
+        Button(tkLocalized("已购买，移入书库"), systemImage: "books.vertical") { moveToLibrary(item) }
+#else
         Button("移入书库", systemImage: "books.vertical") { moveToLibrary(item) }
+#endif
 #if os(macOS)
         Button("打开比价", systemImage: "tag") { pricingItem = item }
 #endif
@@ -3156,6 +3284,7 @@ private struct WishlistView: View {
             onDelete: { delete(item) }
         )
         .contextMenu { wishlistContextMenu(for: item) }
+        .modifier(CoverDownloadVisibility(collection: .wishlist, id: item.id))
     }
 
     private func compactWishlistGrid(_ values: [WishlistItem]) -> some View {
@@ -3176,6 +3305,7 @@ private struct WishlistView: View {
                             )
                             .frame(maxWidth: .infinity)
                             .contextMenu { wishlistContextMenu(for: item) }
+                            .modifier(CoverDownloadVisibility(collection: .wishlist, id: item.id))
                         }
                         ForEach(row.count..<compactColumns, id: \.self) { _ in
                             CompactBookPlaceholder().frame(maxWidth: .infinity)
@@ -3234,18 +3364,10 @@ private struct WishlistView: View {
     private var filteredItems: [WishlistItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = items.filter { item in
-            let matchesQuery = query.isEmpty ||
-                item.title.localizedCaseInsensitiveContains(query) ||
-                item.author.localizedCaseInsensitiveContains(query) ||
-                (item.isbn?.localizedCaseInsensitiveContains(query) ?? false)
-            let matchesTags: Bool
             if selectedTags.contains(untaggedFilterToken) {
-                matchesTags = item.tags.isEmpty
-            } else {
-                matchesTags = selectedTags.isEmpty || selectedTags.allSatisfy(item.tags.contains)
+                return item.tags.isEmpty && wishlistMatchesFilters(item, query: query, tags: [], pendingOnly: purchaseFilter == .pending)
             }
-            let matchesPurchase = purchaseFilter == .all || item.pendingBuy
-            return matchesQuery && matchesTags && matchesPurchase
+            return wishlistMatchesFilters(item, query: query, tags: selectedTags, pendingOnly: purchaseFilter == .pending)
         }
         return filtered.sorted { lhs, rhs in
             let order = wishlistComparison(lhs, rhs)
@@ -3348,10 +3470,13 @@ private struct WishlistView: View {
             if expandedCompactItemID == item.id { expandedCompactItemID = nil }
 #endif
             _ = try WishlistRepository(context: modelContext).moveToLibrary(id: item.id)
+#if os(iOS)
+            purchasedItem = item
+#endif
             reload()
             requestTomeKeepSync()
         }
-        catch WishlistRepositoryError.duplicateISBN { errorMessage = tkLocalized("书库中已经存在相同 ISBN 的书籍。") }
+        catch WishlistRepositoryError.duplicateISBN { existingPurchase = item }
         catch { errorMessage = tkLocalized("无法移入书库。") }
     }
 
@@ -3366,6 +3491,18 @@ private struct WishlistView: View {
             requestTomeKeepSync()
         }
         catch { errorMessage = tkLocalized("删除失败，请稍后重试。") }
+    }
+
+    private func completeExistingPurchase(_ item: WishlistItem) {
+        do {
+            _ = try WishlistRepository(context: modelContext).completePurchaseUsingExistingBook(id: item.id)
+            existingPurchase = nil
+#if os(iOS)
+            purchasedItem = item
+#endif
+            reload()
+            requestTomeKeepSync()
+        } catch { errorMessage = tkLocalized("无法移入书库。") }
     }
 
     private func togglePendingBuy(_ item: WishlistItem) {
@@ -3433,7 +3570,7 @@ private struct WishlistView: View {
         let repository = PriceCacheRepository(context: modelContext)
         let key = priceKey(for: item)
         let existing = (try? repository.entry(key: key))?.quotes ?? []
-        let service = RetailerPricingService()
+        let service = makeNativeRetailerPricingService()
 
         let outcomes = await withTaskGroup(of: PricingCaptureOutcome.self, returning: [PricingCaptureOutcome].self) { group in
             for channel in PriceChannel.allCases {
@@ -3494,7 +3631,7 @@ private struct WishlistView: View {
             let repository = PriceCacheRepository(context: modelContext)
             let key = priceKey(for: request.item)
             let old = try repository.entry(key: key)
-            let quote = try await RetailerPricingService().capture(
+            let quote = try await makeNativeRetailerPricingService().capture(
                 channel: request.channel,
                 title: request.item.title,
                 author: request.item.author.nilIfBlank,
@@ -3566,43 +3703,49 @@ private struct WishlistView: View {
 }
 
 #if os(iOS)
-private struct IOSCompactWishlistCard: View {
+private struct IOSCompactWishlistCard<Actions: View>: View {
     let item: WishlistItem
     let coverURL: URL?
     let action: () -> Void
     let onTogglePending: () -> Void
+    let menu: Actions
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 5) {
-                ZStack(alignment: .topTrailing) {
-                    TomeKeepBookCover(fileURL: coverURL)
-                        .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                        .clipShape(.rect(cornerRadius: 7))
-                        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
-                }
-                Text(item.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.leading)
-                if !item.author.isEmpty {
-                    Text(item.author)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+        VStack(alignment: .leading, spacing: 5) {
+            Button(action: action) {
+                TomeKeepBookCover(fileURL: coverURL)
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .clipShape(.rect(cornerRadius: 7))
+                    .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            .accessibilityLabel(tkLocalized("编辑") + " · " + item.title)
+            .overlay(alignment: .topTrailing) {
+                WishlistPendingButton(title: item.title, isPending: item.pendingBuy, action: onTogglePending)
+                    .accessibilityIdentifier("wishlist.book.pending.\(item.id)")
+                    .padding(4)
+            }
+            .overlay(alignment: .bottomTrailing) { menu.padding(4) }
+            IOSBookIntroductionLink(url: item.detailURL, edit: action) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.leading)
+                    if !item.author.isEmpty {
+                        Text(item.author)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .accessibilityIdentifier("wishlist.book.introduction.\(item.id)")
         }
-        .buttonStyle(.plain)
-        .accessibilityHint(tkLocalized("打开编辑表单"))
-        .overlay(alignment: .topTrailing) {
-            WishlistPendingButton(title: item.title, isPending: item.pendingBuy, action: onTogglePending)
-                .accessibilityIdentifier("wishlist.book.pending.\(item.id)")
-                .padding(4)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 #endif
@@ -3954,58 +4097,139 @@ private struct WishlistDraft {
     }
 }
 
+/// Keep the ISBN and collapsed tag rows on the same native form baseline.
+private struct EditorFieldRow: ViewModifier {
+    func body(content: Content) -> some View {
+#if os(iOS)
+        content
+            .frame(minHeight: 44)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+#else
+        content
+#endif
+    }
+}
+
+private enum EditorInputField: Hashable {
+    case title, author, publisher, isbn, tags
+}
+
 private struct EditorTagInput: View {
     @Binding var tagsText: String
     @Binding var input: String
+    var focus: FocusState<EditorInputField?>.Binding
+    @State private var isAdding = false
 
     private var tags: [String] {
         normalizedBookTags(tagsText.split(whereSeparator: { ",，、".contains($0) }).map(String.init))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !tags.isEmpty {
-                CompactTagFlowLayout(spacing: 8) {
-                    ForEach(tags, id: \.self) { tag in
-                        let color = TagPalette.color(for: tag)
-                        Button {
-                            tagsText = tags.filter { $0 != tag }.joined(separator: "，")
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(tag)
-                                Image(systemName: "xmark").font(.caption.weight(.semibold))
-                            }
-                            .font(.callout)
-                            .padding(.horizontal, 12)
-                            .frame(minHeight: 44)
-                            .foregroundStyle(color)
-                            .background(color.opacity(0.12), in: .capsule)
-                            .contentShape(.capsule)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(tkLocalizedFormat("删除标签 %@", tag))
+#if os(macOS)
+        MacBookTagEditor(tags: tags, input: $input) { updated in
+            tagsText = updated.joined(separator: "，")
+        }
+#else
+        VStack(alignment: .leading, spacing: 8) {
+            selectedTagsAndInput
+            if isAdding {
+                CommonBookTagSuggestions(selected: tags, showsHeading: true) { tag in
+                    tagsText = normalizedBookTags(tags + [tag]).joined(separator: "，")
+                }
+                .padding(.bottom, 8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(EditorFieldRow())
+        .onChange(of: focus.wrappedValue) { previous, current in
+            if previous == .tags, current != .tags { finishAdding() }
+        }
+#endif
+    }
+
+    private var selectedTagsAndInput: some View {
+        CompactTagFlowLayout(spacing: 8) {
+            ForEach(tags, id: \.self) { tag in
+                let color = TagPalette.color(for: tag)
+                Button {
+                    tagsText = tags.filter { $0 != tag }.joined(separator: "，")
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(tag)
+                        Image(systemName: "xmark").font(.caption.weight(.semibold))
                     }
+                    .font(.subheadline)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .foregroundStyle(color)
+                    .background(color.opacity(0.12), in: .capsule)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(tkLocalizedFormat("删除标签 %@", tag))
             }
-            HStack {
-                TextField(tkLocalized("新增标签"), text: $input)
-                    .onSubmit(addTag)
-                Button(action: addTag) {
-                    Label(tkLocalized("添加"), systemImage: "plus")
+            if isAdding {
+                TextField(tkLocalized("标签名称"), text: $input)
+                    .textFieldStyle(.plain)
+                    .font(.subheadline)
+                    .focused(focus, equals: .tags)
+                    .onSubmit(finishAdding)
+                    .accessibilityLabel(tkLocalized("标签名称"))
+                    .accessibilityIdentifier("editor.tags.input")
+#if os(iOS)
+                    .submitLabel(.done)
+#endif
+                    .padding(.leading, 10)
+                    .padding(.trailing, 44)
+                    .padding(.vertical, 6)
+                    .background(Color.accentColor.opacity(0.12), in: .capsule)
+                    .frame(idealWidth: 140, maxWidth: 140, minHeight: 44)
+                    .overlay(alignment: .trailing) {
+                        Button(action: finishAdding) {
+                            Image(systemName: input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "xmark" : "checkmark")
+                                .font(.subheadline.weight(.medium))
+                                .frame(width: 44, height: 44)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(tkLocalized("完成"))
+                        .accessibilityIdentifier("editor.tags.done")
+                    }
+#if os(macOS)
+                .onExitCommand {
+                    input = ""
+                    finishAdding()
                 }
-                .buttonStyle(.bordered)
-                .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            CommonBookTagSuggestions(selected: tags, query: input) { tag in
-                tagsText = normalizedBookTags(tags + [tag]).joined(separator: "，")
-                input = ""
+#endif
+            } else {
+                Button {
+                    focus.wrappedValue = nil
+                    isAdding = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(Color.accentColor)
+                        .background(Color.accentColor.opacity(0.12), in: .capsule)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(tkLocalized("添加标签"))
+                .accessibilityIdentifier("editor.tags.add")
+                .help(tkLocalized("添加标签"))
             }
         }
     }
 
-    private func addTag() {
+    private func finishAdding() {
+        guard isAdding else { return }
         tagsText = committedEditorTagsText(existing: tags, pending: input)
         input = ""
+        isAdding = false
+        if focus.wrappedValue == .tags { focus.wrappedValue = nil }
     }
 }
 
@@ -4045,6 +4269,7 @@ private struct WishlistEditorView: View {
     @State private var draft: WishlistDraft
     @State private var validationMessage: String?
     @State private var pendingTag = ""
+    @FocusState private var focusedField: EditorInputField?
     @State private var isLookingUp = false
     @State private var lookupMessage: String?
     @State private var verificationTarget: WebsiteVerificationTarget?
@@ -4076,8 +4301,11 @@ private struct WishlistEditorView: View {
                         .disabled(isLookingUp)
                     }
                     TextField("书名", text: $draft.title)
+                        .focused($focusedField, equals: .title)
                     TextField("作者", text: $draft.author)
+                        .focused($focusedField, equals: .author)
                     TextField("出版社", text: $draft.publisher)
+                        .focused($focusedField, equals: .publisher)
                     Button("按书名关联豆瓣", systemImage: "link.badge.plus") {
                         Task { await searchDouban() }
                     }
@@ -4086,6 +4314,7 @@ private struct WishlistEditorView: View {
                 Section("ISBN") {
                     HStack {
                         TextField("ISBN-10 或 ISBN-13", text: $draft.isbn)
+                            .focused($focusedField, equals: .isbn)
 #if os(iOS)
                             .keyboardType(.asciiCapable)
                             .textInputAutocapitalization(.characters)
@@ -4104,9 +4333,10 @@ private struct WishlistEditorView: View {
                         .labelStyle(.iconOnly)
 #endif
                     }
+                    .modifier(EditorFieldRow())
                 }
                 Section("标签") {
-                    EditorTagInput(tagsText: $draft.tagsText, input: $pendingTag)
+                    EditorTagInput(tagsText: $draft.tagsText, input: $pendingTag, focus: $focusedField)
                 }
                 Section("购买计划") {
                     Toggle("标记为待购买", isOn: $draft.pendingBuy)
@@ -4916,6 +5146,7 @@ private struct SettingsView: View {
     @State private var isManagingInvites = false
     @State private var isShowingServiceSettings = false
     @State private var isShowingMigration = false
+    @State private var isShowingBookConflicts = false
     let platform: TomeKeepPlatform
 
     var body: some View {
@@ -4937,6 +5168,7 @@ private struct SettingsView: View {
 
             Section(tkLocalized("同步")) {
                 syncStatus
+                Button(tkLocalized("书籍冲突"), systemImage: "arrow.triangle.merge") { isShowingBookConflicts = true }
                 Button {
                     Task { await synchronize() }
                 } label: {
@@ -4980,6 +5212,13 @@ private struct SettingsView: View {
         }
         .sheet(isPresented: $isShowingServiceSettings) {
             ServiceConfigurationView(apiBaseURL: $apiBaseURL)
+        }
+        .sheet(isPresented: $isShowingBookConflicts) {
+            NavigationStack { BookConflictsView() }
+                .presentationDetents([.medium, .large])
+#if os(macOS)
+                .frame(minWidth: 560, minHeight: 480)
+#endif
         }
         .sheet(isPresented: $isShowingMigration) {
             NavigationStack { LegacyMigrationView() }
@@ -5672,6 +5911,7 @@ private struct BookEditorView: View {
     @State private var draft: BookDraft
     @State private var validationMessage: String?
     @State private var pendingTag = ""
+    @FocusState private var focusedField: EditorInputField?
     @State private var isLookingUp = false
     @State private var lookupMessage: String?
     @State private var verificationTarget: WebsiteVerificationTarget?
@@ -5705,11 +5945,14 @@ private struct BookEditorView: View {
                     }
                     TextField("书名", text: $draft.title)
                         .textContentType(.name)
+                        .focused($focusedField, equals: .title)
                         .accessibilityIdentifier("book.title")
                     TextField("作者", text: $draft.author)
                         .accessibilityIdentifier("book.author")
+                        .focused($focusedField, equals: .author)
                     TextField("出版社", text: $draft.publisher)
                         .accessibilityIdentifier("book.publisher")
+                        .focused($focusedField, equals: .publisher)
                     Button("按书名关联豆瓣", systemImage: "link.badge.plus") {
                         Task { await searchDouban() }
                     }
@@ -5724,6 +5967,7 @@ private struct BookEditorView: View {
                         .textInputAutocapitalization(.characters)
 #endif
                         .accessibilityIdentifier("book.isbn")
+                        .focused($focusedField, equals: .isbn)
                         Button {
                             Task { await fillMetadata() }
                         } label: {
@@ -5738,12 +5982,13 @@ private struct BookEditorView: View {
                         .labelStyle(.iconOnly)
 #endif
                     }
+                    .modifier(EditorFieldRow())
                 } header: {
                     Text("ISBN")
                 }
 
                 Section("标签") {
-                    EditorTagInput(tagsText: $draft.tagsText, input: $pendingTag)
+                    EditorTagInput(tagsText: $draft.tagsText, input: $pendingTag, focus: $focusedField)
                         .accessibilityIdentifier("book.tags")
                 }
 

@@ -16,21 +16,33 @@ public struct SyncResult: Equatable, Sendable {
 
 @MainActor
 public final class NativeSyncEngine {
-    private let client: APIClient
-    private let coverSync: CoverSyncService
+    let client: APIClient
+    let coverSync: CoverSyncService
     private let tokenStore: KeychainTokenStore
     private let uploadsPriceCache: Bool
+    private let coverPriority: CoverDownloadPriority
+    private let coverSessionRevision: Int
+    let onLocalDataChanged: @MainActor () -> Void
+    private let conflictStoreDirectory: URL?
 
     public init(
         baseURL: URL,
         tokenStore: KeychainTokenStore = .init(),
-        uploadsPriceCache: Bool = true
+        uploadsPriceCache: Bool = true,
+        coverPriority: CoverDownloadPriority = .init(),
+        onLocalDataChanged: @escaping @MainActor () -> Void = {},
+        session: URLSession = .shared,
+        conflictStoreDirectory: URL? = nil
     ) {
-        let client = APIClient(baseURL: baseURL)
+        let client = APIClient(baseURL: baseURL, session: session)
         self.client = client
         coverSync = CoverSyncService(client: client)
         self.tokenStore = tokenStore
         self.uploadsPriceCache = uploadsPriceCache
+        self.coverPriority = coverPriority
+        coverSessionRevision = coverPriority.sessionRevision
+        self.onLocalDataChanged = onLocalDataChanged
+        self.conflictStoreDirectory = conflictStoreDirectory
     }
 
     public func synchronize(context: ModelContext) async throws -> SyncResult {
@@ -73,7 +85,14 @@ public final class NativeSyncEngine {
         let replayKey = "native.sync.sqliteDateReplay.\(user.id)"
         let needsDateReplay = !UserDefaults.standard.bool(forKey: replayKey)
         let pulled = try await pull(repository: repository, token: token, replayAll: needsDateReplay)
-        let pushed = try await push(repository: repository, token: token)
+        let pushed: Int
+        do {
+            pushed = try await push(repository: repository, token: token, accountID: user.id)
+        } catch {
+            await downloadMissingCovers(repository: repository, token: token)
+            throw error
+        }
+        await downloadMissingCovers(repository: repository, token: token)
         UserDefaults.standard.set(true, forKey: replayKey)
         return SyncResult(
             pulled: pulled + remoteProfiles.count + priceSync.pulled,
@@ -108,14 +127,22 @@ public final class NativeSyncEngine {
             since: replayAll ? "" : cursors.readingStates,
             finalCursor: status.readingStates
         )
-        await downloadMissingBookCovers(repository: repository, token: token)
-        await downloadMissingWishlistCovers(repository: repository, token: token)
+        onLocalDataChanged()
+        // Give the refreshed presentation a chance to publish its list order.
+        await Task.yield()
         return count
     }
 
-    private func push(repository: LocalSyncRepository, token: String) async throws -> Int {
+    func push(repository: LocalSyncRepository, token: String, accountID: String) async throws -> Int {
         var count = 0
+        let conflicts = try BookConflictStore(accountID: accountID, directory: conflictStoreDirectory)
+        for entry in try conflicts.entries() where !entry.completed {
+            try await resumeConflict(entry, repository: repository, store: conflicts, token: token)
+        }
+        let aliases = Set(try conflicts.entries().map(\.id))
         for var record in try repository.pendingBooks() {
+            if aliases.contains(record.book.id) { continue }
+            do {
             if record.deletedAt != nil {
                 do {
                     _ = try await client.data(for: "books/\(record.book.id)", method: "DELETE", bearerToken: token)
@@ -123,6 +150,10 @@ public final class NativeSyncEngine {
                     // The desired end state is already present remotely.
                 }
             } else {
+                if let id = try repository.otherSyncedBookID(isbn: record.book.isbn, excluding: record.book.id) {
+                    try await stageBookConflict(localID: record.book.id, canonicalID: id, repository: repository, store: conflicts, token: token)
+                    continue
+                }
                 if record.book.coverKey == nil,
                    let fileName = record.book.coverFileName,
                    localCoverExists(fileName) {
@@ -143,8 +174,16 @@ public final class NativeSyncEngine {
                     )
                 }
             }
-            try repository.markBookSynced(id: record.book.id)
+            try repository.markBookSynced(id: record.book.id, expectedUpdatedAt: record.book.updatedAt)
             count += 1
+            } catch let error as APIBookConflictError where error.reason == "duplicate_isbn" {
+                if error.id == record.book.id {
+                    // A replay of the same creation is not a second identity.
+                    try repository.markBookSynced(id: record.book.id, expectedUpdatedAt: record.book.updatedAt)
+                } else {
+                    try await stageBookConflict(localID: record.book.id, canonicalID: error.id, repository: repository, store: conflicts, token: token)
+                }
+            }
         }
 
         for var record in try repository.pendingWishlist() {
@@ -190,29 +229,28 @@ public final class NativeSyncEngine {
         return count
     }
 
-    private func downloadMissingBookCovers(repository: LocalSyncRepository, token: String) async {
-        guard let references = try? repository.missingBookCovers() else { return }
-        for reference in references {
-            guard let fileName = try? await coverSync.download(
-                coverKey: reference.coverKey,
-                bearerToken: token
-            ) else { continue }
-            try? repository.setBookCoverFileName(id: reference.recordID, fileName: fileName)
+    private func downloadMissingCovers(repository: LocalSyncRepository, token: String) async {
+        let sessionRevision = coverSessionRevision
+        guard let books = try? repository.missingBookCovers(),
+              let wishlist = try? repository.missingWishlistCovers() else { return }
+        var jobs = books.map { CoverDownloadJob(collection: .library, reference: $0) } +
+            wishlist.map { CoverDownloadJob(collection: .wishlist, reference: $0) }
+        while let index = coverPriority.nextIndex(in: jobs) {
+            guard !Task.isCancelled, coverPriority.sessionRevision == sessionRevision else { return }
+            let job = jobs.remove(at: index)
+            do {
+                let fileName = try await coverSync.download(coverKey: job.reference.coverKey, bearerToken: token)
+                try Task.checkCancellation()
+                guard coverPriority.sessionRevision == sessionRevision else { return }
+                try repository.attachDownloadedCover(job.reference, fileName: fileName, isWishlist: job.collection == .wishlist)
+                onLocalDataChanged()
+                await Task.yield()
+            } catch is CancellationError { return }
+            catch { continue } // One attempt per pass; missing files are retried next sync.
         }
     }
 
-    private func downloadMissingWishlistCovers(repository: LocalSyncRepository, token: String) async {
-        guard let references = try? repository.missingWishlistCovers() else { return }
-        for reference in references {
-            guard let fileName = try? await coverSync.download(
-                coverKey: reference.coverKey,
-                bearerToken: token
-            ) else { continue }
-            try? repository.setWishlistCoverFileName(id: reference.recordID, fileName: fileName)
-        }
-    }
-
-    private func localCoverExists(_ fileName: String) -> Bool {
+    func localCoverExists(_ fileName: String) -> Bool {
         guard let directory = try? NativeStorageLocations.covers() else { return false }
         return FileManager.default.fileExists(atPath: directory.appending(path: fileName).path)
     }
@@ -460,6 +498,7 @@ struct APIBook: Decodable, Sendable {
     var addedAt: String
     var updatedAt: String
     var deletedAt: String?
+    var revision: Int?
 
     var syncRecord: BookSyncRecord? {
         guard let addedAt = Self.date(addedAt), let updatedAt = Self.date(updatedAt) else { return nil }
@@ -599,7 +638,7 @@ private struct APIPriceCacheRow: Decodable, Sendable {
     }
 }
 
-private struct BookPayload: Encodable {
+struct BookPayload: Encodable {
     var id: String
     var title: String
     var author: String
@@ -609,6 +648,7 @@ private struct BookPayload: Encodable {
     var detailUrl: URL?
     var tags: [String]
     var addedAt: String
+    var expectedRevision: Int?
 
     init(_ book: Book) {
         id = book.id; title = book.title; author = book.author; isbn = book.isbn

@@ -13,6 +13,12 @@ public enum APIClientError: LocalizedError, Sendable, Equatable {
     }
 }
 
+public struct APIBookConflictError: LocalizedError, Sendable, Equatable {
+    public let id: String
+    public let reason: String
+    public var errorDescription: String? { "书籍存在同步冲突。" }
+}
+
 public actor APIClient {
     private let baseURL: URL
     private let session: URLSession
@@ -48,7 +54,13 @@ public actor APIClient {
             throw APIClientError.invalidResponse
         }
         guard (200..<300).contains(response.statusCode) else {
-            let message = (try? JSONDecoder().decode(APIErrorBody.self, from: data))?.error
+            let error = try? JSONDecoder().decode(APIErrorBody.self, from: data)
+            let message = error?.error
+            if response.statusCode == 409, path.split(separator: "/").first == "books",
+               let id = error?.id, !id.isEmpty, let message,
+               message == "duplicate_isbn" || message == "stale_book" {
+                throw APIBookConflictError(id: id, reason: message)
+            }
             throw APIClientError.rejected(statusCode: response.statusCode, message: message)
         }
         return data
@@ -117,7 +129,7 @@ public struct APIResponseDecodingError: Error, Sendable, Equatable {
     }
 }
 
-private struct APIErrorBody: Decodable { var error: String? }
+private struct APIErrorBody: Decodable { var error: String?; var id: String? }
 
 public extension JSONDecoder {
     static var tomeKeep: JSONDecoder {
